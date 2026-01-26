@@ -4,7 +4,9 @@ A self-contained desktop application that runs Qwen3-TTS text-to-speech locally 
 
 ## Current Status
 
-**Phase 1 MVP is functional.** Custom Voice mode works end-to-end on M4 Macs with the 0.6B model. Voice Design mode requires the 1.7B-Design model (selectable in UI).
+**Phase 2 complete.** The app now bundles as a standalone `.app` with no Python required for end users. Custom Voice mode works end-to-end on M4 Macs with the 0.6B model. Voice Design mode requires the 1.7B-Design model (selectable in UI).
+
+**Note:** First launch takes ~60 seconds while the bundled Python environment initializes. Subsequent launches are faster.
 
 ## Overview
 
@@ -144,6 +146,21 @@ python -m tts_server.main
 pnpm tauri dev
 ```
 
+### Building for Release
+
+```bash
+# Full release build (builds sidecar + Tauri app)
+./scripts/build-release.sh
+
+# Or step by step:
+./python/build_sidecar.sh   # Build PyInstaller binary (~243MB)
+pnpm tauri build             # Build .app and .dmg
+
+# Output locations:
+# - src-tauri/target/release/bundle/macos/Qwen3-TTS.app
+# - src-tauri/target/release/bundle/dmg/Qwen3-TTS_0.1.0_aarch64.dmg
+```
+
 ### Quick Test (CLI)
 
 ```bash
@@ -195,29 +212,40 @@ curl -X POST http://127.0.0.1:8765/generate/custom-voice \
 - [x] UI with model selection and all three modes
 - [x] End-to-end testing on M4 Mac
 
-### Phase 2: Full Features (Next)
+### Phase 2: Sidecar Bundling ✅
+- [x] PyInstaller bundling of Python server
+- [x] Tauri shell plugin for sidecar management
+- [x] Release build scripts (`build_sidecar.sh`, `build-release.sh`)
+- [x] DMG packaging (253MB app, 256MB DMG)
+
+### Phase 3: UX Improvements (Next)
+- [ ] **First-launch loading screen** - Show progress during ~60s cold start initialization
+  - Display "Initializing TTS engine..." with spinner/progress
+  - Show server health status transitions
+  - Indicate when ready to use
 - [ ] Model download progress indicator
 - [ ] Audio waveform visualization
 - [ ] Audio export options (MP3)
 - [ ] Settings persistence
 
-### Phase 3: Polish
+### Phase 4: Polish
 - [ ] Voice preset save/load
 - [ ] Memory usage warnings
 - [ ] Keyboard shortcuts
 - [ ] Better error messages
 
-### Phase 4: Distribution
-- [ ] PyInstaller bundling
+### Phase 5: Distribution
 - [ ] Code signing and notarization
-- [ ] DMG packaging
 - [ ] Auto-update via GitHub Releases
+- [ ] Homebrew cask formula
 
 ## Known Issues
 
+- **First launch takes ~60 seconds** - PyInstaller bundle initialization; subsequent launches are faster
 - First model load downloads ~1.2-3.4GB from HuggingFace (no progress UI yet)
 - Voice Clone mode untested
 - No graceful handling if model download fails
+- No loading screen during initial sidecar startup
 
 ## Acknowledgments
 
