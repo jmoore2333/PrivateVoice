@@ -26,7 +26,7 @@ python/dist/
 python/build/
 
 # Tauri sidecar binaries (built, not committed)
-src-tauri/binaries/
+src-tauri/tts-server-*
 
 # IDE
 .idea/

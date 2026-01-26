@@ -91,7 +91,7 @@ excludes = [
 ]
 
 a = Analysis(
-    ['tts_server/main.py'],
+    ['tts_server_entry.py'],
     pathex=[],
     binaries=[],
     datas=datas,

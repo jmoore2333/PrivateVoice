@@ -68,7 +68,7 @@ async fn start_tts_server(
 
         let sidecar = app
             .shell()
-            .sidecar("binaries/tts-server")
+            .sidecar("tts-server")
             .map_err(|e| format!("Failed to create sidecar command: {}", e))?;
 
         let (mut _rx, child) = sidecar

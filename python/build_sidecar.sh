@@ -6,7 +6,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_ROOT/src-tauri/binaries"
+OUTPUT_DIR="$PROJECT_ROOT/src-tauri"
 
 echo "=== Building TTS Server Sidecar ==="
 echo "Script dir: $SCRIPT_DIR"
