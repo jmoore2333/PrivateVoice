@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+target/
+build/
+.svelte-kit/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+
+# PyInstaller
+*.spec
+python/dist/
+python/build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+src-tauri/bin/
+
+# Models (downloaded at runtime)
+models/
+*.safetensors
+*.bin
+*.pt
+
+# Audio files (user generated)
+output/
+*.wav
+*.mp3
+
+# Temporary
+tmp/
+temp/
+.cache/
