@@ -2,8 +2,16 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
+#[cfg(not(debug_assertions))]
+use tauri_plugin_shell::ShellExt;
+
 struct SidecarState {
+    // For dev mode: std::process::Child
+    #[cfg(debug_assertions)]
     child: Option<Child>,
+    // For release mode: tauri_plugin_shell::process::CommandChild
+    #[cfg(not(debug_assertions))]
+    child: Option<tauri_plugin_shell::process::CommandChild>,
 }
 
 impl Drop for SidecarState {
@@ -25,49 +33,51 @@ async fn start_tts_server(
         return Ok("Server already running".to_string());
     }
 
-    // Get the path to the Python server
-    let python_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?
-        .parent()
-        .ok_or("No parent dir")?
-        .parent()
-        .ok_or("No grandparent dir")?
-        .parent()
-        .ok_or("No great-grandparent dir")?
-        .join("python");
-
-    println!("Python dir: {:?}", python_dir);
-
-    // In development mode, run Python directly
-    // In production, we'd use the bundled sidecar
+    // Development mode: run Python directly
     #[cfg(debug_assertions)]
-    let child = Command::new("python3")
-        .args(["-m", "tts_server.main"])
-        .current_dir(&python_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn Python server: {}", e))?;
-
-    #[cfg(not(debug_assertions))]
-    let child = {
-        // In release mode, use the bundled sidecar
-        let sidecar_path = app
+    {
+        let python_dir = app
             .path()
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?
-            .join("tts-server");
+            .parent()
+            .ok_or("No parent dir")?
+            .parent()
+            .ok_or("No grandparent dir")?
+            .parent()
+            .ok_or("No great-grandparent dir")?
+            .join("python");
 
-        Command::new(&sidecar_path)
+        println!("Dev mode: Python dir: {:?}", python_dir);
+
+        let child = Command::new("python3")
+            .args(["-m", "tts_server.main"])
+            .current_dir(&python_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?
-    };
+            .map_err(|e| format!("Failed to spawn Python server: {}", e))?;
 
-    state.child = Some(child);
+        state.child = Some(child);
+    }
+
+    // Release mode: use bundled sidecar via shell plugin
+    #[cfg(not(debug_assertions))]
+    {
+        println!("Release mode: spawning tts-server sidecar");
+
+        let sidecar = app
+            .shell()
+            .sidecar("binaries/tts-server")
+            .map_err(|e| format!("Failed to create sidecar command: {}", e))?;
+
+        let (mut _rx, child) = sidecar
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+
+        state.child = Some(child);
+    }
+
     Ok("Server started".to_string())
 }
 
@@ -91,8 +101,17 @@ fn get_server_status(state: tauri::State<'_, Mutex<SidecarState>>) -> Result<boo
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init());
+
+    // Add shell plugin for release mode sidecar support
+    #[cfg(not(debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_shell::init());
+    }
+
+    builder
         .manage(Mutex::new(SidecarState { child: None }))
         .invoke_handler(tauri::generate_handler![
             start_tts_server,

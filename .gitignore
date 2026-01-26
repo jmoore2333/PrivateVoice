@@ -22,9 +22,11 @@ env/
 .eggs/
 
 # PyInstaller
-*.spec
 python/dist/
 python/build/
+
+# Tauri sidecar binaries (built, not committed)
+src-tauri/binaries/
 
 # IDE
 .idea/
