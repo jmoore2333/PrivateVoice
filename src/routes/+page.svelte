@@ -30,6 +30,8 @@
   import LoadingScreen from "$lib/components/startup/LoadingScreen.svelte";
   import DebugConsole from "$lib/components/debug/DebugConsole.svelte";
   import SettingsPanel from "$lib/components/settings/SettingsPanel.svelte";
+  import HelpPanel from "$lib/components/help/HelpPanel.svelte";
+  import { helpStore } from "$lib/stores/helpStore.svelte";
 
   const { state: ttsState } = ttsStore;
   const { state: appState } = appStore;
@@ -297,7 +299,7 @@
     status={currentStatus}
     onModeChange={handleModeChange}
     onSettingsClick={() => settingsStore.open()}
-    onHelpClick={() => {/* TODO: help panel */}}
+    onHelpClick={() => helpStore.open()}
   />
 
   <!-- Error Banner -->
@@ -411,3 +413,6 @@
 
 <!-- Settings Panel -->
 <SettingsPanel />
+
+<!-- Help Panel -->
+<HelpPanel />
