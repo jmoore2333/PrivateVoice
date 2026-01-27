@@ -4,7 +4,21 @@ A self-contained desktop application that runs Qwen3-TTS text-to-speech locally 
 
 ## Current Status
 
-**Phase 2 complete.** The app now bundles as a standalone `.app` with no Python required for end users. Custom Voice mode works end-to-end on M4 Macs with the 0.6B model. Voice Design mode requires the 1.7B-Design model (selectable in UI).
+**Phase 3 in progress.** Core infrastructure complete, UI redesign needed.
+
+**What works:**
+- Standalone `.app` bundles with no Python required for end users
+- All three TTS modes functional (Custom Voice, Voice Clone, Voice Design)
+- Model loading/switching with compatibility checking
+- Debug console for sidecar log viewing
+- Settings panel with persistence
+- Loading screen during startup
+
+**What needs work:**
+- UI is functional but visually "stubbed" - needs comprehensive redesign
+- No download progress indicator during model fetching
+- No generation progress indicator while audio is rendering
+- See [issues.md](./issues.md) for full tracking
 
 **Note:** First launch takes ~60 seconds while the bundled Python environment initializes. Subsequent launches are faster.
 
@@ -81,23 +95,37 @@ qwen3-tts-desktop/
 ├── src-tauri/                      # Rust/Tauri backend
 │   ├── src/
 │   │   ├── main.rs                 # Entry point
-│   │   └── lib.rs                  # Sidecar management
+│   │   └── lib.rs                  # Sidecar management, log streaming
 │   ├── capabilities/default.json   # Permissions
 │   └── tauri.conf.json             # Tauri config
 │
 ├── src/                            # Svelte 5 frontend
 │   ├── lib/
-│   │   ├── api/ttsClient.ts        # HTTP client
-│   │   └── stores/ttsStore.svelte.ts  # State (Svelte 5 runes)
-│   └── routes/+page.svelte         # Main UI
+│   │   ├── api/ttsClient.ts        # HTTP client for TTS API
+│   │   ├── stores/
+│   │   │   ├── ttsStore.svelte.ts     # TTS state (Svelte 5 runes)
+│   │   │   ├── appStore.svelte.ts     # Startup/UI state
+│   │   │   ├── debugStore.svelte.ts   # Log buffer
+│   │   │   └── settingsStore.svelte.ts # Persistent settings
+│   │   └── components/
+│   │       ├── ui/                 # Reusable UI primitives
+│   │       ├── tts/                # TTS-specific components
+│   │       ├── startup/            # Loading screen components
+│   │       ├── debug/              # Debug console components
+│   │       └── settings/           # Settings panel
+│   └── routes/+page.svelte         # Main page
 │
 ├── python/                         # Python sidecar
 │   ├── tts_server/
 │   │   ├── main.py                 # FastAPI server
-│   │   ├── inference.py            # TTS wrapper
-│   │   └── device.py               # MPS detection
+│   │   ├── inference.py            # TTS wrapper (MPS-optimized)
+│   │   ├── device.py               # MPS detection
+│   │   ├── download_tracker.py     # HuggingFace progress (WIP)
+│   │   ├── log_handler.py          # Structured logging
+│   │   └── speaker_data.py         # Speaker metadata
 │   └── requirements.txt
 │
+├── issues.md                       # Known issues & improvement tracking
 └── README.md
 ```
 
@@ -218,34 +246,51 @@ curl -X POST http://127.0.0.1:8765/generate/custom-voice \
 - [x] Release build scripts (`build_sidecar.sh`, `build-release.sh`)
 - [x] DMG packaging (253MB app, 256MB DMG)
 
-### Phase 3: UX Improvements (Next)
-- [ ] **First-launch loading screen** - Show progress during ~60s cold start initialization
-  - Display "Initializing TTS engine..." with spinner/progress
-  - Show server health status transitions
-  - Indicate when ready to use
-- [ ] Model download progress indicator
-- [ ] Audio waveform visualization
-- [ ] Audio export options (MP3)
-- [ ] Settings persistence
+### Phase 3: Infrastructure ✅ (Partial)
+- [x] Loading screen during startup
+- [x] Debug console for sidecar logs
+- [x] Settings panel with persistence
+- [x] Model/mode compatibility checking
+- [x] Speaker metadata and language info
+- [ ] Download progress indicator (research complete, implementation pending)
+- [ ] Generation progress indicator (research complete - no native API available)
+- [ ] Voice Library (deferred to UI redesign)
+- [ ] Help Panel (deferred to UI redesign)
 
-### Phase 4: Polish
-- [ ] Voice preset save/load
+### Phase 4: UI Redesign (Next)
+Current UI is functional but visually "stubbed" - needs comprehensive redesign before adding more features.
+
+- [ ] Define product goals and target users
+- [ ] Design information hierarchy and layout
+- [ ] Create cohesive visual language
+- [ ] Implement polished components
+- [ ] Voice Library with proper gallery UI
+- [ ] Help Panel matching final design
+
+### Phase 5: Polish
+- [ ] Waveform visualization
+- [ ] Audio export options (MP3, etc.)
 - [ ] Memory usage warnings
 - [ ] Keyboard shortcuts
-- [ ] Better error messages
 
-### Phase 5: Distribution
+### Phase 6: Distribution
 - [ ] Code signing and notarization
 - [ ] Auto-update via GitHub Releases
 - [ ] Homebrew cask formula
 
 ## Known Issues
 
-- **First launch takes ~60 seconds** - PyInstaller bundle initialization; subsequent launches are faster
-- First model load downloads ~1.2-3.4GB from HuggingFace (no progress UI yet)
-- Voice Clone mode untested
-- No graceful handling if model download fails
-- No loading screen during initial sidecar startup
+See [issues.md](./issues.md) for detailed tracking with status and research findings.
+
+**Current blockers:**
+- No download progress indicator during model fetching (~1.2-3.4GB)
+- No generation progress indicator while audio renders
+- UI needs comprehensive redesign (functional but visually incomplete)
+
+**Minor issues:**
+- First launch takes ~60 seconds (PyInstaller initialization)
+- Voice Clone mode lightly tested
+- No graceful handling if model download fails mid-stream
 
 ## Acknowledgments
 

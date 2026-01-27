@@ -112,15 +112,35 @@ wavesurfer.js integration prepared but not bundled due to npm issues.
 
 ---
 
-## Low Priority
+## Deferred to UI Redesign
 
 ### Voice Library (Phase 3G)
-**Status:** Planned
-Save and manage custom voice clones for reuse.
+**Status:** Deferred
+**Reason:** Requires proper gallery/card UI - would be another stub if built now
+
+**Requirements:**
+- Save voice clone configurations (reference audio + text + settings)
+- Gallery view of saved voices with preview/play
+- Import/export voice profiles
+- Organize into folders/tags
+
+**Backend needed:**
+- `voiceLibraryStore.svelte.ts` - State management
+- File storage via Tauri fs plugin
+- Voice metadata schema
 
 ### Help Panel (Phase 3H)
-**Status:** Planned
-In-app documentation and troubleshooting.
+**Status:** Deferred
+**Reason:** Content should match final UI design
+
+**Requirements:**
+- Getting started guide
+- Mode explanations (Custom Voice vs Clone vs Design)
+- Speaker guide with audio samples
+- Troubleshooting section
+- Keyboard shortcuts
+
+## Low Priority
 
 ---
 
