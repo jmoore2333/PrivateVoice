@@ -14,7 +14,7 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   defaultModel: "0.6b",
-  defaultSpeaker: "Aiden",
+  defaultSpeaker: "aiden",
   autoLoadModel: false,
   showWaveform: true,
   showDebugOnStartup: false,

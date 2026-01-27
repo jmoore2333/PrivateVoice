@@ -31,42 +31,50 @@
     { id: "1.7b-design", name: "1.7B Design", description: "Voice Design mode" },
   ] as const;
 
+  // Format speaker name for display (capitalize, handle underscores)
+  function formatSpeakerName(name: string): string {
+    return name
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
   // Speaker data with descriptions
   const SPEAKERS = PRESET_SPEAKERS.map((name) => ({
     id: name,
-    name,
+    name: formatSpeakerName(name),
     description: getSpeakerDescription(name),
     language: getSpeakerLanguage(name),
   }));
 
   function getSpeakerDescription(name: string): string {
     const descriptions: Record<string, string> = {
-      Vivian: "Bright, slightly edgy young female",
-      Serena: "Warm, gentle young female",
-      Uncle_Fu: "Seasoned male, low mellow timbre",
-      Dylan: "Youthful Beijing male, clear natural",
-      Eric: "Lively Chengdu male, slightly husky",
-      Ryan: "Dynamic male, strong rhythmic drive",
-      Aiden: "Sunny American male, clear midrange",
-      Ono_Anna: "Playful Japanese female, light nimble",
-      Sohee: "Warm Korean female, rich emotion",
+      vivian: "Bright, slightly edgy young female",
+      serena: "Warm, gentle young female",
+      uncle_fu: "Seasoned male, low mellow timbre",
+      dylan: "Youthful Beijing male, clear natural",
+      eric: "Lively Chengdu male, slightly husky",
+      ryan: "Dynamic male, strong rhythmic drive",
+      aiden: "Sunny American male, clear midrange",
+      ono_anna: "Playful Japanese female, light nimble",
+      sohee: "Warm Korean female, rich emotion",
     };
-    return descriptions[name] ?? "";
+    return descriptions[name.toLowerCase()] ?? "";
   }
 
   function getSpeakerLanguage(name: string): string {
     const languages: Record<string, string> = {
-      Vivian: "Chinese",
-      Serena: "Chinese",
-      Uncle_Fu: "Chinese",
-      Dylan: "Chinese (Beijing)",
-      Eric: "Chinese (Sichuan)",
-      Ryan: "English",
-      Aiden: "English",
-      Ono_Anna: "Japanese",
-      Sohee: "Korean",
+      vivian: "Chinese",
+      serena: "Chinese",
+      uncle_fu: "Chinese",
+      dylan: "Chinese (Beijing)",
+      eric: "Chinese (Sichuan)",
+      ryan: "English",
+      aiden: "English",
+      ono_anna: "Japanese",
+      sohee: "Korean",
     };
-    return languages[name] ?? "Multilingual";
+    return languages[name.toLowerCase()] ?? "Multilingual";
   }
 
   let selectedModelId = $state("0.6b");

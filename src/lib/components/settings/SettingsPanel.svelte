@@ -16,7 +16,15 @@
     { value: "system", label: "System" },
   ];
 
-  const SPEAKERS = PRESET_SPEAKERS.map((s) => ({ value: s, label: s }));
+  // Format speaker name for display
+  function formatSpeakerName(name: string): string {
+    return name
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
+
+  const SPEAKERS = PRESET_SPEAKERS.map((s) => ({ value: s, label: formatSpeakerName(s) }));
 
   function handleChange<K extends keyof Settings>(key: K) {
     return (value: string) => {

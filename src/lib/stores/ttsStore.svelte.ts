@@ -42,7 +42,7 @@ function createTTSStore() {
     device: null,
     mode: "custom-voice",
     text: "",
-    speaker: "serena",
+    speaker: "aiden",
     instruction: "",
     voiceDescription: "",
     referenceAudio: null,
