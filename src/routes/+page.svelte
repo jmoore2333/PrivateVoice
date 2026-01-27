@@ -131,11 +131,13 @@
 
   // Auto-load model when server is ready and onboarding was already completed
   // This handles returning users who already went through onboarding
+  // Respects the autoLoadModel setting (defaults to true)
   let hasAutoLoaded = $state(false);
   $effect(() => {
     if (
       isStartupComplete &&
       !showOnboarding &&
+      settingsStore.state.autoLoadModel &&
       !ttsState.modelLoaded &&
       !ttsState.isLoadingModel &&
       !hasAutoLoaded

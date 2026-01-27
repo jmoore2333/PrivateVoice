@@ -32,6 +32,10 @@
   ];
 
   function handleGetStarted() {
+    // Save the selected model as the user's default for future launches
+    settingsStore.updateSetting('defaultModel', selectedModel);
+    // Enable auto-load so the model loads automatically on next launch
+    settingsStore.updateSetting('autoLoadModel', true);
     settingsStore.updateSetting('hasCompletedOnboarding', true);
     onComplete(selectedModel);
   }

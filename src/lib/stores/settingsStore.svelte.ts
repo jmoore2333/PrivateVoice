@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   defaultModel: "0.6b",
   defaultSpeaker: "aiden",
-  autoLoadModel: false,
+  autoLoadModel: true,
   showWaveform: true,
   showDebugOnStartup: false,
   // Audio settings
