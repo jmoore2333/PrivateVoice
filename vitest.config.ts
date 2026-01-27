@@ -15,5 +15,19 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['src/lib/test-utils.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'html'],
+      exclude: [
+        'node_modules/**',
+        'src/**/*.{test,spec}.{js,ts}',
+        'src/lib/test-utils.ts',
+        '**/*.d.ts',
+        'playwright.config.ts',
+        'svelte.config.js',
+        'vite.config.ts',
+        'vitest.config.ts',
+      ],
+    },
   },
 });
