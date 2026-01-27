@@ -13,9 +13,11 @@ export interface DebugLogEntry extends LogEntry {
 export interface DebugState {
   logs: DebugLogEntry[];
   systemInfo: SystemInfo | null;
+  systemInfoError: string | null;
   filter: LogLevel | "ALL";
   isVisible: boolean;
   isLoading: boolean;
+  isLoadingSystemInfo: boolean;
   autoScroll: boolean;
 }
 
@@ -26,9 +28,11 @@ function createDebugStore() {
   let state = $state<DebugState>({
     logs: [],
     systemInfo: null,
+    systemInfoError: null,
     filter: "ALL",
     isVisible: false,
     isLoading: false,
+    isLoadingSystemInfo: false,
     autoScroll: true,
   });
 
@@ -63,10 +67,15 @@ function createDebugStore() {
   }
 
   async function fetchSystemInfo() {
+    state.isLoadingSystemInfo = true;
+    state.systemInfoError = null;
     try {
       state.systemInfo = await ttsClient.getSystemInfo();
     } catch (e) {
       console.error("Failed to fetch system info:", e);
+      state.systemInfoError = e instanceof Error ? e.message : "Failed to fetch system info";
+    } finally {
+      state.isLoadingSystemInfo = false;
     }
   }
 

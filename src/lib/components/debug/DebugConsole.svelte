@@ -139,7 +139,12 @@
       </div>
     {:else}
       <div class="p-4">
-        <SystemStatus info={debugStore.state.systemInfo} />
+        <SystemStatus
+          info={debugStore.state.systemInfo}
+          isLoading={debugStore.state.isLoadingSystemInfo}
+          error={debugStore.state.systemInfoError}
+          onRetry={() => debugStore.fetchSystemInfo()}
+        />
       </div>
     {/if}
   </div>

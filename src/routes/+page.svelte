@@ -129,6 +129,26 @@
     localVoiceDescription = ttsState.voiceDescription;
   });
 
+  // Auto-load model when server is ready and onboarding was already completed
+  // This handles returning users who already went through onboarding
+  let hasAutoLoaded = $state(false);
+  $effect(() => {
+    if (
+      isStartupComplete &&
+      !showOnboarding &&
+      !ttsState.modelLoaded &&
+      !ttsState.isLoadingModel &&
+      !hasAutoLoaded
+    ) {
+      hasAutoLoaded = true;
+      // Clear any stale errors from previous sessions
+      ttsStore.clearError();
+      // Load the user's preferred default model
+      const defaultModel = settingsStore.state.defaultModel || "0.6b";
+      ttsStore.loadModel(defaultModel);
+    }
+  });
+
   // Track elapsed time during generation
   $effect(() => {
     if (ttsState.isGenerating) {
