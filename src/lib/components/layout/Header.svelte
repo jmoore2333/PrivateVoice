@@ -8,7 +8,9 @@
     modelId: string | null;
     status: Status;
     statusDetail?: string;
+    isLoadingModel?: boolean;
     onModeChange?: (mode: TTSMode) => void;
+    onModelChange?: (modelId: string) => void;
     onSettingsClick?: () => void;
     onHelpClick?: () => void;
   }
@@ -18,15 +20,25 @@
     modelId,
     status,
     statusDetail,
+    isLoadingModel = false,
     onModeChange,
+    onModelChange,
     onSettingsClick,
     onHelpClick
   }: Props = $props();
+
+  let showModelMenu = $state(false);
 
   const modes: { id: TTSMode; label: string }[] = [
     { id: 'custom-voice', label: 'Custom Voice' },
     { id: 'voice-clone', label: 'Voice Clone' },
     { id: 'voice-design', label: 'Voice Design' },
+  ];
+
+  const models = [
+    { id: '0.6b', label: '0.6B', description: 'Fast, Custom Voice & Clone' },
+    { id: '1.7b', label: '1.7B', description: 'Quality, Custom Voice & Clone' },
+    { id: '1.7b-design', label: '1.7B Design', description: 'Voice Design mode' },
   ];
 
   const statusConfig: Record<Status, { color: string; label: string }> = {
@@ -36,6 +48,11 @@
     loading: { color: 'bg-blue-500', label: 'Loading...' },
     error: { color: 'bg-red-500', label: 'Error' },
   };
+
+  function handleModelSelect(id: string) {
+    showModelMenu = false;
+    onModelChange?.(id);
+  }
 </script>
 
 <header class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
@@ -56,13 +73,63 @@
 
   <!-- Right section -->
   <div class="flex items-center gap-4">
-    <!-- Model Indicator -->
-    {#if modelId}
-      <div class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-        <span>Model:</span>
-        <span class="font-mono text-[var(--color-text-primary)]">{modelId}</span>
-      </div>
-    {/if}
+    <!-- Model Selector -->
+    <div class="relative">
+      <button
+        class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm
+          bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]
+          hover:border-[var(--color-border-strong)] transition-colors
+          {isLoadingModel ? 'opacity-50 cursor-wait' : ''}"
+        onclick={() => showModelMenu = !showModelMenu}
+        disabled={isLoadingModel}
+      >
+        <span class="text-[var(--color-text-secondary)]">Model:</span>
+        <span class="font-mono text-[var(--color-text-primary)]">
+          {#if isLoadingModel}
+            Loading...
+          {:else if modelId}
+            {modelId}
+          {:else}
+            None
+          {/if}
+        </span>
+        <svg class="w-4 h-4 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {#if showModelMenu}
+        <!-- Backdrop -->
+        <button
+          class="fixed inset-0 z-40"
+          onclick={() => showModelMenu = false}
+          aria-label="Close menu"
+        ></button>
+
+        <!-- Dropdown Menu -->
+        <div class="absolute right-0 top-full mt-1 w-64 py-1 z-50
+          bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]
+          rounded-lg shadow-xl">
+          {#each models as model}
+            <button
+              class="w-full px-4 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors
+                {modelId === model.id ? 'bg-[var(--color-accent-muted)]' : ''}"
+              onclick={() => handleModelSelect(model.id)}
+            >
+              <div class="flex items-center justify-between">
+                <span class="font-medium text-[var(--color-text-primary)]">{model.label}</span>
+                {#if modelId === model.id}
+                  <svg class="w-4 h-4 text-[var(--color-accent)]" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                  </svg>
+                {/if}
+              </div>
+              <p class="text-xs text-[var(--color-text-muted)]">{model.description}</p>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    </div>
 
     <!-- Status Badge -->
     <div class="flex items-center gap-2">

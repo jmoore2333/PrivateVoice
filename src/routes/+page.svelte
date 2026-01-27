@@ -365,7 +365,9 @@
     currentMode={ttsState.mode}
     modelId={ttsState.modelId}
     status={currentStatus}
+    isLoadingModel={ttsState.isLoadingModel}
     onModeChange={handleModeChange}
+    onModelChange={(modelId) => ttsStore.loadModel(modelId)}
     onSettingsClick={() => settingsStore.open()}
     onHelpClick={() => helpStore.open()}
   />
