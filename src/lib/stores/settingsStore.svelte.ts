@@ -9,6 +9,14 @@ export interface Settings {
   autoLoadModel: boolean;
   showWaveform: boolean;
   showDebugOnStartup: boolean;
+  // Audio settings
+  exportFolder: string;
+  exportFormat: "wav" | "mp3";
+  // Library settings
+  recentCacheSize: number;
+  // Optional features
+  enableWhisper: boolean;
+  enableTranslation: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +26,14 @@ const DEFAULT_SETTINGS: Settings = {
   autoLoadModel: false,
   showWaveform: true,
   showDebugOnStartup: false,
+  // Audio settings
+  exportFolder: "~/Documents/PrivateVoice",
+  exportFormat: "wav",
+  // Library settings
+  recentCacheSize: 10,
+  // Optional features
+  enableWhisper: false,
+  enableTranslation: false,
 };
 
 const STORAGE_KEY = "qwen3-tts-settings";
