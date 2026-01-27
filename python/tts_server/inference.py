@@ -50,6 +50,9 @@ class TTSModel:
 
     def load(self, model_id: Optional[str] = None) -> None:
         """Load the TTS model with MPS-compatible settings."""
+        import os
+        import sys
+
         if model_id:
             self.model_id = model_id
 
@@ -62,13 +65,27 @@ class TTSModel:
 
         logger.info(f"Loading model {hf_model_id} on {self.config.device}...")
 
-        # Load model with MPS-compatible settings
-        self.model = Qwen3TTSModel.from_pretrained(
-            hf_model_id,
-            device_map=self.config.device_map,
-            dtype=self.config.dtype,
-            attn_implementation=self.config.attn_implementation,
-        )
+        # Suppress stdout/stderr during model loading to prevent broken pipe errors
+        # HuggingFace/transformers prints a lot of output that can overwhelm the pipe
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        try:
+            # Redirect to devnull during heavy loading
+            with open(os.devnull, 'w') as devnull:
+                sys.stdout = devnull
+                sys.stderr = devnull
+
+                # Load model with MPS-compatible settings
+                self.model = Qwen3TTSModel.from_pretrained(
+                    hf_model_id,
+                    device_map=self.config.device_map,
+                    dtype=self.config.dtype,
+                    attn_implementation=self.config.attn_implementation,
+                )
+        finally:
+            # Restore stdout/stderr
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
         self._loaded = True
         logger.info(f"Model loaded successfully on {self.config.device}")

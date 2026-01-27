@@ -78,6 +78,23 @@ fn get_timestamp() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string()
 }
 
+/// Kill any process listening on the given port (macOS only)
+fn kill_process_on_port(port: u16) {
+    // Use lsof to find and kill any process on the port
+    if let Ok(output) = Command::new("lsof")
+        .args(["-ti", &format!(":{}", port)])
+        .output()
+    {
+        let pids = String::from_utf8_lossy(&output.stdout);
+        for pid in pids.lines() {
+            if let Ok(pid_num) = pid.trim().parse::<i32>() {
+                println!("Killing existing process {} on port {}", pid_num, port);
+                let _ = Command::new("kill").args(["-9", &pid_num.to_string()]).output();
+            }
+        }
+    }
+}
+
 #[tauri::command]
 async fn start_tts_server(
     app: tauri::AppHandle,
@@ -85,9 +102,18 @@ async fn start_tts_server(
 ) -> Result<String, String> {
     let mut state_guard = state.lock().map_err(|e| e.to_string())?;
 
+    // Kill any existing server on our port first
+    kill_process_on_port(8765);
+
     if state_guard.child.is_some() {
-        return Ok("Server already running".to_string());
+        // Also kill our tracked child if it exists
+        if let Some(mut child) = state_guard.child.take() {
+            let _ = child.kill();
+        }
     }
+
+    // Small delay to let port be released
+    std::thread::sleep(std::time::Duration::from_millis(100));
 
     // Emit startup event
     let _ = app.emit(
