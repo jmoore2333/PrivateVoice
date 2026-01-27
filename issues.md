@@ -30,31 +30,56 @@ model with tokenizer_type: qwen3_tts_tokenizer_12hz tts_model_size: 1b7 tts_mode
 ---
 
 ### Download Progress Monitoring
-**Status:** Open
+**Status:** Open (Research Complete)
 **Found:** Phase 3 testing
 
 HuggingFace model downloads show no progress. The `download_tracker.py` was created but not fully integrated.
 
-**Requirements:**
-- Poll `/download-progress` endpoint during model loading
-- Show in debug console: filename, bytes downloaded, speed, ETA
-- Show in UI: progress bar with percentage
+**Research Findings:**
+- `huggingface_hub` supports `tqdm_class` parameter for custom progress tracking
+- Can use `dry_run=True` to get file sizes before downloading
+- Best approach: `snapshot_download()` with custom tqdm, then `from_pretrained(local_path)`
 
-**Backend:** `DownloadTracker` class exists but needs HuggingFace callback integration.
+**Implementation Plan:**
+```python
+from huggingface_hub import snapshot_download
+from tqdm.auto import tqdm as base_tqdm
+
+class ProgressCallback(base_tqdm):
+    callback = None
+    def update(self, n=1):
+        super().update(n)
+        if self.callback and self.total:
+            self.callback(current=self.n, total=self.total, filename=self.desc)
+
+# Use: snapshot_download(repo_id, tqdm_class=ProgressCallback)
+```
+
+**Requirements:**
+- Modify `inference.py` to use `snapshot_download` with progress callback
+- Poll `/download-progress` endpoint during model loading
+- Show in debug console and UI
 
 ---
 
 ### Generation Progress Indicator
-**Status:** Open
+**Status:** Open (Research Complete)
 **Found:** Phase 3 testing
 
 No visual feedback while audio is "baking" (generating). User sees frozen UI.
 
-**Requirements:**
-- Investigate if qwen_tts exposes generation progress callbacks
-- If yes: stream progress to frontend
-- If no: show indeterminate spinner with "Generating..." state
-- Show elapsed time during generation
+**Research Findings:**
+- qwen_tts does NOT expose progress callbacks, streaming, or generator patterns
+- Methods return complete `(wavs, sample_rate)` tuples
+- The `non_streaming_mode` parameter only affects internal generation, not output format
+- vLLM-Omni has streaming but requires separate deployment
+
+**Workaround Options:**
+1. **Time-based estimation** - Measure avg time per character, estimate progress
+2. **Text chunking** - For long texts, split into sentences, show per-sentence progress
+3. **Indeterminate spinner** - Show elapsed time with "Generating..." state
+
+**Recommended approach for now:** Indeterminate spinner with elapsed time display
 
 ---
 
