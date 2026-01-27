@@ -2,88 +2,114 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { ttsStore } from "$lib/stores/ttsStore.svelte";
+
+  // Stores
+  import { ttsStore, type TTSMode, MODEL_CAPABILITIES, getRecommendedModel, modelSupportsMode } from "$lib/stores/ttsStore.svelte";
   import { appStore, type StartupPhase } from "$lib/stores/appStore.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
-  import { ttsClient, PRESET_SPEAKERS, type Speaker } from "$lib/api/ttsClient";
   import { settingsStore } from "$lib/stores/settingsStore.svelte";
+  import { libraryStore } from "$lib/stores/libraryStore.svelte";
+  import { ttsClient, type Speaker } from "$lib/api/ttsClient";
 
-  // Components
+  // Layout components
+  import Header from "$lib/components/layout/Header.svelte";
+  import Workspace from "$lib/components/layout/Workspace.svelte";
+
+  // Input panels
+  import CustomVoicePanel from "$lib/components/input/CustomVoicePanel.svelte";
+  import VoiceClonePanel from "$lib/components/input/VoiceClonePanel.svelte";
+  import VoiceDesignPanel from "$lib/components/input/VoiceDesignPanel.svelte";
+
+  // Output
+  import OutputPanel from "$lib/components/output/OutputPanel.svelte";
+
+  // Library
+  import LibraryDrawer from "$lib/components/library/LibraryDrawer.svelte";
+
+  // Keep existing components
   import LoadingScreen from "$lib/components/startup/LoadingScreen.svelte";
   import DebugConsole from "$lib/components/debug/DebugConsole.svelte";
   import SettingsPanel from "$lib/components/settings/SettingsPanel.svelte";
-  import StatusBar from "$lib/components/tts/StatusBar.svelte";
-  import ModeSelector from "$lib/components/tts/ModeSelector.svelte";
-  import SpeakerSelector from "$lib/components/tts/SpeakerSelector.svelte";
-  import AudioPlayer from "$lib/components/tts/AudioPlayer.svelte";
-  import GenerateButton from "$lib/components/tts/GenerateButton.svelte";
-  import StudioCard from "$lib/components/ui/StudioCard.svelte";
-  import StudioTextarea from "$lib/components/ui/StudioTextarea.svelte";
-  import StudioInput from "$lib/components/ui/StudioInput.svelte";
 
   const { state: ttsState } = ttsStore;
   const { state: appState } = appStore;
 
-  // Available models
-  const MODELS = [
-    { id: "0.6b", name: "0.6B", description: "Fast, Custom Voice" },
-    { id: "1.7b", name: "1.7B", description: "Quality, Custom Voice" },
-    { id: "1.7b-design", name: "1.7B Design", description: "Voice Design mode" },
-  ] as const;
-
-  // Format speaker name for display (capitalize, handle underscores)
-  function formatSpeakerName(name: string): string {
-    return name
-      .split("_")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
-  }
-
-  // Speaker data with descriptions
-  const SPEAKERS = PRESET_SPEAKERS.map((name) => ({
-    id: name,
-    name: formatSpeakerName(name),
-    description: getSpeakerDescription(name),
-    language: getSpeakerLanguage(name),
-  }));
-
-  function getSpeakerDescription(name: string): string {
-    const descriptions: Record<string, string> = {
-      vivian: "Bright, slightly edgy young female",
-      serena: "Warm, gentle young female",
-      uncle_fu: "Seasoned male, low mellow timbre",
-      dylan: "Youthful Beijing male, clear natural",
-      eric: "Lively Chengdu male, slightly husky",
-      ryan: "Dynamic male, strong rhythmic drive",
-      aiden: "Sunny American male, clear midrange",
-      ono_anna: "Playful Japanese female, light nimble",
-      sohee: "Warm Korean female, rich emotion",
-    };
-    return descriptions[name.toLowerCase()] ?? "";
-  }
-
-  function getSpeakerLanguage(name: string): string {
-    const languages: Record<string, string> = {
-      vivian: "Chinese",
-      serena: "Chinese",
-      uncle_fu: "Chinese",
-      dylan: "Chinese (Beijing)",
-      eric: "Chinese (Sichuan)",
-      ryan: "English",
-      aiden: "English",
-      ono_anna: "Japanese",
-      sohee: "Korean",
-    };
-    return languages[name.toLowerCase()] ?? "Multilingual";
-  }
-
-  let selectedModelId = $state("0.6b");
+  // Local state
   let healthInterval: ReturnType<typeof setInterval> | null = null;
   let unlistenStartup: (() => void) | null = null;
   let unlistenLog: (() => void) | null = null;
+  let libraryOpen = $state(false);
+  let generationStartTime = $state<number | null>(null);
+  let elapsedTime = $state(0);
+  let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
+  // Voice clone local state
+  let referenceAudioBlob = $state<Blob | null>(null);
+  let referenceAudioUrl = $state<string | null>(null);
+
+  // Local text/language state for binding
+  let localText = $state(ttsState.text);
+  let localLanguage = $state('English');
+  let localSpeaker = $state<string>(ttsState.speaker);
+  let localInstruction = $state(ttsState.instruction);
+  let localReferenceText = $state(ttsState.referenceText);
+  let localVoiceDescription = $state(ttsState.voiceDescription);
+
+  // Derived state
   const isStartupComplete = $derived(appState.startup.phase === "ready");
 
+  function computeStatus(): 'ready' | 'generating' | 'downloading' | 'loading' | 'error' {
+    if (ttsState.error) return 'error';
+    if (ttsState.isGenerating) return 'generating';
+    if (ttsState.isLoadingModel) return 'loading';
+    if (appState.download.status !== 'idle') return 'downloading';
+    return 'ready';
+  }
+
+  const currentStatus = $derived(computeStatus());
+
+  const voiceDesignModelLoaded = $derived(ttsState.modelId === '1.7b-design');
+
+  // Sync local state from store when store changes
+  $effect(() => {
+    localText = ttsState.text;
+  });
+
+  $effect(() => {
+    localSpeaker = ttsState.speaker;
+  });
+
+  $effect(() => {
+    localInstruction = ttsState.instruction;
+  });
+
+  $effect(() => {
+    localReferenceText = ttsState.referenceText;
+  });
+
+  $effect(() => {
+    localVoiceDescription = ttsState.voiceDescription;
+  });
+
+  // Track elapsed time during generation
+  $effect(() => {
+    if (ttsState.isGenerating) {
+      generationStartTime = Date.now();
+      elapsedInterval = setInterval(() => {
+        if (generationStartTime) {
+          elapsedTime = (Date.now() - generationStartTime) / 1000;
+        }
+      }, 100);
+    } else {
+      if (elapsedInterval) {
+        clearInterval(elapsedInterval);
+        elapsedInterval = null;
+      }
+      generationStartTime = null;
+    }
+  });
+
+  // --- Keep existing lifecycle code from current +page.svelte ---
   onMount(() => {
     listen<{ phase: string; message: string; progress: number }>("sidecar-startup", (event) => {
       const { phase, message, progress } = event.payload;
@@ -106,6 +132,7 @@
     if (healthInterval) clearInterval(healthInterval);
     if (unlistenStartup) unlistenStartup();
     if (unlistenLog) unlistenLog();
+    if (elapsedInterval) clearInterval(elapsedInterval);
   });
 
   async function startServer() {
@@ -154,38 +181,96 @@
     }
   }
 
-  async function handleRetry() {
+  function handleRetry() {
     appStore.setStartupPhase("initializing", "Retrying...");
-    await startServer();
+    startServer();
   }
 
-  function handleGenerate() {
-    ttsStore.generate();
+  // --- New handlers for PrivateVoice ---
+
+  function handleModeChange(mode: TTSMode) {
+    ttsStore.setMode(mode);
+
+    // Auto-load appropriate model if needed
+    if (mode === 'voice-design' && ttsState.modelId !== '1.7b-design') {
+      // Will show warning in VoiceDesignPanel
+    }
   }
 
-  function handleLoadModel() {
-    appStore.setStartupPhase("loading-model", `Loading ${selectedModelId} model...`);
-    ttsStore.loadModel(selectedModelId).then(() => {
-      appStore.setStartupPhase("ready", "Model loaded and ready");
-    });
+  async function handleGenerate() {
+    await ttsStore.generate();
+
+    // Add to recent library if successful
+    if (ttsState.audioBlob && ttsState.audioUrl) {
+      libraryStore.addToRecent({
+        id: crypto.randomUUID(),
+        type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
+        name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
+        audioUrl: ttsState.audioUrl,
+        createdAt: new Date(),
+        metadata: {
+          speaker: ttsState.speaker,
+          modelId: ttsState.modelId ?? undefined,
+        }
+      });
+    }
   }
 
-  function handleModelChange(modelId: string) {
-    selectedModelId = modelId;
+  function handleSave() {
+    if (ttsState.audioBlob && ttsState.audioUrl) {
+      libraryStore.saveToLibrary({
+        id: crypto.randomUUID(),
+        type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
+        name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
+        audioUrl: ttsState.audioUrl,
+        createdAt: new Date(),
+        metadata: {
+          speaker: ttsState.speaker,
+          modelId: ttsState.modelId ?? undefined,
+        }
+      });
+    }
   }
 
-  function handleSpeakerChange(speakerId: string) {
-    ttsStore.setSpeaker(speakerId as Speaker);
+  function handleExport() {
+    ttsStore.downloadAudio();
   }
 
-  function handleFileChange(e: Event) {
-    const target = e.target as HTMLInputElement;
-    const file = target.files?.[0] ?? null;
+  function handleLoadVoiceDesignModel() {
+    ttsStore.loadModel('1.7b-design');
+  }
+
+  function handleReferenceAudioChange(blob: Blob, url: string) {
+    referenceAudioBlob = blob;
+    referenceAudioUrl = url;
+    // Convert blob to File for ttsStore
+    const file = new File([blob], 'reference.wav', { type: blob.type });
     ttsStore.setReferenceAudio(file);
   }
 
-  function handleModeChange(mode: "custom-voice" | "voice-clone" | "voice-design") {
-    ttsStore.setMode(mode);
+  function handleTextChange(text: string) {
+    localText = text;
+    ttsStore.setText(text);
+  }
+
+  function handleSpeakerChange(speaker: string, _isPreset: boolean) {
+    localSpeaker = speaker;
+    ttsStore.setSpeaker(speaker as Speaker);
+  }
+
+  function handleInstructionChange(instruction: string) {
+    localInstruction = instruction;
+    ttsStore.setInstruction(instruction);
+  }
+
+  function handleReferenceTextChange(text: string) {
+    localReferenceText = text;
+    ttsStore.setReferenceText(text);
+  }
+
+  function handleDescriptionChange(description: string) {
+    localVoiceDescription = description;
+    ttsStore.setVoiceDescription(description);
   }
 </script>
 
@@ -201,195 +286,125 @@
 {/if}
 
 <!-- Main App -->
-<main
-  class="min-h-screen p-6 noise"
+<div
+  class="h-screen flex flex-col bg-[var(--color-bg-deep)]"
   class:hidden={!isStartupComplete && !ttsState.serverConnected}
 >
-  <div class="max-w-2xl mx-auto space-y-6">
-    <!-- Header -->
-    <header class="text-center py-4 animate-fade-in">
-      <h1 class="text-2xl font-bold text-[var(--color-text-primary)] tracking-tight font-mono">
-        Qwen3-TTS
-      </h1>
-      <p class="text-sm text-[var(--color-text-muted)]">
-        Text-to-speech for Apple Silicon
-      </p>
-    </header>
+  <!-- Header -->
+  <Header
+    currentMode={ttsState.mode}
+    modelId={ttsState.modelId}
+    status={currentStatus}
+    onModeChange={handleModeChange}
+    onSettingsClick={() => settingsStore.open()}
+    onHelpClick={() => {/* TODO: help panel */}}
+  />
 
-    <!-- Status Bar -->
-    <div class="animate-slide-up stagger-1">
-      <StatusBar
-        serverConnected={ttsState.serverConnected}
-        modelLoaded={ttsState.modelLoaded}
-        modelId={ttsState.modelId ?? undefined}
-        device={ttsState.device}
-        isLoadingModel={ttsState.isLoadingModel}
-        models={[...MODELS]}
-        {selectedModelId}
-        onModelChange={handleModelChange}
-        onLoadModel={handleLoadModel}
-      />
-    </div>
-
-    <!-- Error Display -->
-    {#if ttsState.error}
-      <div
-        class="p-4 rounded-xl bg-[var(--color-accent-red-glow)] border border-[var(--color-accent-red)] animate-slide-up"
-      >
-        <div class="flex items-start gap-3">
-          <div class="led led-red mt-1"></div>
-          <div class="flex-1">
-            <p class="text-sm text-[var(--color-accent-red)]">{ttsState.error}</p>
-            <button
-              onclick={() => ttsStore.clearError()}
-              class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] mt-1 underline"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
+  <!-- Error Banner -->
+  {#if ttsState.error}
+    <div class="px-4 py-2 bg-[var(--color-error)]/10 border-b border-[var(--color-error)]/30">
+      <div class="flex items-center justify-between max-w-4xl mx-auto">
+        <span class="text-sm text-[var(--color-error)]">{ttsState.error}</span>
+        <button
+          onclick={() => ttsStore.clearError()}
+          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+        >
+          Dismiss
+        </button>
       </div>
-    {/if}
-
-    <!-- Mode Selector -->
-    <div class="animate-slide-up stagger-2">
-      <ModeSelector mode={ttsState.mode} onchange={handleModeChange} />
     </div>
+  {/if}
 
-    <!-- Main Form -->
-    <StudioCard variant="elevated" class="animate-slide-up stagger-3">
-      <!-- Text Input -->
-      <StudioTextarea
-        value={ttsState.text}
-        label="Text to speak"
-        placeholder="Enter the text you want to convert to speech..."
-        rows={4}
-        oninput={(value) => ttsStore.setText(value)}
-      />
-
-      <!-- Custom Voice Options -->
-      {#if ttsState.mode === "custom-voice"}
-        <div class="grid grid-cols-2 gap-4 mt-5">
-          <SpeakerSelector
-            speakers={SPEAKERS}
-            selectedSpeaker={ttsState.speaker}
-            onchange={handleSpeakerChange}
-          />
-
-          <StudioInput
-            value={ttsState.instruction}
-            label="Style (optional)"
-            placeholder="e.g., speaks slowly"
-            oninput={(value) => ttsStore.setInstruction(value)}
-          />
-        </div>
-      {/if}
-
-      <!-- Voice Clone Options -->
-      {#if ttsState.mode === "voice-clone"}
-        <div class="space-y-4 mt-5">
-          <div>
-            <span class="block text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider mb-1.5">
-              Reference Audio
-            </span>
-            <input
-              type="file"
-              accept="audio/*"
-              onchange={handleFileChange}
-              class="w-full text-sm text-[var(--color-text-secondary)]
-                file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium
-                file:bg-[var(--color-bg-elevated)] file:text-[var(--color-text-primary)]
-                file:border file:border-[var(--color-border-default)]
-                hover:file:bg-[var(--color-bg-hover)]
-                file:cursor-pointer file:transition-colors"
-            />
-          </div>
-
-          <StudioInput
-            value={ttsState.referenceText}
-            label="Reference Text"
-            placeholder="Transcript of the reference audio..."
-            oninput={(value) => ttsStore.setReferenceText(value)}
-          />
-        </div>
-      {/if}
-
-      <!-- Voice Design Options -->
-      {#if ttsState.mode === "voice-design"}
-        <div class="mt-5">
-          <StudioTextarea
-            value={ttsState.voiceDescription}
-            label="Voice Description"
-            placeholder="Describe the voice: e.g., A deep male voice with a British accent, speaking in a calm and reassuring manner..."
-            rows={3}
-            oninput={(value) => ttsStore.setVoiceDescription(value)}
-          />
-          {#if ttsState.modelId !== "1.7b-design"}
-            <div class="mt-3 p-3 rounded-lg bg-[var(--color-accent-amber-glow)] border border-[var(--color-accent-amber)]">
-              <p class="text-xs text-[var(--color-accent-amber)]">
-                Voice Design requires the 1.7B Design model. Please select and load it above.
-              </p>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
-      <!-- Generate Button -->
-      <div class="mt-6">
-        <GenerateButton
-          disabled={!ttsState.modelLoaded || !ttsState.text.trim()}
+  <!-- Workspace -->
+  <Workspace>
+    {#snippet inputPanel()}
+      {#if ttsState.mode === 'custom-voice'}
+        <CustomVoicePanel
+          bind:text={localText}
+          bind:language={localLanguage}
+          bind:speaker={localSpeaker}
+          bind:instruction={localInstruction}
           isGenerating={ttsState.isGenerating}
-          onclick={handleGenerate}
+          onGenerate={handleGenerate}
+          onTextChange={handleTextChange}
+          onSpeakerChange={handleSpeakerChange}
+          onInstructionChange={handleInstructionChange}
         />
-      </div>
-    </StudioCard>
+      {:else if ttsState.mode === 'voice-clone'}
+        <VoiceClonePanel
+          bind:text={localText}
+          bind:language={localLanguage}
+          bind:referenceText={localReferenceText}
+          {referenceAudioUrl}
+          {referenceAudioBlob}
+          isGenerating={ttsState.isGenerating}
+          hasWhisper={false}
+          onGenerate={handleGenerate}
+          onTextChange={handleTextChange}
+          onReferenceTextChange={handleReferenceTextChange}
+          onReferenceAudioChange={handleReferenceAudioChange}
+        />
+      {:else if ttsState.mode === 'voice-design'}
+        <VoiceDesignPanel
+          bind:text={localText}
+          bind:language={localLanguage}
+          bind:voiceDescription={localVoiceDescription}
+          isGenerating={ttsState.isGenerating}
+          modelLoaded={voiceDesignModelLoaded}
+          modelLoading={ttsState.isLoadingModel}
+          onGenerate={handleGenerate}
+          onLoadModel={handleLoadVoiceDesignModel}
+          onTextChange={handleTextChange}
+          onDescriptionChange={handleDescriptionChange}
+        />
+      {/if}
+    {/snippet}
 
-    <!-- Audio Player -->
-    <AudioPlayer
-      audioUrl={ttsState.audioUrl}
-      onDownload={() => ttsStore.downloadAudio()}
-    />
+    {#snippet outputPanel()}
+      <OutputPanel
+        audioUrl={ttsState.audioUrl ?? undefined}
+        isGenerating={ttsState.isGenerating}
+        {elapsedTime}
+        generatingText={ttsState.text}
+        onRegenerate={handleGenerate}
+        onSave={handleSave}
+        onExport={handleExport}
+      />
+    {/snippet}
+  </Workspace>
 
-    <!-- Bottom toolbar -->
-    <div class="fixed bottom-4 right-4 flex items-center gap-2 z-30">
-      <!-- Settings -->
-      <button
-        onclick={() => settingsStore.open()}
-        class="p-3 rounded-xl
-          bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]
-          text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]
-          hover:border-[var(--color-border-strong)]
-          transition-all duration-200"
-        title="Settings"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-        </svg>
-      </button>
+  <!-- Library Button (floating) -->
+  <button
+    onclick={() => libraryOpen = true}
+    class="fixed bottom-4 left-4 p-3 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] transition-all z-30"
+    title="Voice Library"
+  >
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+    </svg>
+  </button>
 
-      <!-- Debug Toggle -->
-      <button
-        onclick={() => debugStore.toggleVisibility()}
-        class="p-3 rounded-xl
-          bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]
-          text-[var(--color-text-muted)] hover:text-[var(--color-accent-cyan)]
-          hover:border-[var(--color-accent-cyan)] hover:shadow-[0_0_15px_rgba(0,212,255,0.2)]
-          transition-all duration-200"
-        title="Toggle Debug Console"
-      >
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-          />
-        </svg>
-      </button>
-    </div>
-  </div>
-</main>
+  <!-- Debug Button (floating) -->
+  <button
+    onclick={() => debugStore.toggleVisibility()}
+    class="fixed bottom-4 right-4 p-3 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-all z-30"
+    title="Toggle Debug Console"
+  >
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+    </svg>
+  </button>
+</div>
+
+<!-- Library Drawer -->
+<LibraryDrawer
+  isOpen={libraryOpen}
+  onClose={() => libraryOpen = false}
+  onUseVoice={(id) => {
+    // TODO: Load voice configuration
+    libraryOpen = false;
+  }}
+/>
 
 <!-- Debug Console -->
 <DebugConsole />
