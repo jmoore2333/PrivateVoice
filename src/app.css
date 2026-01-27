@@ -75,17 +75,29 @@
 /* Light mode via system preference */
 @media (prefers-color-scheme: light) {
   :root:not(.dark) {
+    /* Primary color variables used by components */
+    --color-bg-deep: #fafafa;
+    --color-bg-surface: #ffffff;
+    --color-bg-elevated: #f5f5f5;
+    --color-bg-hover: #ebebeb;
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #666666;
+    --color-text-muted: #888888;
+    --color-border-subtle: #e5e5e5;
+    --color-border-default: #d4d4d4;
+    --color-border-strong: #a3a3a3;
+    /* Legacy variables */
     --bg-deep: #fafafa;
     --bg-surface: #ffffff;
-    --bg-elevated: #ffffff;
-    --bg-hover: #f0f0f0;
+    --bg-elevated: #f5f5f5;
+    --bg-hover: #ebebeb;
     --text-primary: #1a1a1a;
     --text-secondary: #666666;
     --text-muted: #888888;
-    --border-subtle: #e0e0e0;
-    --border-default: #d0d0d0;
-    --border-strong: #c0c0c0;
-    --glass-bg: rgba(255, 255, 255, 0.8);
+    --border-subtle: #e5e5e5;
+    --border-default: #d4d4d4;
+    --border-strong: #a3a3a3;
+    --glass-bg: rgba(255, 255, 255, 0.9);
     --glass-border: rgba(0, 0, 0, 0.08);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -95,6 +107,18 @@
 
 /* Force dark mode with .dark class */
 .dark {
+  /* Primary color variables used by components */
+  --color-bg-deep: #0d0d0d;
+  --color-bg-surface: #1a1a1a;
+  --color-bg-elevated: #242424;
+  --color-bg-hover: #2a2a2a;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #888888;
+  --color-text-muted: #666666;
+  --color-border-subtle: #2a2a2a;
+  --color-border-default: #3a3a3a;
+  --color-border-strong: #4a4a4a;
+  /* Legacy variables */
   --bg-deep: #0d0d0d;
   --bg-surface: #1a1a1a;
   --bg-elevated: #242424;
