@@ -60,7 +60,7 @@ models/
 *.pt
 
 # Audio files (user generated)
-output/
+/output/
 *.wav
 *.mp3
 

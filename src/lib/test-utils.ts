@@ -30,3 +30,21 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
     sidecar: vi.fn(),
   },
 }));
+
+// Mock WaveSurfer for testing
+vi.mock('$lib/audio/wavesurfer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/audio/wavesurfer')>();
+  return {
+    ...actual,
+    createWaveSurfer: vi.fn(() => ({
+      on: vi.fn(),
+      load: vi.fn(),
+      play: vi.fn(),
+      pause: vi.fn(),
+      stop: vi.fn(),
+      playPause: vi.fn(),
+      getDuration: vi.fn(() => 0),
+      destroy: vi.fn(),
+    })),
+  };
+});
