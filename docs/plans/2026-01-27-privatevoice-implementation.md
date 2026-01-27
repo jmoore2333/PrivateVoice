@@ -6,7 +6,7 @@
 
 **Architecture:** Unified workspace with three modes sharing common layout. Left panel for input, right panel for output with waveform visualization. Voice library as drawer overlay. Svelte 5 with runes, wavesurfer.js for audio visualization.
 
-**Tech Stack:** Svelte 5, TypeScript, Tailwind CSS 4, wavesurfer.js, Tauri 2, Vitest for testing
+**Tech Stack:** Svelte 5, TypeScript, Tailwind CSS 4, wavesurfer.js, Tauri 2, Vitest for unit/component tests, Playwright for E2E tests
 
 **Design Reference:** `docs/plans/2026-01-27-privatevoice-ui-design.md`
 
@@ -2206,9 +2206,576 @@ Show on first launch:
 
 ---
 
+## Phase 8: Testing Infrastructure
+
+Establish comprehensive testing to ensure stability during future development.
+
+### Task 8.1: Configure Playwright for E2E Testing
+
+**Files:**
+- Create: `playwright.config.ts`
+- Create: `e2e/example.spec.ts`
+- Modify: `package.json`
+
+**Step 1: Install Playwright**
+
+Run:
+```bash
+pnpm add -D @playwright/test
+npx playwright install
+```
+
+**Step 2: Create Playwright config**
+
+Create `playwright.config.ts`:
+```typescript
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: 'html',
+  use: {
+    baseURL: 'http://localhost:1420',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+  webServer: {
+    command: 'pnpm dev',
+    url: 'http://localhost:1420',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120000,
+  },
+});
+```
+
+**Step 3: Create E2E test directory and example test**
+
+Create `e2e/example.spec.ts`:
+```typescript
+import { test, expect } from '@playwright/test';
+
+test.describe('PrivateVoice App', () => {
+  test('loads the main page', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveTitle(/PrivateVoice|Qwen3-TTS/);
+  });
+
+  test('shows mode selector with three modes', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByText('Custom Voice')).toBeVisible();
+    await expect(page.getByText('Voice Clone')).toBeVisible();
+    await expect(page.getByText('Voice Design')).toBeVisible();
+  });
+
+  test('can switch between modes', async ({ page }) => {
+    await page.goto('/');
+
+    // Click Voice Clone mode
+    await page.getByText('Voice Clone').click();
+    await expect(page.getByText('Reference Audio')).toBeVisible();
+
+    // Click Voice Design mode
+    await page.getByText('Voice Design').click();
+    await expect(page.getByText('Voice description')).toBeVisible();
+
+    // Click Custom Voice mode
+    await page.getByText('Custom Voice').click();
+    await expect(page.getByText('Style instructions')).toBeVisible();
+  });
+});
+```
+
+**Step 4: Add E2E test scripts to package.json**
+
+Add to scripts:
+```json
+"test:e2e": "playwright test",
+"test:e2e:ui": "playwright test --ui",
+"test:e2e:headed": "playwright test --headed"
+```
+
+**Step 5: Run E2E tests to verify setup**
+
+Run: `pnpm test:e2e`
+Expected: Tests pass (or skip gracefully if backend not running)
+
+**Step 6: Commit**
+
+```bash
+git add -A && git commit -m "test: add Playwright E2E testing infrastructure"
+```
+
+---
+
+### Task 8.2: Add Component Test Coverage
+
+**Files:**
+- Create: `src/lib/components/layout/Header.test.ts` (if not exists)
+- Create: `src/lib/components/audio/WaveformPlayer.test.ts`
+- Create: `src/lib/components/input/TextInput.test.ts`
+- Create: `src/lib/components/output/OutputPanel.test.ts`
+
+**Step 1: Write Header component tests**
+
+Create/update `src/lib/components/layout/Header.test.ts`:
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/svelte';
+import Header from './Header.svelte';
+
+describe('Header', () => {
+  const defaultProps = {
+    currentMode: 'custom-voice' as const,
+    modelId: '1.7b',
+    status: 'ready' as const,
+  };
+
+  it('renders all three mode buttons', () => {
+    render(Header, { props: defaultProps });
+
+    expect(screen.getByText('Custom Voice')).toBeInTheDocument();
+    expect(screen.getByText('Voice Clone')).toBeInTheDocument();
+    expect(screen.getByText('Voice Design')).toBeInTheDocument();
+  });
+
+  it('highlights current mode', () => {
+    render(Header, { props: defaultProps });
+
+    const customVoiceBtn = screen.getByText('Custom Voice');
+    expect(customVoiceBtn.className).toContain('bg-');
+  });
+
+  it('calls onModeChange when mode button clicked', async () => {
+    const onModeChange = vi.fn();
+    render(Header, { props: { ...defaultProps, onModeChange } });
+
+    await fireEvent.click(screen.getByText('Voice Clone'));
+    expect(onModeChange).toHaveBeenCalledWith('voice-clone');
+  });
+
+  it('displays model indicator', () => {
+    render(Header, { props: defaultProps });
+    expect(screen.getByText('1.7b')).toBeInTheDocument();
+  });
+
+  it('displays status badge', () => {
+    render(Header, { props: defaultProps });
+    expect(screen.getByText(/ready/i)).toBeInTheDocument();
+  });
+
+  it('shows generating status with detail', () => {
+    render(Header, {
+      props: {
+        ...defaultProps,
+        status: 'generating',
+        statusDetail: '12.3s'
+      }
+    });
+    expect(screen.getByText(/generating/i)).toBeInTheDocument();
+    expect(screen.getByText(/12.3s/)).toBeInTheDocument();
+  });
+});
+```
+
+**Step 2: Write TextInput component tests**
+
+Create `src/lib/components/input/TextInput.test.ts`:
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/svelte';
+import TextInput from './TextInput.svelte';
+
+describe('TextInput', () => {
+  it('renders with label', () => {
+    render(TextInput, { props: { value: '', label: 'Test Label' } });
+    expect(screen.getByText('Test Label')).toBeInTheDocument();
+  });
+
+  it('displays character count', () => {
+    render(TextInput, { props: { value: 'Hello' } });
+    expect(screen.getByText('5 characters')).toBeInTheDocument();
+  });
+
+  it('shows remaining when maxLength set', () => {
+    render(TextInput, { props: { value: 'Hello', maxLength: 100 } });
+    expect(screen.getByText('95 remaining')).toBeInTheDocument();
+  });
+
+  it('calls onInput when typing', async () => {
+    const onInput = vi.fn();
+    render(TextInput, { props: { value: '', onInput } });
+
+    const textarea = screen.getByRole('textbox');
+    await fireEvent.input(textarea, { target: { value: 'test' } });
+
+    expect(onInput).toHaveBeenCalledWith('test');
+  });
+});
+```
+
+**Step 3: Write OutputPanel component tests**
+
+Create `src/lib/components/output/OutputPanel.test.ts`:
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen } from '@testing-library/svelte';
+import OutputPanel from './OutputPanel.svelte';
+
+describe('OutputPanel', () => {
+  it('shows empty state when no audio', () => {
+    render(OutputPanel, { props: {} });
+    expect(screen.getByText(/generate audio to preview/i)).toBeInTheDocument();
+  });
+
+  it('shows generating state with elapsed time', () => {
+    render(OutputPanel, {
+      props: {
+        isGenerating: true,
+        elapsedTime: 5.2,
+        generatingText: 'Hello world'
+      }
+    });
+
+    expect(screen.getByText(/generating/i)).toBeInTheDocument();
+    expect(screen.getByText('5.2s')).toBeInTheDocument();
+    expect(screen.getByText(/"Hello world"/)).toBeInTheDocument();
+  });
+
+  it('shows action buttons when audio available', () => {
+    render(OutputPanel, {
+      props: { audioUrl: 'blob:test' }
+    });
+
+    expect(screen.getByText('Regenerate')).toBeInTheDocument();
+    expect(screen.getByText('Save')).toBeInTheDocument();
+    expect(screen.getByText('Export')).toBeInTheDocument();
+  });
+
+  it('shows contextual suggestion when provided', () => {
+    render(OutputPanel, {
+      props: {
+        audioUrl: 'blob:test',
+        suggestion: {
+          message: 'Save as clonable voice?',
+          action: vi.fn(),
+          actionLabel: 'Save'
+        }
+      }
+    });
+
+    expect(screen.getByText(/save as clonable voice/i)).toBeInTheDocument();
+  });
+});
+```
+
+**Step 4: Run all component tests**
+
+Run: `pnpm test:run`
+Expected: All tests pass
+
+**Step 5: Commit**
+
+```bash
+git add -A && git commit -m "test: add component test coverage for core components"
+```
+
+---
+
+### Task 8.3: Set Up GitHub Actions CI
+
+**Files:**
+- Create: `.github/workflows/ci.yml`
+
+**Step 1: Create CI workflow**
+
+Create `.github/workflows/ci.yml`:
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Type check
+        run: pnpm check
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Run unit tests
+        run: pnpm test:run
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build frontend
+        run: pnpm build
+```
+
+**Step 2: Add coverage config to vitest**
+
+Update `vitest.config.ts` to add coverage:
+```typescript
+import { defineConfig } from 'vitest/config';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
+
+export default defineConfig({
+  plugins: [svelte({ hot: !process.env.VITEST })],
+  test: {
+    include: ['src/**/*.{test,spec}.{js,ts}'],
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['src/lib/test-utils.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov', 'html'],
+      exclude: [
+        'node_modules/',
+        'src/lib/test-utils.ts',
+        '**/*.test.ts',
+        '**/*.spec.ts',
+      ],
+    },
+  },
+});
+```
+
+**Step 3: Add coverage script to package.json**
+
+Add to scripts:
+```json
+"test:coverage": "vitest run --coverage"
+```
+
+**Step 4: Commit**
+
+```bash
+git add -A && git commit -m "ci: add GitHub Actions workflow for CI/CD"
+```
+
+---
+
+### Task 8.4: Add Test Automation Scripts
+
+**Files:**
+- Create: `scripts/test-all.sh`
+- Modify: `package.json`
+
+**Step 1: Create unified test script**
+
+Create `scripts/test-all.sh`:
+```bash
+#!/bin/bash
+set -e
+
+echo "🧪 Running PrivateVoice Test Suite"
+echo "=================================="
+
+echo ""
+echo "📋 Type checking..."
+pnpm check
+
+echo ""
+echo "🔬 Running unit tests..."
+pnpm test:run
+
+echo ""
+echo "🎭 Running E2E tests..."
+pnpm test:e2e
+
+echo ""
+echo "✅ All tests passed!"
+```
+
+**Step 2: Make script executable**
+
+Run:
+```bash
+chmod +x scripts/test-all.sh
+```
+
+**Step 3: Add comprehensive test scripts to package.json**
+
+Update scripts section:
+```json
+"scripts": {
+  "dev": "vite dev",
+  "build": "vite build",
+  "preview": "vite preview",
+  "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+  "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+  "test": "vitest",
+  "test:run": "vitest run",
+  "test:coverage": "vitest run --coverage",
+  "test:e2e": "playwright test",
+  "test:e2e:ui": "playwright test --ui",
+  "test:e2e:headed": "playwright test --headed",
+  "test:all": "./scripts/test-all.sh",
+  "tauri": "tauri"
+}
+```
+
+**Step 4: Commit**
+
+```bash
+git add -A && git commit -m "chore: add unified test automation scripts"
+```
+
+---
+
+### Task 8.5: Add Pre-commit Hooks (Optional)
+
+**Files:**
+- Create: `.husky/pre-commit`
+- Modify: `package.json`
+
+**Step 1: Install husky and lint-staged**
+
+Run:
+```bash
+pnpm add -D husky lint-staged
+npx husky init
+```
+
+**Step 2: Configure pre-commit hook**
+
+Create `.husky/pre-commit`:
+```bash
+#!/bin/sh
+. "$(dirname "$0")/_/husky.sh"
+
+pnpm lint-staged
+```
+
+**Step 3: Add lint-staged config to package.json**
+
+Add to package.json:
+```json
+"lint-staged": {
+  "*.{ts,svelte}": [
+    "svelte-check --tsconfig ./tsconfig.json"
+  ],
+  "*.test.ts": [
+    "vitest related --run"
+  ]
+}
+```
+
+**Step 4: Commit**
+
+```bash
+git add -A && git commit -m "chore: add pre-commit hooks with husky"
+```
+
+---
+
 ## Summary
 
-**Total Tasks:** 25+ (Phases 1-4 detailed, Phases 5-7 outlined)
+**Total Tasks:** 30+ (Phases 1-4 detailed, Phases 5-8 outlined)
 
 **Estimated Implementation Order:**
 1. Foundation (testing, wavesurfer, theme, library store)
@@ -2218,8 +2785,16 @@ Show on first launch:
 5. Main integration
 6. Settings/Help
 7. Polish
+8. Testing infrastructure (E2E, coverage, CI/CD, automation)
 
 **Key Dependencies:**
 - wavesurfer.js must be installed before audio components
 - Library store must exist before library UI
 - All input panels needed before main integration
+- Phase 8 can run in parallel with Phase 7 (polish)
+
+**Testing Coverage Goals:**
+- Unit tests: Core stores, utility functions, component logic
+- Component tests: All interactive components with user events
+- E2E tests: Critical user flows (mode switching, generation, library)
+- CI: Automated on every PR and push to main
