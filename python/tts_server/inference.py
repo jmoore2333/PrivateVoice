@@ -1,14 +1,21 @@
 """MPS-compatible Qwen3-TTS inference wrapper."""
 
+import signal
 import torch
 import numpy as np
 from typing import Optional
 import soundfile as sf
 import io
+import logging
 
 from qwen_tts import Qwen3TTSModel
 
 from .device import DeviceConfig, get_device_config, synchronize_device, clear_cache
+
+# Ignore SIGPIPE to prevent broken pipe crashes during stdout writes
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
+logger = logging.getLogger("tts_server")
 
 
 # Available preset speakers for Custom Voice mode
@@ -53,7 +60,7 @@ class TTSModel:
         self.config = get_device_config()
         hf_model_id = MODEL_IDS.get(self.model_id, MODEL_IDS["0.6b"])
 
-        print(f"Loading model {hf_model_id} on {self.config.device}...")
+        logger.info(f"Loading model {hf_model_id} on {self.config.device}...")
 
         # Load model with MPS-compatible settings
         self.model = Qwen3TTSModel.from_pretrained(
@@ -64,7 +71,7 @@ class TTSModel:
         )
 
         self._loaded = True
-        print(f"Model loaded successfully on {self.config.device}")
+        logger.info(f"Model loaded successfully on {self.config.device}")
 
     def unload(self) -> None:
         """Unload the model and free memory."""
@@ -76,7 +83,7 @@ class TTSModel:
             clear_cache(self.config.device)
 
         self._loaded = False
-        print("Model unloaded")
+        logger.info("Model unloaded")
 
     def generate_custom_voice(
         self,

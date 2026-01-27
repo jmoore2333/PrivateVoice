@@ -127,8 +127,9 @@ async fn start_tts_server(
         };
 
         let mut child = Command::new(&python_cmd)
-            .args(["-m", "tts_server.main"])
+            .args(["-u", "-m", "tts_server.main"])  // -u for unbuffered output
             .current_dir(&python_dir)
+            .env("PYTHONUNBUFFERED", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

@@ -4,6 +4,11 @@ import os
 import platform
 import signal
 import sys
+
+# Ignore SIGPIPE to prevent broken pipe crashes during stdout writes
+# This must be done early before any libraries print to stdout
+signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+
 import torch
 from contextlib import asynccontextmanager
 from typing import Optional, List
