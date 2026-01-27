@@ -140,6 +140,47 @@ wavesurfer.js integration prepared but not bundled due to npm issues.
 - Troubleshooting section
 - Keyboard shortcuts
 
+## Future Phases
+
+### Cross-Platform Support
+**Status:** Planned (after UI redesign)
+**Priority:** High for project goals
+
+Currently targeting Apple Silicon (MPS). Need to support:
+
+| Platform | GPU | Backend | Notes |
+|----------|-----|---------|-------|
+| macOS Apple Silicon | MPS | ✅ Current | bfloat16, SDPA |
+| macOS Intel | CPU | Planned | float32 fallback |
+| Linux NVIDIA | CUDA | Planned | Flash Attention 2 possible |
+| Linux no GPU | CPU | Planned | Slower but functional |
+| Windows NVIDIA | CUDA | Planned | Flash Attention 2 possible |
+| Windows no GPU | CPU | Planned | Slower but functional |
+
+**Requirements:**
+- Hardware detection on startup (GPU type, VRAM, CUDA version)
+- Clear user guidance when optimal setup not detected
+- Link to Help Panel with setup instructions per platform
+- Graceful degradation (CUDA → CPU fallback)
+- Platform-specific PyInstaller builds
+
+**Device detection flow:**
+```
+Startup → Detect Hardware →
+  ├─ Apple Silicon → MPS (bfloat16, SDPA)
+  ├─ NVIDIA GPU → CUDA (float16, Flash Attention 2 if available)
+  ├─ Intel Mac → CPU (float32, warn about speed)
+  └─ No GPU → CPU (float32, warn about speed)
+```
+
+**Help Panel integration:**
+- "Your system" section showing detected hardware
+- Platform-specific optimization tips
+- CUDA installation guide for NVIDIA users
+- Memory requirements per configuration
+
+---
+
 ## Low Priority
 
 ---

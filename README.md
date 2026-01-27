@@ -26,8 +26,23 @@ A self-contained desktop application that runs Qwen3-TTS text-to-speech locally 
 
 This app bundles a Python-based TTS inference server as a sidecar process, communicating with a native Tauri/Svelte frontend. Users get a simple UI to generate speech from text using preset voices, voice cloning, or voice design.
 
-**Target Hardware:** M1/M2/M3/M4 Macs with 16GB+ RAM
+**Target Hardware:** Currently Apple Silicon (M1/M2/M3/M4) with 16GB+ RAM. Cross-platform support planned.
 **License:** Open source for public benefit
+
+### Cross-Platform Goals
+
+The app is being developed on Apple Silicon first, with planned support for:
+
+| Platform | GPU Support | Status |
+|----------|-------------|--------|
+| macOS (Apple Silicon) | MPS | ✅ Current focus |
+| macOS (Intel) | CPU only | Planned |
+| Linux (NVIDIA) | CUDA | Planned |
+| Linux (no GPU) | CPU | Planned |
+| Windows (NVIDIA) | CUDA | Planned |
+| Windows (no GPU) | CPU | Planned |
+
+Each platform will need appropriate dependency detection and user guidance for optimal setup.
 
 ## Architecture
 
@@ -273,10 +288,19 @@ Current UI is functional but visually "stubbed" - needs comprehensive redesign b
 - [ ] Memory usage warnings
 - [ ] Keyboard shortcuts
 
-### Phase 6: Distribution
-- [ ] Code signing and notarization
+### Phase 6: Cross-Platform
+- [ ] Hardware detection (MPS/CUDA/CPU)
+- [ ] CUDA support for Linux/Windows NVIDIA
+- [ ] CPU fallback for non-GPU systems
+- [ ] Platform-specific PyInstaller builds
+- [ ] Help Panel with setup guides per platform
+
+### Phase 7: Distribution
+- [ ] Code signing and notarization (macOS)
 - [ ] Auto-update via GitHub Releases
-- [ ] Homebrew cask formula
+- [ ] Homebrew cask formula (macOS)
+- [ ] Flatpak/AppImage (Linux)
+- [ ] Windows installer
 
 ## Known Issues
 
