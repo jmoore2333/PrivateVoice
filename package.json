@@ -16,7 +16,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:all": "./scripts/test-all.sh"
+    "test:all": "./scripts/test-all.sh",
+    "prepare": "husky"
   },
   "license": "MIT",
   "dependencies": {
@@ -35,12 +36,19 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/svelte": "^5.3.1",
     "@vitest/coverage-v8": "^4.0.18",
+    "husky": "^9.1.7",
     "jsdom": "^27.4.0",
+    "lint-staged": "^16.2.7",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
     "vitest": "^4.0.18"
+  },
+  "lint-staged": {
+    "*.{ts,svelte}": [
+      "svelte-check --tsconfig ./tsconfig.json"
+    ]
   }
 }
