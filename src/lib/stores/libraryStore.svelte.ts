@@ -51,7 +51,10 @@ function createLibraryStore() {
     if (stored) {
       try {
         const data = JSON.parse(stored);
-        saved = data.saved || [];
+        saved = (data.saved || []).map((item: LibraryItem) => ({
+          ...item,
+          createdAt: new Date(item.createdAt)
+        }));
       } catch (e) {
         console.error('Failed to load library:', e);
       }
