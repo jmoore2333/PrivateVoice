@@ -20,6 +20,45 @@ export interface ModelStatus {
   };
 }
 
+export interface StartupStatus {
+  phase: string;
+  message: string;
+  progress: number;
+}
+
+export interface DownloadProgress {
+  status: "idle" | "downloading" | "complete" | "error";
+  file_name: string;
+  bytes_downloaded: number;
+  bytes_total: number;
+  speed_mbps: number;
+  eta: number;
+}
+
+export interface SystemInfo {
+  python_version: string;
+  torch_version: string;
+  device: string;
+  device_name: string;
+  memory_total_gb: number;
+  memory_available_gb: number;
+  cache_dir: string;
+}
+
+export interface LogEntry {
+  level: string;
+  message: string;
+  timestamp: string;
+}
+
+export interface SpeakerInfo {
+  name: string;
+  description: string;
+  native_language: string;
+  personality: string;
+  gender: string;
+}
+
 export interface CustomVoiceRequest {
   text: string;
   speaker: string;
@@ -52,9 +91,25 @@ class TTSClient {
     this.baseUrl = baseUrl;
   }
 
+  // ============================================================================
+  // Health & Status
+  // ============================================================================
+
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${this.baseUrl}/health`);
     if (!res.ok) throw new Error("Server not available");
+    return res.json();
+  }
+
+  async getStartupStatus(): Promise<StartupStatus> {
+    const res = await fetch(`${this.baseUrl}/startup-status`);
+    if (!res.ok) throw new Error("Failed to get startup status");
+    return res.json();
+  }
+
+  async getDownloadProgress(): Promise<DownloadProgress> {
+    const res = await fetch(`${this.baseUrl}/download-progress`);
+    if (!res.ok) throw new Error("Failed to get download progress");
     return res.json();
   }
 
@@ -63,6 +118,53 @@ class TTSClient {
     if (!res.ok) throw new Error("Failed to get model status");
     return res.json();
   }
+
+  // ============================================================================
+  // Debug & System Info
+  // ============================================================================
+
+  async getSystemInfo(): Promise<SystemInfo> {
+    const res = await fetch(`${this.baseUrl}/system-info`);
+    if (!res.ok) throw new Error("Failed to get system info");
+    return res.json();
+  }
+
+  async getLogs(count: number = 100, level?: string): Promise<LogEntry[]> {
+    const params = new URLSearchParams({ count: count.toString() });
+    if (level) params.append("level", level);
+
+    const res = await fetch(`${this.baseUrl}/logs?${params}`);
+    if (!res.ok) throw new Error("Failed to get logs");
+    return res.json();
+  }
+
+  // ============================================================================
+  // Speaker & Voice Info
+  // ============================================================================
+
+  async getSpeakers(): Promise<string[]> {
+    const res = await fetch(`${this.baseUrl}/speakers`);
+    if (!res.ok) throw new Error("Failed to get speakers");
+    const data = await res.json();
+    return data.speakers;
+  }
+
+  async getSpeakersInfo(): Promise<SpeakerInfo[]> {
+    const res = await fetch(`${this.baseUrl}/speakers-info`);
+    if (!res.ok) throw new Error("Failed to get speaker info");
+    return res.json();
+  }
+
+  async getLanguages(): Promise<string[]> {
+    const res = await fetch(`${this.baseUrl}/languages`);
+    if (!res.ok) throw new Error("Failed to get languages");
+    const data = await res.json();
+    return data.languages;
+  }
+
+  // ============================================================================
+  // Model Management
+  // ============================================================================
 
   async loadModel(modelId: string = "0.6b"): Promise<void> {
     const res = await fetch(`${this.baseUrl}/load-model`, {
@@ -82,6 +184,10 @@ class TTSClient {
     });
     if (!res.ok) throw new Error("Failed to unload model");
   }
+
+  // ============================================================================
+  // Generation
+  // ============================================================================
 
   async generateCustomVoice(request: CustomVoiceRequest): Promise<Blob> {
     const res = await fetch(`${this.baseUrl}/generate/custom-voice`, {
@@ -129,6 +235,10 @@ class TTSClient {
     }
     return res.blob();
   }
+
+  // ============================================================================
+  // Lifecycle
+  // ============================================================================
 
   async shutdown(): Promise<void> {
     await fetch(`${this.baseUrl}/shutdown`, { method: "POST" });
