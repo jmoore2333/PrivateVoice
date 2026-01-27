@@ -32,6 +32,10 @@
   import SettingsPanel from "$lib/components/settings/SettingsPanel.svelte";
   import HelpPanel from "$lib/components/help/HelpPanel.svelte";
   import { helpStore } from "$lib/stores/helpStore.svelte";
+  import { useKeyboardShortcuts } from "$lib/hooks/useKeyboardShortcuts";
+
+  // Onboarding
+  import Welcome from "$lib/components/onboarding/Welcome.svelte";
 
   const { state: ttsState } = ttsStore;
   const { state: appState } = appStore;
@@ -56,6 +60,37 @@
   let localInstruction = $state(ttsState.instruction);
   let localReferenceText = $state(ttsState.referenceText);
   let localVoiceDescription = $state(ttsState.voiceDescription);
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onPlayPause: () => {
+      // TODO: Need reference to WaveformPlayer to call play/pause
+      // For now, this is a placeholder
+    },
+    onGenerate: () => {
+      if (!ttsState.isGenerating && ttsState.text.trim()) {
+        handleGenerate();
+      }
+    },
+    onSave: () => {
+      if (ttsState.audioUrl) {
+        handleSave();
+      }
+    },
+    onSwitchMode: (mode) => {
+      handleModeChange(mode);
+    },
+    onEscape: () => {
+      // Close any open panels in priority order
+      if (libraryOpen) {
+        libraryOpen = false;
+      } else if (settingsStore.isOpen) {
+        settingsStore.close();
+      } else if (helpStore.isOpen) {
+        helpStore.close();
+      }
+    },
+  });
 
   // Derived state
   const isStartupComplete = $derived(appState.startup.phase === "ready");
