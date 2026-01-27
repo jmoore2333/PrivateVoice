@@ -127,18 +127,13 @@ class TTSModel:
         if speaker not in PRESET_SPEAKERS:
             raise ValueError(f"Unknown speaker: {speaker}. Available: {PRESET_SPEAKERS}")
 
-        # Build speaker with instruction if provided
-        if instruction:
-            speaker_str = f"{speaker} {instruction}"
-        else:
-            speaker_str = speaker
-
-        # Generate audio
+        # Generate audio with instruction as separate parameter
         with torch.no_grad():
             wavs, sr = self.model.generate_custom_voice(
                 text=text,
                 language=language,
-                speaker=speaker_str,
+                speaker=speaker,
+                instruct=instruction if instruction else None,
             )
 
         synchronize_device(self.config.device)

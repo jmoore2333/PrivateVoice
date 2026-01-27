@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    qwen3_tts_lib::run()
+    privatevoice_lib::run()
 }

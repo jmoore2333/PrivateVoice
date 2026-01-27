@@ -1,12 +1,12 @@
 [package]
-name = "qwen3-tts-desktop"
+name = "privatevoice"
 version = "0.1.0"
-description = "Qwen3-TTS Desktop for Apple Silicon"
+description = "PrivateVoice - Local text-to-speech for Apple Silicon"
 authors = ["jmoore"]
 edition = "2021"
 
 [lib]
-name = "qwen3_tts_lib"
+name = "privatevoice_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
