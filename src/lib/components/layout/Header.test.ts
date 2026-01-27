@@ -16,6 +16,24 @@ describe('Header', () => {
     expect(screen.getByText('Voice Design')).toBeInTheDocument();
   });
 
+  it('highlights current mode', () => {
+    const { container } = render(Header, { props: defaultProps });
+    const customVoiceButton = screen.getByText('Custom Voice');
+    // The active mode button should have the accent color class
+    expect(customVoiceButton.className).toContain('bg-[var(--color-accent)]');
+    // Other buttons should not have the accent background
+    const voiceCloneButton = screen.getByText('Voice Clone');
+    expect(voiceCloneButton.className).not.toContain('bg-[var(--color-accent)]');
+  });
+
+  it('highlights different mode when selected', () => {
+    render(Header, { props: { ...defaultProps, currentMode: 'voice-clone' } });
+    const customVoiceButton = screen.getByText('Custom Voice');
+    const voiceCloneButton = screen.getByText('Voice Clone');
+    expect(voiceCloneButton.className).toContain('bg-[var(--color-accent)]');
+    expect(customVoiceButton.className).not.toContain('bg-[var(--color-accent)]');
+  });
+
   it('shows model indicator', () => {
     render(Header, { props: defaultProps });
     expect(screen.getByText('1.7b')).toBeInTheDocument();
