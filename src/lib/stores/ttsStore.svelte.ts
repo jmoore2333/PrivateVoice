@@ -6,6 +6,32 @@ import { ttsClient, type ModelStatus, type Speaker, PRESET_SPEAKERS } from "$lib
 
 export type TTSMode = "custom-voice" | "voice-clone" | "voice-design";
 
+// Model compatibility matrix
+const MODEL_CAPABILITIES: Record<string, TTSMode[]> = {
+  "0.6b": ["custom-voice", "voice-clone"],
+  "1.7b": ["custom-voice", "voice-clone"],
+  "1.7b-design": ["voice-design"],
+};
+
+// Get the recommended model for a mode
+function getRecommendedModel(mode: TTSMode): string {
+  switch (mode) {
+    case "voice-design":
+      return "1.7b-design";
+    case "custom-voice":
+    case "voice-clone":
+    default:
+      return "0.6b";
+  }
+}
+
+// Check if a model supports a mode
+function modelSupportsMode(modelId: string | null, mode: TTSMode): boolean {
+  if (!modelId) return false;
+  const capabilities = MODEL_CAPABILITIES[modelId];
+  return capabilities?.includes(mode) ?? false;
+}
+
 export interface TTSState {
   // Server state
   serverConnected: boolean;
@@ -92,6 +118,14 @@ function createTTSStore() {
   async function generate() {
     if (!state.text.trim()) {
       state.error = "Please enter some text";
+      return;
+    }
+
+    // Check model compatibility with current mode
+    if (!modelSupportsMode(state.modelId, state.mode)) {
+      const recommended = getRecommendedModel(state.mode);
+      const modeName = state.mode.replace("-", " ");
+      state.error = `Current model doesn't support ${modeName}. Please load the ${recommended.toUpperCase()} model.`;
       return;
     }
 
@@ -212,3 +246,6 @@ function createTTSStore() {
 }
 
 export const ttsStore = createTTSStore();
+
+// Export helpers for UI compatibility checks
+export { MODEL_CAPABILITIES, getRecommendedModel, modelSupportsMode };
