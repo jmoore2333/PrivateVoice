@@ -94,6 +94,7 @@
 
   // Derived state
   const isStartupComplete = $derived(appState.startup.phase === "ready");
+  const showOnboarding = $derived(!settingsStore.state.hasCompletedOnboarding);
 
   function computeStatus(): 'ready' | 'generating' | 'downloading' | 'loading' | 'error' {
     if (ttsState.error) return 'error';
@@ -309,7 +310,17 @@
     localVoiceDescription = description;
     ttsStore.setVoiceDescription(description);
   }
+
+  function handleOnboardingComplete(selectedModel: string) {
+    // Load the selected model after onboarding
+    ttsStore.loadModel(selectedModel);
+  }
 </script>
+
+<!-- Welcome/Onboarding -->
+{#if showOnboarding}
+  <Welcome onComplete={handleOnboardingComplete} />
+{/if}
 
 <!-- Loading Screen -->
 {#if !isStartupComplete && !ttsState.serverConnected}

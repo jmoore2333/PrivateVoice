@@ -17,6 +17,8 @@ export interface Settings {
   // Optional features
   enableWhisper: boolean;
   enableTranslation: boolean;
+  // Onboarding
+  hasCompletedOnboarding: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -34,6 +36,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Optional features
   enableWhisper: false,
   enableTranslation: false,
+  // Onboarding
+  hasCompletedOnboarding: false,
 };
 
 const STORAGE_KEY = "qwen3-tts-settings";
