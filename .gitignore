@@ -8,6 +8,8 @@ target/
 build/
 .svelte-kit/
 coverage/
+playwright-report/
+test-results/
 
 # Python
 __pycache__/
