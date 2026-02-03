@@ -200,9 +200,20 @@
       appStore.setStartupPhase("initializing", "Starting Python environment...");
       await invoke("start_tts_server");
 
+      // Attempt an immediate health check to unblock UI even if startup-status is delayed.
+      try {
+        await ttsStore.checkServerHealth();
+      } catch {
+        // Ignore; health polling below will retry.
+      }
+
       healthInterval = setInterval(async () => {
         try {
           await ttsClient.health();
+
+          if (!ttsState.serverConnected) {
+            ttsStore.checkServerHealth();
+          }
 
           const status = await ttsClient.getStartupStatus();
           appStore.setStartupPhase(status.phase as StartupPhase, status.message);
@@ -220,11 +231,7 @@
             });
           }
 
-          if (!ttsState.serverConnected) {
-            ttsStore.checkServerHealth();
-          }
-
-          if (status.phase === "ready" || status.phase === "checking-models") {
+          if (status.phase === "ready") {
             if (healthInterval) {
               clearInterval(healthInterval);
               healthInterval = null;
