@@ -13,7 +13,7 @@ Models: 0.6B, 1.7B, 1.7B-Design
 **Checklist**
 | ID | Check | Expected | Result | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | Production build launch | App opens, sidecar starts, loading screen clears |  |  |
+| 1 | Production build launch | App opens, sidecar starts, loading screen clears | Blocked | Stuck at "Starting TTS Server" after several minutes; port 8765 shows a listener but `/health` is unreachable. |
 | 2 | First-run onboarding | Welcome shown once, model selection triggers download |  |  |
 | 3 | Model download progress | Status shows progress and completes |  |  |
 | 4 | Model switching | 0.6B <-> 1.7B switches cleanly |  |  |
