@@ -17,9 +17,18 @@
   let hasRecording = $state(false);
   let recordedUrl = $state<string | null>(null);
   let recordingTime = $state(0);
-  let recordingInterval: ReturnType<typeof setInterval> | null = null;
+  let error = $state<string | null>(null);
+  let microphoneSupported = $state(true);
 
   onMount(() => {
+    // Check if microphone recording is supported
+    // Note: Tauri's WebView on macOS may not support navigator.mediaDevices
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      console.warn('[AudioRecorder] navigator.mediaDevices not available - recording disabled');
+      microphoneSupported = false;
+    }
+
+    // Create WaveSurfer for playback of recorded/imported audio
     wavesurfer = WaveSurfer.create({
       container,
       waveColor: '#4a9eff',
@@ -29,47 +38,80 @@
       barGap: 1,
     });
 
-    recorder = wavesurfer.registerPlugin(RecordPlugin.create({
-      scrollingWaveform: false,
-      renderRecordedAudio: true,
-    }));
+    // Only create RecordPlugin if microphone is supported
+    if (microphoneSupported) {
+      // Create RecordPlugin
+      // Note: scrollingWaveform shows live visualization during recording
+      recorder = wavesurfer.registerPlugin(RecordPlugin.create({
+        mimeType: 'audio/webm',
+        scrollingWaveform: true,
+        renderRecordedAudio: true,
+      }));
 
-    recorder.on('record-end', (blob: Blob) => {
-      const url = URL.createObjectURL(blob);
-      recordedUrl = url;
-      hasRecording = true;
-      onRecordingComplete?.(blob, url);
-    });
+      recorder.on('record-start', () => {
+        console.log('[AudioRecorder] Recording started');
+      });
+
+      recorder.on('record-progress', (time: number) => {
+        // Update recording time from plugin
+        recordingTime = time / 1000; // Convert ms to seconds
+      });
+
+      recorder.on('record-end', (blob: Blob) => {
+        console.log('[AudioRecorder] Recording ended, blob size:', blob.size);
+        const url = URL.createObjectURL(blob);
+        recordedUrl = url;
+        hasRecording = true;
+        onRecordingComplete?.(blob, url);
+      });
+    }
   });
 
   onDestroy(() => {
-    if (recordingInterval) clearInterval(recordingInterval);
     wavesurfer?.destroy();
   });
 
   async function startRecording() {
-    if (!recorder) return;
+    if (!recorder || !microphoneSupported) {
+      error = 'Recording not available. Please use the Import button to upload an audio file.';
+      return;
+    }
 
-    isRecording = true;
+    error = null;
     recordingTime = 0;
     hasRecording = false;
 
-    recordingInterval = setInterval(() => {
-      recordingTime += 0.1;
-    }, 100);
-
-    await recorder.startRecording();
+    try {
+      // Request microphone and start recording
+      console.log('[AudioRecorder] Requesting microphone access...');
+      await recorder.startRecording();
+      console.log('[AudioRecorder] Microphone granted, recording...');
+      isRecording = true;
+    } catch (err) {
+      console.error('[AudioRecorder] Failed to start recording:', err);
+      isRecording = false;
+      if (err instanceof Error) {
+        if (err.name === 'NotAllowedError' || err.message.includes('Permission')) {
+          error = 'Microphone access denied. Please allow microphone access in System Preferences > Privacy & Security > Microphone.';
+        } else if (err.name === 'NotFoundError') {
+          error = 'No microphone found. Please connect a microphone and try again.';
+        } else if (err.message.includes('mediaDevices')) {
+          error = 'Microphone recording is not supported in this environment. Please use the Import button.';
+          microphoneSupported = false;
+        } else {
+          error = err.message || 'Failed to start recording';
+        }
+      } else {
+        error = 'Failed to start recording';
+      }
+    }
   }
 
   function stopRecording() {
     if (!recorder) return;
 
+    console.log('[AudioRecorder] Stopping recording...');
     isRecording = false;
-    if (recordingInterval) {
-      clearInterval(recordingInterval);
-      recordingInterval = null;
-    }
-
     recorder.stopRecording();
   }
 
@@ -103,11 +145,40 @@
     Reference Audio
   </label>
 
+  <!-- Microphone not supported message -->
+  {#if !microphoneSupported}
+    <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+      <p class="font-medium">Recording not available</p>
+      <p class="text-xs mt-1 text-amber-400/80">
+        Microphone access is not available in this environment. Please use the <strong>Import</strong> button to upload a pre-recorded audio file.
+      </p>
+    </div>
+  {/if}
+
+  <!-- Error message -->
+  {#if error}
+    <div class="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+      {error}
+    </div>
+  {/if}
+
   <!-- Waveform display -->
-  <div
-    bind:this={container}
-    class="rounded-lg overflow-hidden bg-[var(--color-bg-elevated)] min-h-[60px]"
-  ></div>
+  <div class="relative">
+    <div
+      bind:this={container}
+      class="rounded-lg overflow-hidden bg-[var(--color-bg-elevated)] min-h-[60px]"
+    ></div>
+
+    <!-- Recording indicator overlay -->
+    {#if isRecording}
+      <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/20 border border-red-500/50">
+          <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+          <span class="text-xs text-red-400 font-medium">Recording...</span>
+        </div>
+      </div>
+    {/if}
+  </div>
 
   <!-- Controls -->
   <div class="flex items-center gap-3">
@@ -121,10 +192,12 @@
       </button>
     {:else}
       <button
-        class="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] transition-colors"
+        class="flex items-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-[var(--color-text-secondary)] disabled:hover:border-[var(--color-border-default)]"
         onclick={startRecording}
+        disabled={!microphoneSupported}
+        title={microphoneSupported ? 'Start recording' : 'Recording not available - use Import instead'}
       >
-        <span class="w-3 h-3 rounded-full bg-red-500"></span>
+        <span class="w-3 h-3 rounded-full {microphoneSupported ? 'bg-red-500' : 'bg-gray-500'}"></span>
         Record
       </button>
     {/if}

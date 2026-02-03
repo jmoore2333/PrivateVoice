@@ -3,6 +3,7 @@
  */
 
 import { ttsClient, type ModelStatus, type Speaker, PRESET_SPEAKERS } from "$lib/api/ttsClient";
+import { settingsStore } from "./settingsStore.svelte";
 
 export type TTSMode = "custom-voice" | "voice-clone" | "voice-design";
 
@@ -219,9 +220,24 @@ function createTTSStore() {
   function downloadAudio() {
     if (!state.audioBlob) return;
 
+    // Generate filename: PrivateVoice_ModeName_YYYY-MM-DD_HHMMSS.format
+    const modeNames: Record<TTSMode, string> = {
+      "custom-voice": "CustomVoice",
+      "voice-clone": "VoiceClone",
+      "voice-design": "VoiceDesign",
+    };
+    const modeName = modeNames[state.mode];
+    const now = new Date();
+    const datestamp = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const timestamp = now.toTimeString().slice(0, 8).replace(/:/g, ""); // HHMMSS
+
+    // Get format from settings (currently only WAV is supported by backend)
+    const format = settingsStore.state.exportFormat || "wav";
+    const filename = `PrivateVoice_${modeName}_${datestamp}_${timestamp}.${format}`;
+
     const a = document.createElement("a");
     a.href = state.audioUrl!;
-    a.download = `tts-output-${Date.now()}.wav`;
+    a.download = filename;
     a.click();
   }
 

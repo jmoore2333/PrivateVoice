@@ -67,12 +67,51 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete development guid
 # Install dependencies
 pnpm install
 
-# Run tests
-pnpm test:run
+# Start the Python TTS server (in a separate terminal)
+cd tts-server && python server.py
 
-# Start development
+# Start the frontend dev server
+pnpm dev
+
+# Or run the full Tauri app in development mode
 pnpm tauri dev
 ```
+
+### Running Tests
+
+```bash
+# Unit tests
+pnpm test
+
+# Unit tests with coverage
+pnpm test:coverage
+
+# E2E tests (requires dev server or mocks)
+pnpm test:e2e
+
+# Type checking
+pnpm check
+```
+
+### Building for Local Testing
+
+Some features (like microphone recording for voice cloning) require a production build due to macOS WebView security restrictions. To test these features locally:
+
+```bash
+# 1. Build the production app
+pnpm tauri build
+
+# 2. The built app will be at:
+#    src-tauri/target/release/bundle/macos/PrivateVoice.app
+
+# 3. Run the production build
+open src-tauri/target/release/bundle/macos/PrivateVoice.app
+
+# Or run the unsigned binary directly
+./src-tauri/target/release/qwen3-tts-desktop
+```
+
+**Note:** The first production build takes several minutes as it compiles the Rust backend and bundles all dependencies.
 
 ### Build for Release
 
@@ -108,15 +147,30 @@ pnpm tauri dev
 
 ## Project Status
 
-| Phase | Status |
-|-------|--------|
-| Core Infrastructure | Complete |
-| Python Sidecar Bundling | Complete |
-| Settings & Debug Tools | Complete |
-| UI Redesign | Complete |
-| Testing Infrastructure | Complete |
-| Code Signing & Distribution | Planned |
-| Cross-Platform Support | Planned |
+### Current State (January 2026)
+
+The app is functional for local development and testing. Core TTS generation works across all three modes.
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Core Infrastructure | ✅ Complete | Tauri + Svelte 5 + Python sidecar |
+| Python TTS Server | ✅ Complete | FastAPI with Qwen3-TTS |
+| UI Implementation | ✅ Complete | Dark theme, all three TTS modes |
+| Settings & Debug Tools | ✅ Complete | Persistent settings, debug console |
+| Model Management | ✅ Complete | Load/switch models, auto-load on startup |
+| Custom Voice Mode | ✅ Complete | 9 preset speakers + style instructions |
+| Voice Clone Mode | ⚠️ Partial | Works with imported audio; recording requires production build |
+| Voice Design Mode | ✅ Complete | Text-based voice description |
+| Audio Export | ✅ Complete | WAV export with descriptive filenames |
+| Testing Infrastructure | ✅ Complete | Unit tests + E2E tests (CI-compatible) |
+| Code Signing & Distribution | 🔲 Planned | Required for public release |
+| Cross-Platform Support | 🔲 Planned | Currently macOS only |
+
+### Known Limitations
+
+- **Voice Clone Recording:** Microphone recording doesn't work in development mode due to macOS WebView security restrictions. Use the **Import** button to upload audio files, or test with a production build.
+- **MP3 Export:** Currently only WAV export is supported. MP3 encoding requires backend implementation.
+- **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace.
 
 ### Cross-Platform Roadmap
 
@@ -143,6 +197,12 @@ The Python backend exposes a REST API at `http://127.0.0.1:8765`:
 
 ## Troubleshooting
 
+**Voice Clone recording not working?**
+Microphone access requires a production build on macOS. In development mode, use the **Import** button to upload pre-recorded audio files. To test recording, build the app with `pnpm tauri build` and run the production `.app` bundle.
+
+**"Recording not available" message?**
+This appears in development mode because Tauri's WebView doesn't expose `navigator.mediaDevices`. This is expected - use Import instead, or test with a production build.
+
 **Slow first launch?**
 Normal - PyInstaller extracts the bundled Python environment (~60 seconds). Subsequent launches are faster.
 
@@ -154,6 +214,9 @@ Check your internet connection. Models are 1.2-3.4GB from HuggingFace Hub.
 
 **MPS errors?**
 Ensure you're on Apple Silicon with macOS 12.3+. Intel Macs use slower CPU inference.
+
+**Export always saves as WAV?**
+Only WAV export is currently supported. The format selector is prepared for future MP3 support.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#troubleshooting) for more solutions.
 

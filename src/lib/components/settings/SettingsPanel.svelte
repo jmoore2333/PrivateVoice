@@ -18,7 +18,8 @@
 
   const EXPORT_FORMATS = [
     { value: "wav", label: "WAV", description: "Lossless" },
-    { value: "mp3", label: "MP3", description: "Compressed" },
+    // MP3 export requires backend encoding support (coming soon)
+    // { value: "mp3", label: "MP3", description: "Compressed" },
   ];
 
   const CACHE_SIZES = [
