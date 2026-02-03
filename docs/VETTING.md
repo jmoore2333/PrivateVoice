@@ -42,3 +42,9 @@ Models: 0.6B, 1.7B, 1.7B-Design
 - Update docs to match backend entrypoint and build outputs.
 - Add or adjust automated tests based on manual findings.
 - Decide on MP3 export approach.
+
+**Testing Notes**
+- Consider a one-click option to download all three models.
+- Show GPU/CPU status on the startup screen, with guidance on which models are recommended and the risks of CPU-only mode.
+- Add a first-run note that initial startup can take several minutes while the Python environment initializes and models download.
+- The loading screen feels slow and non-descriptive; consider an optional debug/console view to show live startup details, especially for cross-platform rollout (macOS first, then Windows, then Linux).
