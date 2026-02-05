@@ -312,6 +312,12 @@
               healthInterval = null;
             }
             await ttsStore.refreshModelStatus();
+
+            // Auto-load the recommended model if none is loaded
+            if (settingsStore.state.autoLoadModel && !ttsState.modelLoaded) {
+              const recommended = getRecommendedModel(ttsState.mode);
+              ttsStore.loadModel(recommended);
+            }
           }
         } catch {
           // Server not ready yet
@@ -495,6 +501,7 @@
           modelSupported={customVoiceModelSupported}
           modelLoading={ttsState.isLoadingModel}
           recommendedModelLabel={recommendedCustomModelLabel}
+          currentModelId={ttsState.modelId}
           isGenerating={ttsState.isGenerating}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}

@@ -1,5 +1,6 @@
 """PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
+import logging
 import os
 import platform
 import signal
@@ -465,6 +466,16 @@ def main():
 
     state = get_startup_state()
     state.set_phase("starting-server", f"Starting TTS server on {host}:{port}", 5)
+
+    # Suppress noisy polling endpoints from uvicorn access logs
+    class SuppressPollingFilter(logging.Filter):
+        _suppressed = {"/health", "/startup-status", "/model-status", "/download-progress"}
+
+        def filter(self, record: logging.LogRecord) -> bool:
+            msg = record.getMessage()
+            return not any(ep in msg for ep in self._suppressed)
+
+    logging.getLogger("uvicorn.access").addFilter(SuppressPollingFilter())
 
     logger.info(f"Starting TTS server on {host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
