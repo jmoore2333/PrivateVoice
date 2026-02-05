@@ -4,12 +4,12 @@
   import { listen } from "@tauri-apps/api/event";
 
   // Stores
-  import { ttsStore, type TTSMode, MODEL_CAPABILITIES, getRecommendedModel, modelSupportsMode } from "$lib/stores/ttsStore.svelte";
+  import { ttsStore, type TTSMode, MODEL_CAPABILITIES, MODEL_OPTIONS, getRecommendedModel, modelSupportsMode } from "$lib/stores/ttsStore.svelte";
   import { appStore, type StartupPhase } from "$lib/stores/appStore.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
   import { settingsStore } from "$lib/stores/settingsStore.svelte";
   import { libraryStore } from "$lib/stores/libraryStore.svelte";
-  import { ttsClient, type Speaker } from "$lib/api/ttsClient";
+  import { ttsClient, type Speaker, type SystemInfo } from "$lib/api/ttsClient";
 
   // Layout components
   import Header from "$lib/components/layout/Header.svelte";
@@ -48,6 +48,11 @@
   let generationStartTime = $state<number | null>(null);
   let elapsedTime = $state(0);
   let elapsedInterval: ReturnType<typeof setInterval> | null = null;
+  let startupStatusAvailable = $state(true);
+  let hasFetchedSystemInfo = $state(false);
+
+  // Component refs
+  let outputPanelRef = $state<OutputPanel>();
 
   // Voice clone local state
   let referenceAudioBlob = $state<Blob | null>(null);
@@ -55,7 +60,7 @@
 
   // Local text/language state for binding
   let localText = $state(ttsState.text);
-  let localLanguage = $state('English');
+  let localLanguage = $state(ttsState.language);
   let localSpeaker = $state<string>(ttsState.speaker);
   let localInstruction = $state(ttsState.instruction);
   let localReferenceText = $state(ttsState.referenceText);
@@ -64,8 +69,7 @@
   // Keyboard shortcuts
   useKeyboardShortcuts({
     onPlayPause: () => {
-      // TODO: Need reference to WaveformPlayer to call play/pause
-      // For now, this is a placeholder
+      outputPanelRef?.togglePlay();
     },
     onGenerate: () => {
       if (!ttsState.isGenerating && ttsState.text.trim()) {
@@ -107,10 +111,55 @@
   const currentStatus = $derived(computeStatus());
 
   const voiceDesignModelLoaded = $derived(ttsState.modelId === '1.7b-design');
+  const voiceCloneModelSupported = $derived(modelSupportsMode(ttsState.modelId, 'voice-clone'));
+  const customVoiceModelSupported = $derived(modelSupportsMode(ttsState.modelId, 'custom-voice'));
+
+  function getModelLabel(modelId: string): string {
+    const match = MODEL_OPTIONS.find((model) => model.id === modelId);
+    return match ? match.label : modelId;
+  }
+
+  function pickRecommendedModel(mode: TTSMode, info: SystemInfo | null): string {
+    const isCpu = info?.device === "cpu";
+    const memoryAvailable = info?.memory_available_gb ?? info?.memory_total_gb ?? 0;
+    const prefersQuality = !isCpu && memoryAvailable >= 12;
+
+    switch (mode) {
+      case "voice-clone":
+        return prefersQuality ? "1.7b-base" : "0.6b-base";
+      case "voice-design":
+        return "1.7b-design";
+      case "custom-voice":
+      default:
+        return prefersQuality ? "1.7b" : "0.6b";
+    }
+  }
+
+  const recommendedCustomModelId = $derived(pickRecommendedModel("custom-voice", debugStore.state.systemInfo));
+  const recommendedCloneModelId = $derived(pickRecommendedModel("voice-clone", debugStore.state.systemInfo));
+  const recommendedDesignModelId = $derived("1.7b-design");
+
+  const recommendedCustomModelLabel = $derived(getModelLabel(recommendedCustomModelId));
+  const recommendedCloneModelLabel = $derived(getModelLabel(recommendedCloneModelId));
+  const recommendedDesignModelLabel = $derived(getModelLabel(recommendedDesignModelId));
+
+  function buildRecommendedHint(info: SystemInfo | null): string {
+    if (!info) return "";
+    const deviceLabel = info.device_name ?? info.device;
+    const memory = info.memory_available_gb ?? info.memory_total_gb;
+    const memoryLabel = memory ? ` • ${memory.toFixed(1)} GB available` : "";
+    return `Detected ${deviceLabel}${memoryLabel}.`;
+  }
+
+  const recommendedCloneHint = $derived(buildRecommendedHint(debugStore.state.systemInfo));
 
   // Sync local state from store when store changes
   $effect(() => {
     localText = ttsState.text;
+  });
+
+  $effect(() => {
+    localLanguage = ttsState.language;
   });
 
   $effect(() => {
@@ -209,29 +258,55 @@
 
       healthInterval = setInterval(async () => {
         try {
+          let statusPhase: StartupPhase | null = null;
+
           await ttsClient.health();
 
           if (!ttsState.serverConnected) {
             ttsStore.checkServerHealth();
           }
 
-          const status = await ttsClient.getStartupStatus();
-          appStore.setStartupPhase(status.phase as StartupPhase, status.message);
-          appStore.setStartupProgress(status.progress);
+          if (startupStatusAvailable) {
+            try {
+              const status = await ttsClient.getStartupStatus();
+              appStore.setStartupPhase(status.phase as StartupPhase, status.message);
+              appStore.setStartupProgress(status.progress);
+              statusPhase = status.phase as StartupPhase;
 
-          if (status.phase === "downloading") {
-            const download = await ttsClient.getDownloadProgress();
-            appStore.updateDownloadProgress({
-              status: download.status,
-              fileName: download.file_name,
-              bytesDownloaded: download.bytes_downloaded,
-              bytesTotal: download.bytes_total,
-              speedMbps: download.speed_mbps,
-              eta: download.eta,
-            });
+              if (status.phase === "downloading") {
+                const download = await ttsClient.getDownloadProgress();
+                appStore.updateDownloadProgress({
+                  status: download.status,
+                  fileName: download.file_name,
+                  bytesDownloaded: download.bytes_downloaded,
+                  bytesTotal: download.bytes_total,
+                  speedMbps: download.speed_mbps,
+                  eta: download.eta,
+                });
+              }
+            } catch (e) {
+              const statusCode = (e as Error & { status?: number }).status;
+              if (statusCode === 404) {
+                startupStatusAvailable = false;
+                appStore.setStartupPhase("ready", "Server connected");
+                appStore.setStartupProgress(100);
+                statusPhase = "ready";
+              } else {
+                throw e;
+              }
+            }
+          } else {
+            appStore.setStartupPhase("ready", "Server connected");
+            appStore.setStartupProgress(100);
+            statusPhase = "ready";
           }
 
-          if (status.phase === "ready") {
+          if (ttsState.serverConnected && !hasFetchedSystemInfo) {
+            hasFetchedSystemInfo = true;
+            debugStore.fetchSystemInfo();
+          }
+
+          if (statusPhase === "ready") {
             if (healthInterval) {
               clearInterval(healthInterval);
               healthInterval = null;
@@ -264,38 +339,35 @@
     }
   }
 
+  function buildLibraryItem(): import('$lib/stores/libraryStore.svelte').LibraryItem {
+    return {
+      id: crypto.randomUUID(),
+      type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
+      name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
+      audioUrl: ttsState.audioUrl!,
+      createdAt: new Date(),
+      metadata: {
+        speaker: ttsState.speaker,
+        language: ttsState.language,
+        referenceText: ttsState.referenceText || undefined,
+        voiceDescription: ttsState.voiceDescription || undefined,
+        modelId: ttsState.modelId ?? undefined,
+      }
+    };
+  }
+
   async function handleGenerate() {
     await ttsStore.generate();
 
     // Add to recent library if successful
     if (ttsState.audioBlob && ttsState.audioUrl) {
-      libraryStore.addToRecent({
-        id: crypto.randomUUID(),
-        type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
-        name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
-        audioUrl: ttsState.audioUrl,
-        createdAt: new Date(),
-        metadata: {
-          speaker: ttsState.speaker,
-          modelId: ttsState.modelId ?? undefined,
-        }
-      });
+      libraryStore.addToRecent(buildLibraryItem());
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (ttsState.audioBlob && ttsState.audioUrl) {
-      libraryStore.saveToLibrary({
-        id: crypto.randomUUID(),
-        type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
-        name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
-        audioUrl: ttsState.audioUrl,
-        createdAt: new Date(),
-        metadata: {
-          speaker: ttsState.speaker,
-          modelId: ttsState.modelId ?? undefined,
-        }
-      });
+      await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
     }
   }
 
@@ -304,7 +376,15 @@
   }
 
   function handleLoadVoiceDesignModel() {
-    ttsStore.loadModel('1.7b-design');
+    ttsStore.loadModel(recommendedDesignModelId);
+  }
+
+  function handleLoadVoiceCloneModel() {
+    ttsStore.loadModel(recommendedCloneModelId);
+  }
+
+  function handleLoadCustomVoiceModel() {
+    ttsStore.loadModel(recommendedCustomModelId);
   }
 
   function handleReferenceAudioChange(blob: Blob, url: string) {
@@ -313,6 +393,11 @@
     // Convert blob to File for ttsStore
     const file = new File([blob], 'reference.wav', { type: blob.type });
     ttsStore.setReferenceAudio(file);
+  }
+
+  function handleLanguageChange(language: string) {
+    localLanguage = language;
+    ttsStore.setLanguage(language);
   }
 
   function handleTextChange(text: string) {
@@ -333,6 +418,10 @@
   function handleReferenceTextChange(text: string) {
     localReferenceText = text;
     ttsStore.setReferenceText(text);
+  }
+
+  function handleCloneQualityChange(enabled: boolean) {
+    ttsStore.setCloneLowQualityMode(enabled);
   }
 
   function handleDescriptionChange(description: string) {
@@ -403,11 +492,16 @@
           bind:language={localLanguage}
           bind:speaker={localSpeaker}
           bind:instruction={localInstruction}
+          modelSupported={customVoiceModelSupported}
+          modelLoading={ttsState.isLoadingModel}
+          recommendedModelLabel={recommendedCustomModelLabel}
           isGenerating={ttsState.isGenerating}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
+          onLanguageChange={handleLanguageChange}
           onSpeakerChange={handleSpeakerChange}
           onInstructionChange={handleInstructionChange}
+          onLoadModel={handleLoadCustomVoiceModel}
         />
       {:else if ttsState.mode === 'voice-clone'}
         <VoiceClonePanel
@@ -416,12 +510,19 @@
           bind:referenceText={localReferenceText}
           {referenceAudioUrl}
           {referenceAudioBlob}
+          modelSupported={voiceCloneModelSupported}
+          modelLoading={ttsState.isLoadingModel}
+          recommendedModelLabel={recommendedCloneModelLabel}
+          recommendedModelHint={recommendedCloneHint}
           isGenerating={ttsState.isGenerating}
           hasWhisper={false}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
+          onLanguageChange={handleLanguageChange}
           onReferenceTextChange={handleReferenceTextChange}
           onReferenceAudioChange={handleReferenceAudioChange}
+          onLowQualityModeChange={handleCloneQualityChange}
+          onLoadModel={handleLoadVoiceCloneModel}
         />
       {:else if ttsState.mode === 'voice-design'}
         <VoiceDesignPanel
@@ -431,9 +532,11 @@
           isGenerating={ttsState.isGenerating}
           modelLoaded={voiceDesignModelLoaded}
           modelLoading={ttsState.isLoadingModel}
+          recommendedModelLabel={recommendedDesignModelLabel}
           onGenerate={handleGenerate}
           onLoadModel={handleLoadVoiceDesignModel}
           onTextChange={handleTextChange}
+          onLanguageChange={handleLanguageChange}
           onDescriptionChange={handleDescriptionChange}
         />
       {/if}
@@ -441,6 +544,7 @@
 
     {#snippet outputPanel()}
       <OutputPanel
+        bind:this={outputPanelRef}
         audioUrl={ttsState.audioUrl ?? undefined}
         isGenerating={ttsState.isGenerating}
         {elapsedTime}
@@ -448,6 +552,7 @@
         onRegenerate={handleGenerate}
         onSave={handleSave}
         onExport={handleExport}
+        onCancel={() => ttsStore.abortGeneration()}
       />
     {/snippet}
   </Workspace>
@@ -480,7 +585,22 @@
   isOpen={libraryOpen}
   onClose={() => libraryOpen = false}
   onUseVoice={(id) => {
-    // TODO: Load voice configuration
+    const item = libraryStore.saved.find(i => i.id === id) ?? libraryStore.recent.find(i => i.id === id);
+    if (!item) { libraryOpen = false; return; }
+
+    // Set mode from item type
+    const modeMap = { clone: 'voice-clone', design: 'voice-design', audio: 'custom-voice' } as const;
+    ttsStore.setMode(modeMap[item.type]);
+
+    // Restore metadata
+    if (item.metadata?.speaker) ttsStore.setSpeaker(item.metadata.speaker as Speaker);
+    if (item.metadata?.language) ttsStore.setLanguage(item.metadata.language);
+    if (item.metadata?.voiceDescription) ttsStore.setVoiceDescription(item.metadata.voiceDescription);
+    if (item.metadata?.referenceText) ttsStore.setReferenceText(item.metadata.referenceText);
+
+    // Restore text from item name (truncated, but best we have)
+    ttsStore.setText(item.name.replace(/\.\.\.$/,''));
+
     libraryOpen = false;
   }}
 />

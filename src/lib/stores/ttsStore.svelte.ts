@@ -9,18 +9,36 @@ export type TTSMode = "custom-voice" | "voice-clone" | "voice-design";
 
 // Model compatibility matrix
 const MODEL_CAPABILITIES: Record<string, TTSMode[]> = {
-  "0.6b": ["custom-voice", "voice-clone"],
-  "1.7b": ["custom-voice", "voice-clone"],
+  "0.6b": ["custom-voice"],
+  "1.7b": ["custom-voice"],
+  "0.6b-base": ["voice-clone"],
+  "1.7b-base": ["voice-clone"],
   "1.7b-design": ["voice-design"],
 };
+
+export interface ModelOption {
+  id: string;
+  label: string;
+  description: string;
+  modes: TTSMode[];
+}
+
+export const MODEL_OPTIONS: ModelOption[] = [
+  { id: "0.6b", label: "0.6B Custom", description: "Fast, Custom Voice", modes: ["custom-voice"] },
+  { id: "1.7b", label: "1.7B Custom", description: "Quality, Custom Voice", modes: ["custom-voice"] },
+  { id: "0.6b-base", label: "0.6B Base", description: "Voice Clone (fast)", modes: ["voice-clone"] },
+  { id: "1.7b-base", label: "1.7B Base", description: "Voice Clone (quality)", modes: ["voice-clone"] },
+  { id: "1.7b-design", label: "1.7B Design", description: "Voice Design", modes: ["voice-design"] },
+];
 
 // Get the recommended model for a mode
 function getRecommendedModel(mode: TTSMode): string {
   switch (mode) {
     case "voice-design":
       return "1.7b-design";
-    case "custom-voice":
     case "voice-clone":
+      return "0.6b-base";
+    case "custom-voice":
     default:
       return "0.6b";
   }
@@ -43,6 +61,7 @@ export interface TTSState {
   // UI state
   mode: TTSMode;
   text: string;
+  language: string;
   speaker: Speaker;
   instruction: string;
   voiceDescription: string;
@@ -50,6 +69,7 @@ export interface TTSState {
   // Voice clone
   referenceAudio: File | null;
   referenceText: string;
+  cloneLowQualityMode: boolean;
 
   // Audio output
   audioUrl: string | null;
@@ -69,11 +89,13 @@ function createTTSStore() {
     device: null,
     mode: "custom-voice",
     text: "",
+    language: "English",
     speaker: "aiden",
     instruction: "",
     voiceDescription: "",
     referenceAudio: null,
     referenceText: "",
+    cloneLowQualityMode: false,
     audioUrl: null,
     audioBlob: null,
     isGenerating: false,
@@ -125,8 +147,11 @@ function createTTSStore() {
     // Check model compatibility with current mode
     if (!modelSupportsMode(state.modelId, state.mode)) {
       const recommended = getRecommendedModel(state.mode);
+      const recommendedLabel =
+        MODEL_OPTIONS.find((model) => model.id === recommended)?.label ??
+        recommended.toUpperCase();
       const modeName = state.mode.replace("-", " ");
-      state.error = `Current model doesn't support ${modeName}. Please load the ${recommended.toUpperCase()} model.`;
+      state.error = `Current model doesn't support ${modeName}. Please load the ${recommendedLabel} model.`;
       return;
     }
 
@@ -141,13 +166,21 @@ function createTTSStore() {
 
     try {
       let blob: Blob;
+      const language = state.language.toLowerCase();
+      const format = settingsStore.state.exportFormat || "wav";
 
       switch (state.mode) {
         case "custom-voice":
+          const speakerId = state.speaker.trim().split(/\s+/)[0];
+          if (!PRESET_SPEAKERS.includes(speakerId as Speaker)) {
+            throw new Error(`Unknown speaker: ${speakerId}`);
+          }
           blob = await ttsClient.generateCustomVoice({
             text: state.text,
-            speaker: state.speaker,
+            speaker: speakerId,
             instruction: state.instruction,
+            language,
+            format,
           });
           break;
 
@@ -155,13 +188,14 @@ function createTTSStore() {
           if (!state.referenceAudio) {
             throw new Error("Please upload a reference audio file");
           }
-          if (!state.referenceText.trim()) {
+          if (!state.cloneLowQualityMode && !state.referenceText.trim()) {
             throw new Error("Please enter the reference text");
           }
           blob = await ttsClient.generateVoiceClone(
             state.text,
             state.referenceText,
-            state.referenceAudio
+            state.referenceAudio,
+            { xVectorOnly: state.cloneLowQualityMode, language, format }
           );
           break;
 
@@ -172,6 +206,8 @@ function createTTSStore() {
           blob = await ttsClient.generateVoiceDesign({
             text: state.text,
             voice_description: state.voiceDescription,
+            language,
+            format,
           });
           break;
       }
@@ -179,18 +215,39 @@ function createTTSStore() {
       state.audioBlob = blob;
       state.audioUrl = URL.createObjectURL(blob);
     } catch (e) {
-      state.error = e instanceof Error ? e.message : "Generation failed";
+      // Don't show error for user-initiated cancellation
+      if (e instanceof DOMException && e.name === "AbortError") {
+        // Cancelled — no error
+      } else {
+        state.error = e instanceof Error ? e.message : "Generation failed";
+      }
     } finally {
       state.isGenerating = false;
     }
   }
 
+  function abortGeneration() {
+    ttsClient.abortGeneration();
+  }
+
   function setMode(mode: TTSMode) {
     state.mode = mode;
+
+    // Clear output from previous mode
+    if (state.audioUrl) {
+      URL.revokeObjectURL(state.audioUrl);
+      state.audioUrl = null;
+    }
+    state.audioBlob = null;
+    state.error = null;
   }
 
   function setText(text: string) {
     state.text = text;
+  }
+
+  function setLanguage(language: string) {
+    state.language = language;
   }
 
   function setSpeaker(speaker: Speaker) {
@@ -213,14 +270,15 @@ function createTTSStore() {
     state.referenceText = text;
   }
 
+  function setCloneLowQualityMode(enabled: boolean) {
+    state.cloneLowQualityMode = enabled;
+  }
+
   function clearError() {
     state.error = null;
   }
 
-  function downloadAudio() {
-    if (!state.audioBlob) return;
-
-    // Generate filename: PrivateVoice_ModeName_YYYY-MM-DD_HHMMSS.format
+  function generateFilename(): string {
     const modeNames: Record<TTSMode, string> = {
       "custom-voice": "CustomVoice",
       "voice-clone": "VoiceClone",
@@ -228,13 +286,43 @@ function createTTSStore() {
     };
     const modeName = modeNames[state.mode];
     const now = new Date();
-    const datestamp = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const timestamp = now.toTimeString().slice(0, 8).replace(/:/g, ""); // HHMMSS
-
-    // Get format from settings (currently only WAV is supported by backend)
+    const datestamp = now.toISOString().slice(0, 10);
+    const timestamp = now.toTimeString().slice(0, 8).replace(/:/g, "");
     const format = settingsStore.state.exportFormat || "wav";
-    const filename = `PrivateVoice_${modeName}_${datestamp}_${timestamp}.${format}`;
+    return `PrivateVoice_${modeName}_${datestamp}_${timestamp}.${format}`;
+  }
 
+  async function downloadAudio() {
+    if (!state.audioBlob) return;
+
+    const filename = generateFilename();
+
+    // Try native save dialog (Tauri)
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeFile } = await import("@tauri-apps/plugin-fs");
+
+      const defaultPath = settingsStore.state.exportFolder
+        ? `${settingsStore.state.exportFolder}/${filename}`
+        : filename;
+
+      const format = settingsStore.state.exportFormat || "wav";
+      const filterName = format === "mp3" ? "MP3 Audio" : "WAV Audio";
+      const filePath = await save({
+        defaultPath,
+        filters: [{ name: filterName, extensions: [format] }],
+      });
+
+      if (filePath) {
+        const arrayBuffer = await state.audioBlob.arrayBuffer();
+        await writeFile(filePath, new Uint8Array(arrayBuffer));
+      }
+      return;
+    } catch {
+      // Not in Tauri or plugin unavailable — fall back to browser download
+    }
+
+    // Browser fallback
     const a = document.createElement("a");
     a.href = state.audioUrl!;
     a.download = filename;
@@ -249,13 +337,16 @@ function createTTSStore() {
     refreshModelStatus,
     loadModel,
     generate,
+    abortGeneration,
     setMode,
     setText,
+    setLanguage,
     setSpeaker,
     setInstruction,
     setVoiceDescription,
     setReferenceAudio,
     setReferenceText,
+    setCloneLowQualityMode,
     clearError,
     downloadAudio,
   };

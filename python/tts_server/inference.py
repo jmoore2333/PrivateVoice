@@ -1,4 +1,4 @@
-"""MPS-compatible Qwen3-TTS inference wrapper."""
+"""PrivateVoice inference wrapper (Qwen3-TTS on MPS/CUDA/CPU)."""
 
 import signal
 import torch
@@ -87,6 +87,10 @@ class TTSModel:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
+        # Suppress pad_token_id warning by setting it explicitly
+        if hasattr(self.model, 'config') and hasattr(self.model.config, 'eos_token_id'):
+            self.model.config.pad_token_id = self.model.config.eos_token_id
+
         self._loaded = True
         logger.info(f"Model loaded successfully on {self.config.device}")
 
@@ -108,7 +112,8 @@ class TTSModel:
         speaker: str = "serena",
         instruction: str = "",
         language: str = "english",
-    ) -> bytes:
+        output_format: str = "wav",
+    ) -> tuple[bytes, str]:
         """
         Generate speech using a preset speaker voice.
 
@@ -117,9 +122,10 @@ class TTSModel:
             speaker: One of the preset speaker names
             instruction: Optional style instruction (e.g., "speaks slowly and calmly")
             language: Language for synthesis
+            output_format: Output audio format ("wav" or "mp3")
 
         Returns:
-            WAV audio bytes
+            Tuple of (audio bytes, media type)
         """
         if not self._loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
@@ -127,7 +133,6 @@ class TTSModel:
         if speaker not in PRESET_SPEAKERS:
             raise ValueError(f"Unknown speaker: {speaker}. Available: {PRESET_SPEAKERS}")
 
-        # Generate audio with instruction as separate parameter
         with torch.no_grad():
             wavs, sr = self.model.generate_custom_voice(
                 text=text,
@@ -137,9 +142,7 @@ class TTSModel:
             )
 
         synchronize_device(self.config.device)
-
-        # Convert to WAV bytes
-        return self._audio_to_wav(wavs[0], sr)
+        return self.audio_to_format(wavs[0], sr, output_format)
 
     def generate_voice_clone(
         self,
@@ -147,7 +150,9 @@ class TTSModel:
         reference_audio: bytes,
         reference_text: str,
         language: str = "english",
-    ) -> bytes:
+        x_vector_only_mode: bool = False,
+        output_format: str = "wav",
+    ) -> tuple[bytes, str]:
         """
         Generate speech by cloning a reference voice.
 
@@ -156,14 +161,19 @@ class TTSModel:
             reference_audio: Reference audio bytes (WAV format)
             reference_text: Transcript of the reference audio
             language: Language for synthesis
+            x_vector_only_mode: When True, use only the x-vector from reference
+                audio (ignores reference_text). Lower quality but doesn't
+                require a transcript.
+            output_format: Output audio format ("wav" or "mp3")
 
         Returns:
-            WAV audio bytes
+            Tuple of (audio bytes, media type)
         """
         if not self._loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
 
-        # Save reference audio to temp file (qwen-tts expects file path)
+        effective_ref_text = "" if x_vector_only_mode else reference_text
+
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             f.write(reference_audio)
@@ -175,11 +185,11 @@ class TTSModel:
                     text=text,
                     language=language,
                     ref_audio=ref_audio_path,
-                    ref_text=reference_text,
+                    ref_text=effective_ref_text,
                 )
 
             synchronize_device(self.config.device)
-            return self._audio_to_wav(wavs[0], sr)
+            return self.audio_to_format(wavs[0], sr, output_format)
         finally:
             import os
             os.unlink(ref_audio_path)
@@ -189,7 +199,8 @@ class TTSModel:
         text: str,
         voice_description: str,
         language: str = "english",
-    ) -> bytes:
+        output_format: str = "wav",
+    ) -> tuple[bytes, str]:
         """
         Generate speech with a novel voice from natural language description.
 
@@ -199,9 +210,10 @@ class TTSModel:
             text: The text to synthesize
             voice_description: Natural language description of the voice
             language: Language for synthesis
+            output_format: Output audio format ("wav" or "mp3")
 
         Returns:
-            WAV audio bytes
+            Tuple of (audio bytes, media type)
         """
         if not self._loaded:
             raise RuntimeError("Model not loaded. Call load() first.")
@@ -217,33 +229,58 @@ class TTSModel:
             )
 
         synchronize_device(self.config.device)
-        return self._audio_to_wav(wavs[0], sr)
+        return self.audio_to_format(wavs[0], sr, output_format)
 
-    def _audio_to_wav(self, audio, sample_rate: int) -> bytes:
-        """Convert audio tensor/array to WAV bytes."""
-        # Convert to numpy if tensor
+    def _prepare_audio(self, audio, sample_rate: int) -> tuple[np.ndarray, int]:
+        """Normalize audio tensor/array to float32 numpy."""
         if isinstance(audio, torch.Tensor):
             audio_np = audio.cpu().numpy()
         else:
             audio_np = np.array(audio)
 
-        # Ensure 1D
         audio_np = audio_np.squeeze()
 
-        # Ensure float32
         if audio_np.dtype != np.float32:
             audio_np = audio_np.astype(np.float32)
 
-        # Normalize if needed
         max_val = np.abs(audio_np).max()
         if max_val > 1.0:
             audio_np = audio_np / max_val
 
-        # Convert to WAV bytes
+        return audio_np, sample_rate
+
+    def _audio_to_wav(self, audio, sample_rate: int) -> bytes:
+        """Convert audio tensor/array to WAV bytes."""
+        audio_np, sr = self._prepare_audio(audio, sample_rate)
         buffer = io.BytesIO()
-        sf.write(buffer, audio_np, sample_rate, format='WAV')
+        sf.write(buffer, audio_np, sr, format='WAV')
         buffer.seek(0)
         return buffer.read()
+
+    def _audio_to_mp3(self, audio, sample_rate: int, bitrate: int = 192) -> bytes:
+        """Convert audio tensor/array to MP3 bytes using lameenc."""
+        import lameenc
+
+        audio_np, sr = self._prepare_audio(audio, sample_rate)
+
+        # lameenc expects int16 PCM
+        pcm_data = (audio_np * 32767).astype(np.int16).tobytes()
+
+        encoder = lameenc.Encoder()
+        encoder.set_bit_rate(bitrate)
+        encoder.set_in_sample_rate(sr)
+        encoder.set_channels(1)
+        encoder.set_quality(2)  # 2 = high quality
+
+        mp3_data = encoder.encode(pcm_data)
+        mp3_data += encoder.flush()
+        return mp3_data
+
+    def audio_to_format(self, audio, sample_rate: int, fmt: str = "wav") -> tuple[bytes, str]:
+        """Convert audio to requested format. Returns (bytes, media_type)."""
+        if fmt == "mp3":
+            return self._audio_to_mp3(audio, sample_rate), "audio/mpeg"
+        return self._audio_to_wav(audio, sample_rate), "audio/wav"
 
 
 # Global model instance

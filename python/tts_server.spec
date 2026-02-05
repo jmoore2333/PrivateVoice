@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for Qwen3-TTS server sidecar.
+"""PyInstaller spec for PrivateVoice TTS server sidecar.
 
 Build with: pyinstaller tts_server.spec
 
@@ -7,7 +7,17 @@ Output: dist/tts-server (single executable for macOS arm64)
 """
 
 import sys
+import platform
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+# Detect target architecture dynamically
+_machine = platform.machine().lower()
+if _machine in ('arm64', 'aarch64'):
+    _target_arch = 'arm64'
+elif _machine in ('x86_64', 'amd64'):
+    _target_arch = 'x86_64'
+else:
+    _target_arch = None  # Let PyInstaller auto-detect
 
 block_cipher = None
 
@@ -59,6 +69,8 @@ hiddenimports = [
     # Numeric
     'numpy',
     'scipy',
+    # Audio encoding
+    'lameenc',
 ]
 
 # Collect all submodules for complex packages
@@ -125,7 +137,7 @@ exe = EXE(
     console=True,  # Keep console for logging
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch='arm64',  # Apple Silicon only
+    target_arch=_target_arch,  # Detected from current platform
     codesign_identity=None,
     entitlements_file=None,
 )

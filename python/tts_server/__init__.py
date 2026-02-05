@@ -1,3 +1,3 @@
-"""Qwen3-TTS Server for Apple Silicon."""
+"""PrivateVoice TTS Server for Apple Silicon."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"

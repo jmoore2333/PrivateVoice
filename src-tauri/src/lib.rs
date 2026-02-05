@@ -78,18 +78,42 @@ fn get_timestamp() -> String {
     chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string()
 }
 
-/// Kill any process listening on the given port (macOS only)
+/// Kill any process listening on the given port.
+/// Uses platform-specific commands: lsof on macOS/Linux, netstat+taskkill on Windows.
 fn kill_process_on_port(port: u16) {
-    // Use lsof to find and kill any process on the port
-    if let Ok(output) = Command::new("lsof")
-        .args(["-ti", &format!(":{}", port)])
-        .output()
-    {
-        let pids = String::from_utf8_lossy(&output.stdout);
-        for pid in pids.lines() {
-            if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                println!("Killing existing process {} on port {}", pid_num, port);
-                let _ = Command::new("kill").args(["-9", &pid_num.to_string()]).output();
+    if cfg!(target_os = "windows") {
+        // Windows: use netstat to find PID, then taskkill
+        if let Ok(output) = Command::new("netstat")
+            .args(["-ano"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let port_str = format!(":{}", port);
+            for line in stdout.lines() {
+                if line.contains(&port_str) && line.contains("LISTENING") {
+                    if let Some(pid) = line.split_whitespace().last() {
+                        if pid.parse::<u32>().is_ok() {
+                            println!("Killing existing process {} on port {}", pid, port);
+                            let _ = Command::new("taskkill")
+                                .args(["/F", "/PID", pid])
+                                .output();
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // macOS and Linux: use lsof
+        if let Ok(output) = Command::new("lsof")
+            .args(["-ti", &format!(":{}", port)])
+            .output()
+        {
+            let pids = String::from_utf8_lossy(&output.stdout);
+            for pid in pids.lines() {
+                if let Ok(pid_num) = pid.trim().parse::<i32>() {
+                    println!("Killing existing process {} on port {}", pid_num, port);
+                    let _ = Command::new("kill").args(["-9", &pid_num.to_string()]).output();
+                }
             }
         }
     }
@@ -142,14 +166,19 @@ async fn start_tts_server(
 
         println!("Dev mode: Python dir: {:?}", python_dir);
 
-        // Use the virtual environment's Python
-        let venv_python = python_dir.join(".venv").join("bin").join("python");
+        // Use the virtual environment's Python (platform-aware path)
+        let venv_python = if cfg!(target_os = "windows") {
+            python_dir.join(".venv").join("Scripts").join("python.exe")
+        } else {
+            python_dir.join(".venv").join("bin").join("python")
+        };
+        let system_python = if cfg!(target_os = "windows") { "python" } else { "python3" };
         let python_cmd = if venv_python.exists() {
             println!("Using venv Python: {:?}", venv_python);
             venv_python.to_string_lossy().to_string()
         } else {
-            println!("Warning: venv not found, using system python3");
-            "python3".to_string()
+            println!("Warning: venv not found, using system {}", system_python);
+            system_python.to_string()
         };
 
         let mut child = Command::new(&python_cmd)
@@ -200,6 +229,33 @@ async fn start_tts_server(
                                 phase: "checking-models".to_string(),
                                 message: "Server ready, checking models...".to_string(),
                                 progress: 20,
+                            },
+                        );
+                    } else if line.contains("Downloading") || line.contains("downloading") {
+                        let _ = app_handle.emit(
+                            "sidecar-startup",
+                            StartupEvent {
+                                phase: "downloading".to_string(),
+                                message: "Downloading model files...".to_string(),
+                                progress: 40,
+                            },
+                        );
+                    } else if line.contains("Loading model") || line.contains("loading-model") {
+                        let _ = app_handle.emit(
+                            "sidecar-startup",
+                            StartupEvent {
+                                phase: "loading-model".to_string(),
+                                message: "Loading model into memory...".to_string(),
+                                progress: 70,
+                            },
+                        );
+                    } else if line.contains("Model loaded successfully") {
+                        let _ = app_handle.emit(
+                            "sidecar-startup",
+                            StartupEvent {
+                                phase: "ready".to_string(),
+                                message: "Model loaded and ready".to_string(),
+                                progress: 100,
                             },
                         );
                     }
@@ -289,6 +345,33 @@ async fn start_tts_server(
                                     progress: 20,
                                 },
                             );
+                        } else if line_str.contains("Downloading") || line_str.contains("downloading") {
+                            let _ = app_handle.emit(
+                                "sidecar-startup",
+                                StartupEvent {
+                                    phase: "downloading".to_string(),
+                                    message: "Downloading model files...".to_string(),
+                                    progress: 40,
+                                },
+                            );
+                        } else if line_str.contains("Loading model") || line_str.contains("loading-model") {
+                            let _ = app_handle.emit(
+                                "sidecar-startup",
+                                StartupEvent {
+                                    phase: "loading-model".to_string(),
+                                    message: "Loading model into memory...".to_string(),
+                                    progress: 70,
+                                },
+                            );
+                        } else if line_str.contains("Model loaded successfully") {
+                            let _ = app_handle.emit(
+                                "sidecar-startup",
+                                StartupEvent {
+                                    phase: "ready".to_string(),
+                                    message: "Model loaded and ready".to_string(),
+                                    progress: 100,
+                                },
+                            );
                         }
                     }
                     CommandEvent::Stderr(line) => {
@@ -374,7 +457,9 @@ fn get_sidecar_logs(
 pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init());
 
     // Add shell plugin for release mode sidecar support
     #[cfg(not(debug_assertions))]

@@ -113,7 +113,7 @@
             <LibraryItem
               {item}
               onUse={() => onUseVoice?.(item.id)}
-              onDelete={() => libraryStore.removeFromLibrary(item.id)}
+              onDelete={() => { libraryStore.removeFromLibrary(item.id); }}
             />
           {/each}
         </div>

@@ -36,7 +36,7 @@ describe('Header', () => {
 
   it('shows model indicator', () => {
     render(Header, { props: defaultProps });
-    expect(screen.getByText('1.7b')).toBeInTheDocument();
+    expect(screen.getByText('1.7B Custom')).toBeInTheDocument();
   });
 
   it('shows status badge', () => {

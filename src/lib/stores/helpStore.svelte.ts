@@ -4,19 +4,28 @@
 
 function createHelpStore() {
   let isOpen = $state(false);
+  let targetSection = $state<string | null>(null);
 
   return {
     get isOpen() {
       return isOpen;
     },
-    open() {
+    get targetSection() {
+      return targetSection;
+    },
+    open(sectionId?: string) {
       isOpen = true;
+      targetSection = sectionId ?? null;
     },
     close() {
       isOpen = false;
+      targetSection = null;
     },
     toggle() {
       isOpen = !isOpen;
+      if (!isOpen) {
+        targetSection = null;
+      }
     },
   };
 }

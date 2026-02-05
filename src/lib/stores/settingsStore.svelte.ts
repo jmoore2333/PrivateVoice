@@ -40,7 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   hasCompletedOnboarding: false,
 };
 
-const STORAGE_KEY = "qwen3-tts-settings";
+const STORAGE_KEY = "privatevoice-settings";
 
 function createSettingsStore() {
   let state = $state<Settings>(loadSettings());

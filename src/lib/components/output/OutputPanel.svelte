@@ -15,6 +15,7 @@
     onRegenerate?: () => void;
     onSave?: () => void;
     onExport?: () => void;
+    onCancel?: () => void;
     suggestion?: Suggestion | null;
   }
 
@@ -26,10 +27,16 @@
     onRegenerate,
     onSave,
     onExport,
+    onCancel,
     suggestion,
   }: Props = $props();
 
+  let waveformPlayer = $state<ReturnType<typeof WaveformPlayer>>();
   let showSuggestion = $state(true);
+
+  export function togglePlay() {
+    waveformPlayer?.playPause();
+  }
 
   function dismissSuggestion() {
     showSuggestion = false;
@@ -55,6 +62,14 @@
           "{generatingText}"
         </p>
       {/if}
+      {#if onCancel}
+        <button
+          class="mt-4 px-4 py-2 rounded-lg border border-[var(--color-border-default)] text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] transition-colors"
+          onclick={onCancel}
+        >
+          Cancel
+        </button>
+      {/if}
     </div>
 
   {:else if audioUrl}
@@ -62,7 +77,7 @@
     <div class="flex-1 flex flex-col">
       <div class="flex-1 flex items-center">
         <div class="w-full">
-          <WaveformPlayer {audioUrl} height={120} />
+          <WaveformPlayer bind:this={waveformPlayer} {audioUrl} height={120} />
         </div>
       </div>
 

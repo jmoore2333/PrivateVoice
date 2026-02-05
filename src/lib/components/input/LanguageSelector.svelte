@@ -28,12 +28,13 @@
 </script>
 
 <div class="space-y-2">
-  <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+  <div class="block text-sm font-medium text-[var(--color-text-primary)]">
     Language
-  </label>
+  </div>
 
   <select
     {value}
+    aria-label="Language"
     onchange={handleChange}
     class="w-full px-4 py-2.5 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors cursor-pointer"
   >

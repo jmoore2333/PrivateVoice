@@ -34,9 +34,9 @@
 
 <div class="space-y-3">
   <div class="flex items-center justify-between">
-    <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+    <div class="block text-sm font-medium text-[var(--color-text-primary)]">
       Voice
-    </label>
+    </div>
 
     <div class="flex gap-1 bg-[var(--color-bg-deep)] rounded-md p-0.5">
       <button

@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import StartupProgress from "./StartupProgress.svelte";
   import DownloadProgress from "./DownloadProgress.svelte";
   import StudioButton from "$lib/components/ui/StudioButton.svelte";
+  import { debugStore } from "$lib/stores/debugStore.svelte";
   import type { StartupPhase } from "$lib/stores/appStore.svelte";
 
   interface Props {
@@ -23,6 +25,47 @@
 
   const isDownloading = $derived(download?.status === "downloading");
   const isError = $derived(phase === "error");
+  let showDetails = $state(false);
+  let showRawLogs = $state(true);
+  let logsInterval: ReturnType<typeof setInterval> | null = null;
+
+  const recentLogs = $derived.by(() => {
+    const logs = showRawLogs ? debugStore.state.logs : debugStore.state.logs.filter((log) => {
+      const message = (log.message ?? "").toLowerCase();
+      return !(
+        message.includes("get /health") ||
+        message.includes("get /startup-status") ||
+        message.includes("get /model-status") ||
+        message.includes("get /download-progress") ||
+        message.includes("options /generate")
+      );
+    });
+    return logs.slice(-12);
+  });
+
+  $effect(() => {
+    if (showDetails) {
+      debugStore.fetchLogs(200, false);
+      if (!debugStore.state.systemInfo && !debugStore.state.isLoadingSystemInfo) {
+        debugStore.fetchSystemInfo();
+      }
+      if (!logsInterval) {
+        logsInterval = setInterval(() => {
+          debugStore.fetchLogs(200, false);
+        }, 2000);
+      }
+    } else if (logsInterval) {
+      clearInterval(logsInterval);
+      logsInterval = null;
+    }
+  });
+
+  onDestroy(() => {
+    if (logsInterval) {
+      clearInterval(logsInterval);
+      logsInterval = null;
+    }
+  });
 </script>
 
 <div
@@ -77,10 +120,10 @@
     </div>
 
     <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2 tracking-tight">
-      Qwen3-TTS
+      PrivateVoice
     </h1>
     <p class="text-sm text-[var(--color-text-secondary)] font-mono">
-      Text-to-speech for Apple Silicon
+      Local text-to-speech for Apple Silicon
     </p>
   </div>
 
@@ -88,6 +131,10 @@
   <div class="animate-slide-up stagger-2">
     <StartupProgress {phase} {message} {progress} />
   </div>
+
+  <p class="mt-3 text-xs text-[var(--color-text-muted)] font-mono">
+    First launch can take several minutes while the Python environment initializes and models download.
+  </p>
 
   <!-- Download progress (shown during model download) -->
   {#if isDownloading && download}
@@ -114,10 +161,52 @@
     </div>
   {/if}
 
+  <div class="mt-6 animate-slide-up">
+    <button
+      class="text-xs text-[var(--color-accent)] hover:underline"
+      onclick={() => showDetails = !showDetails}
+    >
+      {showDetails ? "Hide startup details" : "Show startup details"}
+    </button>
+  </div>
+
+  {#if showDetails}
+    <div class="mt-4 w-full max-w-xl p-4 rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] text-xs">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[var(--color-text-secondary)] font-medium">Startup Details</span>
+        {#if debugStore.state.systemInfo}
+          <span class="text-[var(--color-text-muted)]">
+            {debugStore.state.systemInfo.device_name} • {debugStore.state.systemInfo.memory_total_gb.toFixed(1)} GB
+          </span>
+        {/if}
+      </div>
+      <div class="mb-2 flex items-center justify-between">
+        <span class="text-[var(--color-text-muted)]">Live console output</span>
+        <button
+          class="text-[var(--color-accent)] hover:underline"
+          onclick={() => showRawLogs = !showRawLogs}
+        >
+          {showRawLogs ? "Show filtered" : "Show raw"}
+        </button>
+      </div>
+      {#if recentLogs.length === 0}
+        <p class="text-[var(--color-text-muted)]">Waiting for startup logs…</p>
+      {:else}
+        <div class="space-y-1 max-h-40 overflow-y-auto">
+          {#each recentLogs as log}
+            <div class="font-mono text-[var(--color-text-muted)]">
+              {log.timestamp.split("T")[1]?.slice(0, 8) ?? log.timestamp} {log.level} {log.message}
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Footer -->
   <div class="absolute bottom-6 text-center">
     <p class="text-xs text-[var(--color-text-muted)] font-mono">
-      Powered by Qwen3-TTS • MPS Accelerated
+      PrivateVoice v1.0.0 • Powered by Qwen3-TTS
     </p>
   </div>
 </div>

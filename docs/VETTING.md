@@ -1,8 +1,8 @@
 # Vetting Checklist
 
-Date: 2026-02-03
+Date: 2026-02-03 (initial), updated 2026-02-05
 Branch: codex/vetting-2026-02-03
-Models: 0.6B, 1.7B, 1.7B-Design
+Version: 1.0.0
 
 **Scope**
 - Validate production macOS build behavior and UX.
@@ -10,41 +10,57 @@ Models: 0.6B, 1.7B, 1.7B-Design
 - Validate feature parity between 0.6B and 1.7B.
 - Defer automated testing until after manual checkpoint.
 
-**Checklist**
+## Initial Manual Vetting (2026-02-03)
+
 | ID | Check | Expected | Result | Notes |
 | --- | --- | --- | --- | --- |
-| 1 | Production build launch | App opens, sidecar starts, loading screen clears | Blocked | Stuck at "Starting TTS Server" after several minutes; port 8765 shows a listener but `/health` is unreachable. |
-| 2 | First-run onboarding | Welcome shown once, model selection triggers download |  |  |
-| 3 | Model download progress | Status shows progress and completes |  |  |
-| 4 | Model switching | 0.6B <-> 1.7B switches cleanly |  |  |
-| 5 | Voice Design gating | Warning appears without 1.7B-Design |  |  |
-| 6 | Custom Voice (0.6B) | Generates audio, waveform renders, playback works |  |  |
-| 7 | Custom Voice (1.7B) | Generates audio, waveform renders, playback works |  |  |
-| 8 | Voice Clone Import (0.6B) | Import + transcript generates audio |  |  |
-| 9 | Voice Clone Import (1.7B) | Import + transcript generates audio |  |  |
-| 10 | Voice Clone Record (prod) | Mic prompt appears, live waveform, generate works |  |  |
-| 11 | Voice Clone error handling | Denied mic shows helpful error |  |  |
-| 12 | Voice Design (1.7B-Design) | Generates and plays audio |  |  |
-| 13 | Export | WAV saved with correct filename format |  |  |
-| 14 | Library | Save/recents persist and play after relaunch |  |  |
-| 15 | Settings persistence | Theme, defaults, auto-load persist |  |  |
-| 16 | Debug console | Logs and system info visible |  |  |
-| 17 | Keyboard shortcuts | Cmd+Enter, Cmd+S, Cmd+1/2/3, Space work |  |  |
-| 18 | Offline after download | Works without network once models cached |  |  |
+| 1 | Production build launch | App opens, sidecar starts, loading screen clears | Partial | Launches; startup details view added, but logs don't appear during startup. |
+| 2 | First-run onboarding | Welcome shown once, model selection triggers download |  | Not observed in this run. |
+| 3 | Model download progress | Status shows progress and completes | Partial | Downloads happen but user-facing progress is unclear. |
+| 4 | Model switching | 0.6B <-> 1.7B switches cleanly | Partial | Switching works; long waits with minimal feedback. |
+| 5 | Voice Design gating | Warning appears without 1.7B-Design | Pass | Warning + load required model works. |
+| 6 | Custom Voice (0.6B) | Generates audio, waveform renders, playback works | Pass | Works. |
+| 7 | Custom Voice (1.7B) | Generates audio, waveform renders, playback works |  | Not re-tested. |
+| 8 | Voice Clone Import (0.6B) | Import + transcript generates audio | Pass | Works with 0.6B Base model. |
+| 9 | Voice Clone Import (1.7B) | Import + transcript generates audio | Pass | Works with 1.7B Base model. |
+| 10 | Voice Clone Record (prod) | Mic prompt appears, live waveform, generate works | Pass | Recording works; playback added; generate works. |
+| 11 | Voice Clone error handling | Denied mic shows helpful error |  | Not tested. |
+| 12 | Voice Design (1.7B-Design) | Generates and plays audio | Pass | Generates expected audio. |
+| 13 | Export | WAV/MP3 saved with correct filename format |  | Needs production build test. |
+| 14 | Library | Save/recents persist and play after relaunch |  | Needs production build test. |
+| 15 | Settings persistence | Theme, defaults, auto-load persist |  | Needs production build test. |
+| 16 | Debug console | Logs and system info visible | Partial | Logs visible. |
+| 17 | Keyboard shortcuts | Cmd+Enter, Cmd+S, Cmd+1/2/3, Space work |  | Needs testing. |
+| 18 | Offline after download | Works without network once models cached |  | Needs testing. |
 
-**Known Gaps To Confirm**
-- Voice Clone low-quality mode may still require transcript.
-- Auto-transcribe toggle is present but Whisper is disabled in UI.
-- Language selector may not affect backend generation.
-- Export folder setting is display-only for now.
+## Fixes Applied (2026-02-05)
 
-**Follow-ups**
-- Update docs to match backend entrypoint and build outputs.
-- Add or adjust automated tests based on manual findings.
-- Decide on MP3 export approach.
+| Issue | Fix | Phase |
+|-------|-----|-------|
+| Voice Clone low-quality mode crashed (missing `x_vector_only_mode` param) | Added param to `inference.py:generate_voice_clone()` | 1.1 |
+| `[object Object]` error display | `ttsClient.ts:readErrorMessage()` handles all FastAPI error shapes | 1.2 |
+| Language selector not wired to backend | Threaded language through UI → store → client → API → inference | 1.3 |
+| Mode switch preserved stale audio | `setMode()` revokes URL, clears blob/error | 1.4 |
+| Startup logs overwritten by empty API response | Changed `fetchLogs` to `replace: false` during startup | 2.1 |
+| `pad_token_id` warning noise | Set `pad_token_id = eos_token_id` after model load | 2.3 |
+| Space bar play/pause not wired | Added `playPause()` export to WaveformPlayer, wired via OutputPanel | 3.1 |
+| "Use Voice" from library not implemented | Implemented full metadata restore on library item use | 3.2 |
+| Export used browser download hack | Native Tauri save dialog with browser fallback | 4.1 |
+| Library lost audio on restart (localStorage) | File-based persistence via Tauri FS plugin | 4.2 |
+| Export folder setting was display-only | Browse button with native directory picker | 4.3 |
+| No MP3 export | lameenc-based MP3 encoding, format param through full stack | MP3 |
+| No input validation | Text max 2000 chars, audio max 50MB | 5.1 |
+| No generation cancel | AbortController + 5-min timeout, Cancel button | 5.2 |
+| Hardcoded system info in Settings | Reactive values from `debugStore.state.systemInfo` | 5.3 |
+| No CUDA detection | MPS > CUDA > CPU priority in device.py | 7.1 |
+| Platform-specific code hardcoded for macOS | Abstracted paths and process management in lib.rs | 7.2 |
+| Build scripts macOS-only | OS detection in build_sidecar.sh, dynamic arch in .spec | 7.3 |
+| Whisper/Translation toggles appeared functional but did nothing | Replaced with disabled "Coming Soon" state | UI cleanup |
 
-**Testing Notes**
-- Consider a one-click option to download all three models.
-- Show GPU/CPU status on the startup screen, with guidance on which models are recommended and the risks of CPU-only mode.
-- Add a first-run note that initial startup can take several minutes while the Python environment initializes and models download.
-- The loading screen feels slow and non-descriptive; consider an optional debug/console view to show live startup details, especially for cross-platform rollout (macOS first, then Windows, then Linux).
+## Known Limitations (v1.0.0)
+
+- **Whisper auto-transcription**: Settings toggle exists but disabled (coming in future release)
+- **Translation support**: Settings toggle exists but disabled (coming in future release)
+- **Cross-platform**: Device detection and build scripts support CUDA/Windows/Linux but not yet tested on those platforms
+- **MP3 quality**: Fixed at 192kbps, not configurable
+- **Library in dev mode**: Falls back to localStorage (metadata only, no audio persistence)

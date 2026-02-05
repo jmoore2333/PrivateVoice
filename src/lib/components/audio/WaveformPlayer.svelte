@@ -92,6 +92,7 @@
   // Exported methods for parent components
   export function play() { wavesurfer?.play(); }
   export function pause() { wavesurfer?.pause(); }
+  export function playPause() { wavesurfer?.playPause(); }
   export function stop() { wavesurfer?.stop(); }
 </script>
 

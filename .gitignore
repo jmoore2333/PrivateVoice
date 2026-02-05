@@ -55,6 +55,7 @@ logs/
 src-tauri/target/
 src-tauri/WixTools/
 src-tauri/bin/
+src-tauri/binaries/
 
 # Models (downloaded at runtime)
 models/

@@ -1,12 +1,14 @@
-"""Device and dtype detection for Apple Silicon MPS."""
+"""Device and dtype detection for Apple Silicon MPS, CUDA, and CPU."""
 
 import torch
 import platform
+import logging
 from dataclasses import dataclass
 from typing import Literal, Union
 
-DeviceType = Literal["mps", "cpu"]
-DtypeType = Literal["float16", "float32"]
+logger = logging.getLogger("tts_server")
+
+DeviceType = Literal["mps", "cuda", "cpu"]
 
 
 @dataclass
@@ -22,7 +24,7 @@ def get_device_config() -> DeviceConfig:
     """
     Detect the best device configuration for the current system.
 
-    Returns MPS config on Apple Silicon, CPU fallback otherwise.
+    Priority: MPS (Apple Silicon) > CUDA (NVIDIA GPU) > CPU.
     """
     # Check if we're on Apple Silicon
     is_apple_silicon = (
@@ -31,16 +33,33 @@ def get_device_config() -> DeviceConfig:
     )
 
     if is_apple_silicon and torch.backends.mps.is_available():
+        logger.info("Using MPS (Apple Silicon) device")
         return DeviceConfig(
             device="mps",
-            # M4 fully supports bfloat16 (better than float16 which has nan/inf issues)
             dtype=torch.bfloat16,
-            # Flash attention not available on MPS, use SDPA
             attn_implementation="sdpa",
             device_map="mps"
         )
+    elif torch.cuda.is_available():
+        # Select dtype based on GPU compute capability
+        capability = torch.cuda.get_device_capability()
+        # bfloat16 requires compute capability >= 8.0 (Ampere+)
+        if capability[0] >= 8:
+            dtype = torch.bfloat16
+            attn = "flash_attention_2"
+        else:
+            dtype = torch.float16
+            attn = "sdpa"
+        device_name = torch.cuda.get_device_name(0)
+        logger.info(f"Using CUDA device: {device_name} (compute {capability[0]}.{capability[1]})")
+        return DeviceConfig(
+            device="cuda",
+            dtype=dtype,
+            attn_implementation=attn,
+            device_map="auto"
+        )
     else:
-        # CPU fallback
+        logger.info("Using CPU device (no GPU acceleration available)")
         return DeviceConfig(
             device="cpu",
             dtype=torch.float32,
@@ -51,16 +70,32 @@ def get_device_config() -> DeviceConfig:
 
 def get_memory_info() -> dict:
     """Get memory information for the current device."""
-    info = {
+    info: dict = {
         "device": "unknown",
         "total_gb": 0,
         "available_gb": 0,
     }
 
-    if torch.backends.mps.is_available():
+    if torch.cuda.is_available():
+        info["device"] = "cuda"
+        try:
+            total = torch.cuda.get_device_properties(0).total_mem
+            free = total - torch.cuda.memory_allocated(0)
+            info["total_gb"] = round(total / (1024**3), 2)
+            info["available_gb"] = round(free / (1024**3), 2)
+        except Exception:
+            pass
+    elif torch.backends.mps.is_available():
         info["device"] = "mps"
-        # MPS doesn't have direct memory query API like CUDA
-        # We can use system memory as a proxy
+        try:
+            import psutil
+            mem = psutil.virtual_memory()
+            info["total_gb"] = round(mem.total / (1024**3), 2)
+            info["available_gb"] = round(mem.available / (1024**3), 2)
+        except ImportError:
+            pass
+    else:
+        info["device"] = "cpu"
         try:
             import psutil
             mem = psutil.virtual_memory()

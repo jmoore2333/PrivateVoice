@@ -1,6 +1,8 @@
 <script lang="ts">
   import TextInput from './TextInput.svelte';
   import LanguageSelector from './LanguageSelector.svelte';
+  import { helpStore } from '$lib/stores/helpStore.svelte';
+  const descriptionId = "voice-design-description";
 
   interface Props {
     text: string;
@@ -9,6 +11,7 @@
     isGenerating: boolean;
     modelLoaded: boolean;
     modelLoading: boolean;
+    recommendedModelLabel?: string;
     onGenerate: () => void;
     onLoadModel: () => void;
     onTextChange?: (text: string) => void;
@@ -23,6 +26,7 @@
     isGenerating,
     modelLoaded,
     modelLoading,
+    recommendedModelLabel = "1.7B Design",
     onGenerate,
     onLoadModel,
     onTextChange,
@@ -55,7 +59,7 @@
             disabled={modelLoading}
             onclick={onLoadModel}
           >
-            {modelLoading ? 'Loading model...' : 'Load required model'}
+            {modelLoading ? 'Loading model...' : `Load ${recommendedModelLabel}`}
           </button>
         </div>
       </div>
@@ -65,18 +69,23 @@
   <!-- Voice Description -->
   <div class="space-y-2">
     <div class="flex items-center gap-2">
-      <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+      <label
+        class="block text-sm font-medium text-[var(--color-text-primary)]"
+        for={descriptionId}
+      >
         Voice description
       </label>
       <button
         class="w-4 h-4 rounded-full bg-[var(--color-bg-hover)] text-[var(--color-text-muted)] text-xs"
         title="Describe the voice you want to create: gender, age, tone, accent, emotion, etc."
+        onclick={() => helpStore.open('voice-design')}
       >
         ?
       </button>
     </div>
 
     <textarea
+      id={descriptionId}
       bind:value={voiceDescription}
       oninput={(e) => onDescriptionChange?.((e.target as HTMLTextAreaElement).value)}
       placeholder="e.g., Warm baritone male voice, slight British accent, calm and reassuring tone, sounds like a nature documentary narrator..."
@@ -97,6 +106,7 @@
     onInput={onTextChange}
     label="Text to generate"
     placeholder="Enter the text you want the designed voice to speak..."
+    maxLength={2000}
   />
 
   <LanguageSelector
@@ -107,7 +117,7 @@
   <!-- Generate Button -->
   <button
     class="w-full py-3 rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-    disabled={!canGenerate || isGenerating}
+    disabled={!canGenerate || isGenerating || modelLoading}
     onclick={onGenerate}
   >
     {isGenerating ? 'Generating...' : 'Generate'}

@@ -1,4 +1,4 @@
-"""FastAPI server for Qwen3-TTS."""
+"""PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
 import os
 import platform
@@ -48,15 +48,26 @@ class LoadModelRequest(BaseModel):
     model_id: str = "0.6b"
 
 
+MAX_TEXT_LENGTH = 2000
+MAX_AUDIO_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+SUPPORTED_FORMATS = ("wav", "mp3")
+
+
 class CustomVoiceRequest(BaseModel):
     text: str
     speaker: str = "serena"
     instruction: str = ""
+    language: str = "english"
+    format: str = "wav"
 
 
 class VoiceDesignRequest(BaseModel):
     text: str
     voice_description: str
+    language: str = "english"
+    format: str = "wav"
 
 
 class StartupStatusResponse(BaseModel):
@@ -147,9 +158,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Qwen3-TTS Server",
-    description="Text-to-speech server for Apple Silicon",
-    version="0.1.0",
+    title="PrivateVoice Server",
+    description="Local text-to-speech server powered by Qwen3-TTS",
+    version="1.0.0",
     lifespan=lifespan,
 )
 
@@ -170,7 +181,7 @@ app.add_middleware(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check server health."""
-    return HealthResponse(status="ok", version="0.1.0")
+    return HealthResponse(status="ok", version="1.0.0")
 
 
 @app.get("/startup-status", response_model=StartupStatusResponse)
@@ -330,14 +341,21 @@ async def generate_custom_voice(request: CustomVoiceRequest):
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if len(request.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
+
+    fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+
     try:
-        logger.info(f"Generating custom voice: speaker={request.speaker}, text={request.text[:50]}...")
-        audio_bytes = model.generate_custom_voice(
+        logger.info(f"Generating custom voice: speaker={request.speaker}, lang={request.language}, fmt={fmt}, text={request.text[:50]}...")
+        audio_bytes, media_type = model.generate_custom_voice(
             text=request.text,
             speaker=request.speaker,
             instruction=request.instruction,
+            language=request.language,
+            output_format=fmt,
         )
-        return Response(content=audio_bytes, media_type="audio/wav")
+        return Response(content=audio_bytes, media_type=media_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -348,8 +366,11 @@ async def generate_custom_voice(request: CustomVoiceRequest):
 @app.post("/generate/voice-clone")
 async def generate_voice_clone(
     text: str = Form(...),
-    reference_text: str = Form(...),
+    reference_text: str = Form(""),
     reference_audio: UploadFile = File(...),
+    x_vector_only_mode: bool = Form(False),
+    language: str = Form("english"),
+    format: str = Form("wav"),
 ):
     """Generate speech by cloning a reference voice."""
     model = get_model()
@@ -357,15 +378,29 @@ async def generate_voice_clone(
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if len(text) > MAX_TEXT_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
+
+    fmt = format if format in SUPPORTED_FORMATS else "wav"
+
     try:
-        logger.info(f"Generating voice clone: text={text[:50]}...")
+        logger.info(f"Generating voice clone: lang={language}, fmt={fmt}, text={text[:50]}...")
         audio_data = await reference_audio.read()
-        audio_bytes = model.generate_voice_clone(
+        if len(audio_data) > MAX_AUDIO_SIZE:
+            raise HTTPException(status_code=400, detail=f"Reference audio exceeds maximum size of {MAX_AUDIO_SIZE // (1024*1024)} MB")
+        if not x_vector_only_mode and not reference_text:
+            raise HTTPException(status_code=400, detail="Reference text is required unless low-quality mode is enabled.")
+        audio_bytes, media_type = model.generate_voice_clone(
             text=text,
             reference_audio=audio_data,
             reference_text=reference_text,
+            language=language,
+            x_vector_only_mode=x_vector_only_mode,
+            output_format=fmt,
         )
-        return Response(content=audio_bytes, media_type="audio/wav")
+        return Response(content=audio_bytes, media_type=media_type)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Voice clone failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -379,13 +414,20 @@ async def generate_voice_design(request: VoiceDesignRequest):
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if len(request.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
+
+    fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+
     try:
-        logger.info(f"Generating voice design: desc={request.voice_description[:50]}...")
-        audio_bytes = model.generate_voice_design(
+        logger.info(f"Generating voice design: lang={request.language}, fmt={fmt}, desc={request.voice_description[:50]}...")
+        audio_bytes, media_type = model.generate_voice_design(
             text=request.text,
             voice_description=request.voice_description,
+            language=request.language,
+            output_format=fmt,
         )
-        return Response(content=audio_bytes, media_type="audio/wav")
+        return Response(content=audio_bytes, media_type=media_type)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

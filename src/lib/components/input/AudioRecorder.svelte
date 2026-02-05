@@ -19,6 +19,7 @@
   let recordingTime = $state(0);
   let error = $state<string | null>(null);
   let microphoneSupported = $state(true);
+  let isPlaying = $state(false);
 
   onMount(() => {
     // Check if microphone recording is supported
@@ -36,6 +37,18 @@
       height: 60,
       barWidth: 2,
       barGap: 1,
+    });
+
+    wavesurfer.on('play', () => {
+      isPlaying = true;
+    });
+
+    wavesurfer.on('pause', () => {
+      isPlaying = false;
+    });
+
+    wavesurfer.on('finish', () => {
+      isPlaying = false;
     });
 
     // Only create RecordPlugin if microphone is supported
@@ -62,6 +75,7 @@
         const url = URL.createObjectURL(blob);
         recordedUrl = url;
         hasRecording = true;
+        wavesurfer?.load(url);
         onRecordingComplete?.(blob, url);
       });
     }
@@ -131,6 +145,12 @@
     hasRecording = false;
     recordedUrl = null;
     wavesurfer?.empty();
+    isPlaying = false;
+  }
+
+  function togglePlayback() {
+    if (!wavesurfer || !recordedUrl) return;
+    wavesurfer.playPause();
   }
 
   function formatTime(seconds: number): string {
@@ -141,9 +161,9 @@
 </script>
 
 <div class="space-y-3">
-  <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+  <div class="block text-sm font-medium text-[var(--color-text-primary)]">
     Reference Audio
-  </label>
+  </div>
 
   <!-- Microphone not supported message -->
   {#if !microphoneSupported}
@@ -216,6 +236,12 @@
     </label>
 
     {#if hasRecording}
+      <button
+        class="px-3 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
+        onclick={togglePlayback}
+      >
+        {isPlaying ? 'Pause' : 'Play'}
+      </button>
       <button
         class="px-3 py-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors"
         onclick={clearRecording}

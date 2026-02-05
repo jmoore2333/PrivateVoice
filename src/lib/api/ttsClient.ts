@@ -63,11 +63,15 @@ export interface CustomVoiceRequest {
   text: string;
   speaker: string;
   instruction?: string;
+  language?: string;
+  format?: string;
 }
 
 export interface VoiceDesignRequest {
   text: string;
   voice_description: string;
+  language?: string;
+  format?: string;
 }
 
 export const PRESET_SPEAKERS = [
@@ -84,11 +88,65 @@ export const PRESET_SPEAKERS = [
 
 export type Speaker = (typeof PRESET_SPEAKERS)[number];
 
+const GENERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
 class TTSClient {
   private baseUrl: string;
+  private _abortController: AbortController | null = null;
 
   constructor(baseUrl: string = BASE_URL) {
     this.baseUrl = baseUrl;
+  }
+
+  /** Create a signal for generation requests with timeout + manual abort. */
+  private createGenerationSignal(): AbortSignal {
+    this._abortController = new AbortController();
+    const timeoutId = setTimeout(() => this._abortController?.abort("Generation timed out"), GENERATION_TIMEOUT_MS);
+    // Clear timeout when signal aborts (manual or timeout)
+    this._abortController.signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+    return this._abortController.signal;
+  }
+
+  /** Abort the current generation request. */
+  abortGeneration(): void {
+    this._abortController?.abort("Generation cancelled");
+    this._abortController = null;
+  }
+
+  get isGenerating(): boolean {
+    return this._abortController !== null;
+  }
+
+  private async readErrorMessage(res: Response, fallback: string): Promise<string> {
+    try {
+      const data = await res.json();
+      const detail = (data as { detail?: unknown })?.detail;
+      if (typeof detail === "string") return detail;
+      if (Array.isArray(detail)) {
+        const messages = detail
+          .map((item) => {
+            if (!item) return null;
+            if (typeof item === "string") return item;
+            if (typeof item === "object" && "msg" in item) {
+              const msg = (item as { msg?: string }).msg;
+              return msg ?? null;
+            }
+            return null;
+          })
+          .filter(Boolean);
+        if (messages.length) return messages.join("; ");
+      }
+      if (detail && typeof detail === "object") {
+        const obj = detail as Record<string, unknown>;
+        if (typeof obj.message === "string") return obj.message;
+        if (typeof obj.msg === "string") return obj.msg;
+        return JSON.stringify(detail);
+      }
+      if (detail) return String(detail);
+      return fallback;
+    } catch {
+      return fallback;
+    }
   }
 
   // ============================================================================
@@ -103,7 +161,11 @@ class TTSClient {
 
   async getStartupStatus(): Promise<StartupStatus> {
     const res = await fetch(`${this.baseUrl}/startup-status`);
-    if (!res.ok) throw new Error("Failed to get startup status");
+    if (!res.ok) {
+      const error = new Error("Failed to get startup status") as Error & { status?: number };
+      error.status = res.status;
+      throw error;
+    }
     return res.json();
   }
 
@@ -173,8 +235,7 @@ class TTSClient {
       body: JSON.stringify({ model_id: modelId }),
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to load model");
+      throw new Error(await this.readErrorMessage(res, "Failed to load model"));
     }
   }
 
@@ -190,50 +251,69 @@ class TTSClient {
   // ============================================================================
 
   async generateCustomVoice(request: CustomVoiceRequest): Promise<Blob> {
-    const res = await fetch(`${this.baseUrl}/generate/custom-voice`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to generate audio");
+    const signal = this.createGenerationSignal();
+    try {
+      const res = await fetch(`${this.baseUrl}/generate/custom-voice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal,
+      });
+      if (!res.ok) {
+        throw new Error(await this.readErrorMessage(res, "Failed to generate audio"));
+      }
+      return res.blob();
+    } finally {
+      this._abortController = null;
     }
-    return res.blob();
   }
 
   async generateVoiceClone(
     text: string,
     referenceText: string,
-    referenceAudio: File
+    referenceAudio: File,
+    options?: { xVectorOnly?: boolean; language?: string; format?: string }
   ): Promise<Blob> {
+    const signal = this.createGenerationSignal();
     const formData = new FormData();
     formData.append("text", text);
-    formData.append("reference_text", referenceText);
+    formData.append("reference_text", referenceText ?? "");
     formData.append("reference_audio", referenceAudio);
+    formData.append("x_vector_only_mode", options?.xVectorOnly ? "true" : "false");
+    if (options?.language) formData.append("language", options.language);
+    if (options?.format) formData.append("format", options.format);
 
-    const res = await fetch(`${this.baseUrl}/generate/voice-clone`, {
-      method: "POST",
-      body: formData,
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to generate audio");
+    try {
+      const res = await fetch(`${this.baseUrl}/generate/voice-clone`, {
+        method: "POST",
+        body: formData,
+        signal,
+      });
+      if (!res.ok) {
+        throw new Error(await this.readErrorMessage(res, "Failed to generate audio"));
+      }
+      return res.blob();
+    } finally {
+      this._abortController = null;
     }
-    return res.blob();
   }
 
   async generateVoiceDesign(request: VoiceDesignRequest): Promise<Blob> {
-    const res = await fetch(`${this.baseUrl}/generate/voice-design`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Failed to generate audio");
+    const signal = this.createGenerationSignal();
+    try {
+      const res = await fetch(`${this.baseUrl}/generate/voice-design`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal,
+      });
+      if (!res.ok) {
+        throw new Error(await this.readErrorMessage(res, "Failed to generate audio"));
+      }
+      return res.blob();
+    } finally {
+      this._abortController = null;
     }
-    return res.blob();
   }
 
   // ============================================================================

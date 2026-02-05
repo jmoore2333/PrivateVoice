@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { libraryStore } from './libraryStore.svelte';
 
 describe('libraryStore', () => {
-  beforeEach(() => {
-    libraryStore.clearAll();
+  beforeEach(async () => {
+    await libraryStore.clearAll();
   });
 
   it('starts with empty recent and saved lists', () => {
@@ -35,8 +35,8 @@ describe('libraryStore', () => {
     expect(libraryStore.recent.length).toBe(10);
   });
 
-  it('saves item to library', () => {
-    libraryStore.saveToLibrary({
+  it('saves item to library', async () => {
+    await libraryStore.saveToLibrary({
       id: '1',
       type: 'clone',
       name: 'My Voice',
@@ -47,27 +47,27 @@ describe('libraryStore', () => {
     expect(libraryStore.saved.length).toBe(1);
   });
 
-  it('removes item from library', () => {
-    libraryStore.saveToLibrary({
+  it('removes item from library', async () => {
+    await libraryStore.saveToLibrary({
       id: '1',
       type: 'clone',
       name: 'My Voice',
       audioUrl: 'blob:test',
       createdAt: new Date(),
     });
-    libraryStore.removeFromLibrary('1');
+    await libraryStore.removeFromLibrary('1');
     expect(libraryStore.saved.length).toBe(0);
   });
 
-  it('updates item in library', () => {
-    libraryStore.saveToLibrary({
+  it('updates item in library', async () => {
+    await libraryStore.saveToLibrary({
       id: '1',
       type: 'clone',
       name: 'Original Name',
       audioUrl: 'blob:test',
       createdAt: new Date(),
     });
-    libraryStore.updateItem('1', { name: 'Updated Name' });
+    await libraryStore.updateItem('1', { name: 'Updated Name' });
     expect(libraryStore.saved[0].name).toBe('Updated Name');
   });
 });

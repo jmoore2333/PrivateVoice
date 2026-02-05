@@ -54,11 +54,21 @@ function createDebugStore() {
     state.logs = [...state.logs, ...debugEntries].slice(-MAX_LOGS);
   }
 
-  async function fetchLogs(count: number = 100) {
+  async function fetchLogs(count: number = 100, replace: boolean = false) {
     state.isLoading = true;
     try {
       const logs = await ttsClient.getLogs(count);
-      addLogs(logs);
+      if (replace) {
+        if (logs.length > 0) {
+          const debugEntries = logs.map((entry) => ({
+            ...entry,
+            id: logIdCounter++,
+          }));
+          state.logs = debugEntries.slice(-MAX_LOGS);
+        }
+      } else {
+        addLogs(logs);
+      }
     } catch (e) {
       console.error("Failed to fetch logs:", e);
     } finally {

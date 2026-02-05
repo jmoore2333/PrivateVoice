@@ -3,12 +3,14 @@
   import StudioButton from "$lib/components/ui/StudioButton.svelte";
   import StudioSelect from "$lib/components/ui/StudioSelect.svelte";
   import { PRESET_SPEAKERS } from "$lib/api/ttsClient";
+  import { MODEL_OPTIONS } from "$lib/stores/ttsStore.svelte";
+  import { debugStore } from "$lib/stores/debugStore.svelte";
 
-  const MODELS = [
-    { value: "0.6b", label: "0.6B", description: "Fast" },
-    { value: "1.7b", label: "1.7B", description: "Quality" },
-    { value: "1.7b-design", label: "1.7B Design", description: "Voice Design" },
-  ];
+  const MODELS = MODEL_OPTIONS.map((model) => ({
+    value: model.id,
+    label: model.label,
+    description: model.description,
+  }));
 
   const THEMES = [
     { value: "dark", label: "Dark" },
@@ -18,8 +20,7 @@
 
   const EXPORT_FORMATS = [
     { value: "wav", label: "WAV", description: "Lossless" },
-    // MP3 export requires backend encoding support (coming soon)
-    // { value: "mp3", label: "MP3", description: "Compressed" },
+    { value: "mp3", label: "MP3", description: "Compressed (192kbps)" },
   ];
 
   const CACHE_SIZES = [
@@ -58,12 +59,26 @@
     };
   }
 
-  // Static system info (can be enhanced later with actual detection)
-  const systemInfo = {
-    device: "MPS (Apple Silicon)",
-    memory: "16 GB",
-    isCPU: false,
-  };
+  const deviceLabel = $derived(debugStore.state.systemInfo?.device_name ?? "Detecting...");
+  const memoryLabel = $derived(
+    debugStore.state.systemInfo
+      ? `${debugStore.state.systemInfo.memory_total_gb.toFixed(1)} GB`
+      : "Detecting..."
+  );
+  const isCPU = $derived(debugStore.state.systemInfo?.device === "cpu");
+  const cacheDir = $derived(debugStore.state.systemInfo?.cache_dir ?? "~/.cache/huggingface/hub");
+
+  async function browseExportFolder() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, title: "Choose Export Folder" });
+      if (selected) {
+        settingsStore.updateSetting("exportFolder", selected as string);
+      }
+    } catch {
+      // Not in Tauri — ignore
+    }
+  }
 </script>
 
 {#if settingsStore.isOpen}
@@ -117,15 +132,27 @@
           Audio
         </h3>
         <div class="space-y-4">
-          <!-- Export folder (read-only) -->
+          <!-- Export folder with Browse -->
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
               Export Folder
-            </label>
-            <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
-              <span class="text-sm text-[var(--color-text-muted)] font-mono">
-                {settingsStore.state.exportFolder}
-              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="flex-1 p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] min-w-0">
+                <span class="text-sm text-[var(--color-text-muted)] font-mono truncate block">
+                  {settingsStore.state.exportFolder}
+                </span>
+              </div>
+              <button
+                onclick={browseExportFolder}
+                class="shrink-0 px-3 py-3 rounded-lg text-sm font-medium
+                  bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]
+                  text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]
+                  hover:bg-[var(--color-bg-hover)] transition-colors"
+                aria-label="Browse for export folder"
+              >
+                Browse
+              </button>
             </div>
           </div>
 
@@ -162,16 +189,16 @@
           <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
             <div class="flex justify-between items-center">
               <span class="text-sm text-[var(--color-text-secondary)]">GPU</span>
-              <span class="text-sm font-medium text-[var(--color-text-primary)]">{systemInfo.device}</span>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">{deviceLabel}</span>
             </div>
           </div>
           <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
             <div class="flex justify-between items-center">
               <span class="text-sm text-[var(--color-text-secondary)]">Memory</span>
-              <span class="text-sm font-medium text-[var(--color-text-primary)]">{systemInfo.memory}</span>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">{memoryLabel}</span>
             </div>
           </div>
-          {#if systemInfo.isCPU}
+          {#if isCPU}
             <div class="p-3 rounded-lg bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)]">
               <div class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-[var(--color-warning)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -184,53 +211,39 @@
         </div>
       </section>
 
-      <!-- Optional Features Section -->
+      <!-- Optional Features Section (Coming Soon) -->
       <section>
         <h3 class="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-3">
           Optional Features
         </h3>
         <div class="space-y-3">
-          <!-- Toggle: Whisper transcription -->
-          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+          <!-- Whisper transcription (coming soon) -->
+          <div class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] opacity-60">
             <div>
               <span class="text-sm font-medium text-[var(--color-text-primary)]">Auto-transcription</span>
-              <p class="text-xs text-[var(--color-text-muted)]">Use Whisper for automatic transcription</p>
+              <p class="text-xs text-[var(--color-text-muted)]">Whisper integration — coming in a future update</p>
             </div>
-            <button
-              onclick={handleToggle("enableWhisper")}
-              class="relative w-11 h-6 rounded-full transition-colors
-                {settingsStore.state.enableWhisper ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
-              role="switch"
-              aria-checked={settingsStore.state.enableWhisper}
-              aria-label="Toggle auto-transcription"
+            <div
+              class="relative w-11 h-6 rounded-full bg-[var(--color-bg-hover)] cursor-not-allowed"
+              title="Coming soon"
             >
-              <span
-                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
-                  {settingsStore.state.enableWhisper ? 'translate-x-5' : ''}"
-              ></span>
-            </button>
-          </label>
+              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white/50 shadow"></span>
+            </div>
+          </div>
 
-          <!-- Toggle: Translation support -->
-          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+          <!-- Translation support (coming soon) -->
+          <div class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] opacity-60">
             <div>
               <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation support</span>
-              <p class="text-xs text-[var(--color-text-muted)]">Enable translation features</p>
+              <p class="text-xs text-[var(--color-text-muted)]">Cross-language translation — coming in a future update</p>
             </div>
-            <button
-              onclick={handleToggle("enableTranslation")}
-              class="relative w-11 h-6 rounded-full transition-colors
-                {settingsStore.state.enableTranslation ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
-              role="switch"
-              aria-checked={settingsStore.state.enableTranslation}
-              aria-label="Toggle translation support"
+            <div
+              class="relative w-11 h-6 rounded-full bg-[var(--color-bg-hover)] cursor-not-allowed"
+              title="Coming soon"
             >
-              <span
-                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
-                  {settingsStore.state.enableTranslation ? 'translate-x-5' : ''}"
-              ></span>
-            </button>
-          </label>
+              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white/50 shadow"></span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -306,12 +319,12 @@
 
           <!-- Model cache location (read-only) -->
           <div class="flex flex-col gap-1.5">
-            <label class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
+            <div class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
               Model Cache Location
-            </label>
+            </div>
             <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
               <span class="text-sm text-[var(--color-text-muted)] font-mono">
-                ~/.cache/huggingface/hub
+                {cacheDir}
               </span>
             </div>
           </div>
@@ -327,7 +340,7 @@
           <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
             <div class="flex justify-between items-center mb-2">
               <span class="text-sm font-medium text-[var(--color-text-primary)]">PrivateVoice</span>
-              <span class="text-sm text-[var(--color-text-muted)]">v0.1.0</span>
+              <span class="text-sm text-[var(--color-text-muted)]">v1.0.0</span>
             </div>
             <div class="flex flex-wrap gap-2">
               <a href="https://github.com/jmoore2333/PrivateVoice" target="_blank"
@@ -358,7 +371,7 @@
     <!-- Footer -->
     <div class="sticky bottom-0 p-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
       <p class="text-xs text-[var(--color-text-muted)] text-center">
-        PrivateVoice v0.1.0
+        PrivateVoice v1.0.0
       </p>
     </div>
   </div>

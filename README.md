@@ -12,6 +12,13 @@ PrivateVoice is a self-contained desktop application that runs Qwen3-TTS locally
 - **Fully Local**: All processing happens on your Mac - no internet required after model download
 - **Native App**: Fast, responsive macOS app built with Tauri
 
+## Tech Stack
+
+- Frontend: Svelte 5 + Tailwind CSS 4 + TypeScript
+- Desktop: Tauri 2 (Rust)
+- Backend: Python FastAPI sidecar with Qwen3-TTS
+- Testing: Vitest (unit) + Playwright (E2E)
+
 ## Requirements
 
 - macOS 12.3+ on Apple Silicon (M1/M2/M3/M4)
@@ -45,13 +52,78 @@ Download the latest `.dmg` from [Releases](https://github.com/your-repo/releases
 | `Cmd+1/2/3` | Switch modes |
 | `Escape` | Close panels |
 
-## Available Models
+## Model List (Qwen3-TTS)
 
-| Model | Size | Use Case | Modes |
-|-------|------|----------|-------|
-| 0.6B | ~1.2GB | Fast generation | Custom Voice, Voice Clone |
-| 1.7B | ~3.4GB | Higher quality | Custom Voice, Voice Clone |
-| 1.7B-Design | ~3.4GB | Voice design | Voice Design only |
+### 1.7B Models
+
+| Model | Features | Language Support | Streaming | Instruction Control |
+|------|----------|------------------|-----------|---------------------|
+| Qwen3-TTS-12Hz-1.7B-VoiceDesign | Voice design from user descriptions | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | ✅ |
+| Qwen3-TTS-12Hz-1.7B-CustomVoice | Preset timbres with instruction control | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | ✅ |
+| Qwen3-TTS-12Hz-1.7B-Base | 3-second rapid voice clone; base for fine-tuning | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | — |
+
+### 0.6B Models
+
+| Model | Features | Language Support | Streaming | Instruction Control |
+|------|----------|------------------|-----------|---------------------|
+| Qwen3-TTS-12Hz-0.6B-CustomVoice | Preset timbres (fast, lightweight) | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | Limited |
+| Qwen3-TTS-12Hz-0.6B-Base | 3-second rapid voice clone; base for fine-tuning | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | — |
+
+**Mode mapping in this app**
+- Custom Voice → CustomVoice models
+- Voice Clone → Base models
+- Voice Design → VoiceDesign model
+
+**Note:** Streaming is a model capability; this app currently uses non-streaming generation.
+
+## Qwen3-TTS Key Features (Reported)
+
+- **Powerful speech representation** via the Qwen3-TTS-Tokenizer-12Hz (high-fidelity acoustic compression + semantic modeling).
+- **Universal end-to-end architecture** using a discrete multi-codebook LM to avoid cascaded errors.
+- **Dual-track hybrid streaming** for low-latency generation (reported first audio after a single character; ~97ms end-to-end latency).
+- **Instruction-driven control** over timbre, emotion, and prosody.
+
+## Performance Highlights (Reported by Qwen)
+
+- Voice Design outperforms closed-source baselines on InstructTTS-Eval for instruction following and expressiveness.
+- Voice Control reports WER 2.34% with strong style control fidelity.
+- Voice Clone reports average WER 1.835 and speaker similarity 0.789 across 10 languages.
+- Cross-lingual cloning reported to exceed prior baselines (MiniMax, SeedTTS, CosyVoice3).
+
+## Tokenizer Performance (Reported by Qwen)
+
+- PESQ: 3.21 (wideband), 3.68 (narrowband)
+- STOI: 0.96
+- UTMOS: 4.16
+- Speaker similarity: 0.95
+
+## Example Prompts & Instructions
+
+**Voice Design**
+- "A relaxed, naturally expressive male voice in his late twenties with a warm, conversational tone and clear articulation."
+- "Older gentleman, early 60s, confident and authoritative, slightly gravelly texture, measured pace."
+
+**Instruction Control**
+- "Speak with a very sad, tearful voice. Keep the pace slow and the volume low."
+- "Fast-paced delivery, bright tone, excited and upbeat with clear emphasis on key words."
+
+**Multi-character / narration**
+- Narrator: "Calm, objective, slightly cinematic delivery with gentle pauses."
+- Character: "Anxious young adult, hesitant with small stutters, then resolves confidently."
+
+## Preset Timbres (Custom Voice)
+
+| Timbre | Language/Dialect | Notes |
+|------|-------------------|------|
+| Serena | Chinese | Warm, gentle female |
+| Uncle Fu | Chinese | Seasoned, mellow male |
+| Vivian | Chinese | Bright young female |
+| Aiden | English | Natural American male |
+| Ryan | English | Dynamic male, strong rhythm |
+| Ono Anna | Japanese | Playful Japanese female |
+| Sohee | Korean | Warm Korean female |
+| Dylan | Chinese (Beijing) | Youthful Beijing male |
+| Eric | Chinese (Sichuan) | Lively Chengdu male |
 
 ## Development
 
@@ -68,7 +140,7 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete development guid
 pnpm install
 
 # Start the Python TTS server (in a separate terminal)
-cd tts-server && python server.py
+python python/tts_server_entry.py
 
 # Start the frontend dev server
 pnpm dev
@@ -145,6 +217,16 @@ open src-tauri/target/release/bundle/macos/PrivateVoice.app
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Key Files
+
+- `src/routes/+page.svelte` - Main app shell and orchestration
+- `src/lib/stores/ttsStore.svelte.ts` - TTS state, model loading, generation
+- `src/lib/stores/settingsStore.svelte.ts` - Persistent settings (localStorage)
+- `src/lib/components/input/*` - Mode input panels (Custom, Clone, Design)
+- `src/lib/components/output/OutputPanel.svelte` - Playback + export
+- `python/tts_server/main.py` - FastAPI backend (Qwen3-TTS)
+- `src-tauri/src/lib.rs` - Tauri backend bootstrap
+
 ## Project Status
 
 ### Current State (January 2026)
@@ -171,6 +253,7 @@ The app is functional for local development and testing. Core TTS generation wor
 - **Voice Clone Recording:** Microphone recording doesn't work in development mode due to macOS WebView security restrictions. Use the **Import** button to upload audio files, or test with a production build.
 - **MP3 Export:** Currently only WAV export is supported. MP3 encoding requires backend implementation.
 - **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace.
+- **Streaming Generation:** The models support streaming, but the app currently uses non-streaming generation.
 
 ### Cross-Platform Roadmap
 

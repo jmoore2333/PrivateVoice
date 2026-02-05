@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TTSMode } from '$lib/stores/ttsStore.svelte';
+  import { MODEL_OPTIONS, modelSupportsMode, type TTSMode } from '$lib/stores/ttsStore.svelte';
 
   type Status = 'ready' | 'generating' | 'downloading' | 'loading' | 'error';
 
@@ -35,11 +35,13 @@
     { id: 'voice-design', label: 'Voice Design' },
   ];
 
-  const models = [
-    { id: '0.6b', label: '0.6B', description: 'Fast, Custom Voice & Clone' },
-    { id: '1.7b', label: '1.7B', description: 'Quality, Custom Voice & Clone' },
-    { id: '1.7b-design', label: '1.7B Design', description: 'Voice Design mode' },
-  ];
+  const models = MODEL_OPTIONS;
+
+  function getModelLabel(id: string | null): string {
+    if (!id) return "None";
+    const match = models.find((m) => m.id === id);
+    return match ? match.label : id;
+  }
 
   const statusConfig: Record<Status, { color: string; label: string }> = {
     ready: { color: 'bg-green-500', label: 'Ready' },
@@ -85,10 +87,10 @@
       >
         <span class="text-[var(--color-text-secondary)]">Model:</span>
         <span class="font-mono text-[var(--color-text-primary)]">
-          {#if isLoadingModel}
+            {#if isLoadingModel}
             Loading...
           {:else if modelId}
-            {modelId}
+            {getModelLabel(modelId)}
           {:else}
             None
           {/if}
@@ -111,10 +113,13 @@
           bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]
           rounded-lg shadow-xl">
           {#each models as model}
+            {@const isCompatible = modelSupportsMode(model.id, currentMode)}
             <button
-              class="w-full px-4 py-2 text-left hover:bg-[var(--color-bg-hover)] transition-colors
-                {modelId === model.id ? 'bg-[var(--color-accent-muted)]' : ''}"
-              onclick={() => handleModelSelect(model.id)}
+              class="w-full px-4 py-2 text-left transition-colors
+                {modelId === model.id ? 'bg-[var(--color-accent-muted)]' : ''} 
+                {isCompatible ? 'hover:bg-[var(--color-bg-hover)]' : 'opacity-40 cursor-not-allowed'}"
+              onclick={() => isCompatible && handleModelSelect(model.id)}
+              disabled={!isCompatible}
             >
               <div class="flex items-center justify-between">
                 <span class="font-medium text-[var(--color-text-primary)]">{model.label}</span>
