@@ -1,9 +1,14 @@
 use std::collections::VecDeque;
-use std::io::{BufRead, BufReader};
-use std::process::{Child, Command, Stdio};
+use std::process::Command;
 use std::sync::Mutex;
-use std::thread;
 use tauri::{Emitter, Manager};
+
+#[cfg(debug_assertions)]
+use std::io::{BufRead, BufReader};
+#[cfg(debug_assertions)]
+use std::process::{Child, Stdio};
+#[cfg(debug_assertions)]
+use std::thread;
 
 #[cfg(not(debug_assertions))]
 use tauri_plugin_shell::ShellExt;
@@ -56,8 +61,16 @@ impl LogBuffer {
 
 impl Drop for SidecarState {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
+        if let Some(child) = self.child.take() {
+            #[cfg(debug_assertions)]
+            {
+                let mut child = child;
+                let _ = child.kill();
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = child.kill();
+            }
         }
     }
 }
@@ -131,8 +144,16 @@ async fn start_tts_server(
 
     if state_guard.child.is_some() {
         // Also kill our tracked child if it exists
-        if let Some(mut child) = state_guard.child.take() {
-            let _ = child.kill();
+        if let Some(child) = state_guard.child.take() {
+            #[cfg(debug_assertions)]
+            {
+                let mut child = child;
+                let _ = child.kill();
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                let _ = child.kill();
+            }
         }
     }
 
@@ -428,10 +449,20 @@ async fn start_tts_server(
 async fn stop_tts_server(state: tauri::State<'_, Mutex<SidecarState>>) -> Result<String, String> {
     let mut state = state.lock().map_err(|e| e.to_string())?;
 
-    if let Some(mut child) = state.child.take() {
-        child
-            .kill()
-            .map_err(|e| format!("Failed to kill server: {}", e))?;
+    if let Some(child) = state.child.take() {
+        #[cfg(debug_assertions)]
+        {
+            let mut child = child;
+            child
+                .kill()
+                .map_err(|e| format!("Failed to kill server: {}", e))?;
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            child
+                .kill()
+                .map_err(|e| format!("Failed to kill server: {}", e))?;
+        }
         Ok("Server stopped".to_string())
     } else {
         Ok("Server not running".to_string())
@@ -481,8 +512,16 @@ pub fn run() {
                 // Stop the server when the window is closed
                 if let Some(state) = window.try_state::<Mutex<SidecarState>>() {
                     if let Ok(mut state) = state.lock() {
-                        if let Some(mut child) = state.child.take() {
-                            let _ = child.kill();
+                        if let Some(child) = state.child.take() {
+                            #[cfg(debug_assertions)]
+                            {
+                                let mut child = child;
+                                let _ = child.kill();
+                            }
+                            #[cfg(not(debug_assertions))]
+                            {
+                                let _ = child.kill();
+                            }
                         }
                     }
                 }
