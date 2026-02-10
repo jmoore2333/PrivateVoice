@@ -62,6 +62,10 @@
   let isTranscribing = $state(false);
   let transcriptionError = $state<string | null>(null);
 
+  // Save notification state
+  let saveNotification = $state<{ message: string; type: 'success' | 'error' } | null>(null);
+  let saveNotificationTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Local text/language state for binding
   let localText = $state(ttsState.text);
   let localLanguage = $state(ttsState.language);
@@ -375,9 +379,28 @@
     }
   }
 
+  function showSaveNotification(message: string, type: 'success' | 'error') {
+    if (saveNotificationTimer) clearTimeout(saveNotificationTimer);
+    saveNotification = { message, type };
+    saveNotificationTimer = setTimeout(() => {
+      saveNotification = null;
+    }, 3000);
+  }
+
   async function handleSave() {
     if (ttsState.audioBlob && ttsState.audioUrl) {
-      await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
+      try {
+        const success = await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
+        if (success) {
+          showSaveNotification('Saved to Library', 'success');
+        } else {
+          showSaveNotification('Save failed — file system unavailable', 'error');
+        }
+      } catch {
+        showSaveNotification('Save failed — unexpected error', 'error');
+      }
+    } else {
+      showSaveNotification('No audio to save — generate first', 'error');
     }
   }
 
@@ -595,6 +618,18 @@
       />
     {/snippet}
   </Workspace>
+
+  <!-- Save Notification Toast -->
+  {#if saveNotification}
+    <div
+      class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg text-sm font-medium shadow-lg transition-all
+        {saveNotification.type === 'success'
+          ? 'bg-emerald-500/90 text-white'
+          : 'bg-red-500/90 text-white'}"
+    >
+      {saveNotification.message}
+    </div>
+  {/if}
 
   <!-- Library Button (floating) -->
   <button

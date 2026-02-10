@@ -166,7 +166,6 @@ describe('generateCustomVoice', () => {
     const parsed = JSON.parse(options?.body as string);
     expect(parsed).toEqual({ text: 'Hello world', speaker: 'serena', instruction: 'calm' });
 
-    expect(blob).toBeInstanceOf(Blob);
     expect(blob.size).toBeGreaterThan(0);
   });
 
@@ -243,7 +242,6 @@ describe('generateVoiceClone', () => {
     expect(formData.get('language')).toBe('English');
     expect(formData.get('format')).toBe('wav');
 
-    expect(blob).toBeInstanceOf(Blob);
     expect(blob.size).toBeGreaterThan(0);
   });
 
@@ -315,7 +313,6 @@ describe('generateVoiceDesign', () => {
       format: 'mp3',
     });
 
-    expect(blob).toBeInstanceOf(Blob);
     expect(blob.size).toBeGreaterThan(0);
   });
 

@@ -278,7 +278,7 @@ function createLibraryStore() {
       recent = [item, ...recent.slice(0, maxRecent - 1)];
     },
 
-    async saveToLibrary(item: LibraryItem, audioBlob?: Blob) {
+    async saveToLibrary(item: LibraryItem, audioBlob?: Blob): Promise<boolean> {
       if (useTauriFs && audioBlob) {
         // Write audio file first, then update index. If audio write fails,
         // we don't update the index (prevents orphaned metadata).
@@ -286,7 +286,7 @@ function createLibraryStore() {
           await writeAudioFile(item.id, audioBlob);
         } catch {
           console.error(`Failed to save audio for ${item.id}, skipping library save`);
-          return;
+          return false;
         }
         // Re-read from file to get a persistent URL
         const persistentUrl = await readAudioFile(item.id);
@@ -296,6 +296,7 @@ function createLibraryStore() {
       }
       saved = [item, ...saved];
       await persist();
+      return true;
     },
 
     async removeFromLibrary(id: string) {
