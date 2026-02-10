@@ -390,14 +390,15 @@
   async function handleSave() {
     if (ttsState.audioBlob && ttsState.audioUrl) {
       try {
-        const success = await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
-        if (success) {
+        const result = await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
+        if (result.ok) {
           showSaveNotification('Saved to Library', 'success');
         } else {
-          showSaveNotification('Save failed — file system unavailable', 'error');
+          showSaveNotification(`Save failed: ${result.error}`, 'error');
         }
-      } catch {
-        showSaveNotification('Save failed — unexpected error', 'error');
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        showSaveNotification(`Save failed: ${msg}`, 'error');
       }
     } else {
       showSaveNotification('No audio to save — generate first', 'error');

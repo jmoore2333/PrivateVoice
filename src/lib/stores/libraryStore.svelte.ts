@@ -278,25 +278,29 @@ function createLibraryStore() {
       recent = [item, ...recent.slice(0, maxRecent - 1)];
     },
 
-    async saveToLibrary(item: LibraryItem, audioBlob?: Blob): Promise<boolean> {
+    async saveToLibrary(item: LibraryItem, audioBlob?: Blob): Promise<{ ok: true } | { ok: false; error: string }> {
       if (useTauriFs && audioBlob) {
         // Write audio file first, then update index. If audio write fails,
         // we don't update the index (prevents orphaned metadata).
         try {
           await writeAudioFile(item.id, audioBlob);
-        } catch {
-          console.error(`Failed to save audio for ${item.id}, skipping library save`);
-          return false;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error(`Failed to save audio for ${item.id}:`, msg);
+          return { ok: false, error: msg };
         }
         // Re-read from file to get a persistent URL
         const persistentUrl = await readAudioFile(item.id);
         if (persistentUrl) {
           item = { ...item, audioUrl: persistentUrl };
         }
+      } else if (!useTauriFs) {
+        // localStorage fallback — save metadata only (no audio persistence across restarts)
+        console.warn('Tauri FS not available, saving metadata only');
       }
       saved = [item, ...saved];
       await persist();
-      return true;
+      return { ok: true };
     },
 
     async removeFromLibrary(id: string) {
