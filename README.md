@@ -158,7 +158,7 @@ pnpm test
 # Unit tests with coverage
 pnpm test:coverage
 
-# E2E tests (requires dev server or mocks)
+# E2E tests (90 tests, full API mocking, CI-compatible)
 pnpm test:e2e
 
 # Type checking
@@ -248,7 +248,7 @@ v1.0 release candidate. All core features complete and tested.
 | Help System | ✅ Complete | Troubleshooting, speaker gallery, keyboard shortcuts |
 | Model Compatibility UX | ✅ Complete | Visual indicators, one-click model switching |
 | Generation Feedback | ✅ Complete | Elapsed time spinner, cancel button |
-| Testing Infrastructure | ✅ Complete | 309 automated tests (unit + E2E + visual) |
+| Testing Infrastructure | ✅ Complete | 343 automated tests (216 unit + 90 E2E + visual validation) |
 | Code Signing & Distribution | 🔲 Planned | Required for public release |
 | Cross-Platform Support | 🔲 Planned | Device detection ready; builds not yet tested |
 

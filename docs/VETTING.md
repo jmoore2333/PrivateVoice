@@ -82,4 +82,4 @@ Version: 1.0.0
 | Non-atomic library save can desync | Audio write failure now aborts before index update |
 | Missing audio files silently dropped | Logged with warnings including item name/id |
 | App unusable at many resolutions | Responsive layout with md breakpoint stacking, tested at 4 sizes |
-| Only 1 E2E test | 93 E2E tests (56 functional + 37 visual validation) |
+| Only 1 E2E test | 90 Playwright E2E tests across 4 spec files (example: 8, library: 14, production: 34, visual-validation: 34) with 46 screenshots at 4 resolutions and HTML report at `docs/e2e-visual-validation-report.html` |

@@ -242,7 +242,7 @@ async function setupMocks(page: Page, mockState: MockServerState = defaultMockSt
 
 async function setupBypassOnboarding(page: Page) {
   await page.addInitScript(() => {
-    localStorage.setItem('qwen3-tts-settings', JSON.stringify({
+    localStorage.setItem('privatevoice-settings', JSON.stringify({
       theme: 'dark',
       defaultModel: '0.6b',
       defaultSpeaker: 'aiden',
@@ -405,7 +405,7 @@ test.describe('3. Voice Clone Flow', () => {
     await page.locator('nav').getByRole('button', { name: 'Voice Clone' }).click();
 
     // Voice Clone panel should show reference audio section
-    await expect(page.getByText('Reference Audio')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Reference Audio').first()).toBeVisible({ timeout: 5000 });
   });
 
   test('Voice Clone panel shows required fields', async ({ page }) => {
@@ -413,7 +413,7 @@ test.describe('3. Voice Clone Flow', () => {
     await page.locator('nav').getByRole('button', { name: 'Voice Clone' }).click();
 
     // Should have reference audio upload area
-    await expect(page.getByText('Reference Audio')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Reference Audio').first()).toBeVisible({ timeout: 5000 });
 
     // Should have text input
     const textarea = page.locator('textarea').first();
@@ -528,7 +528,7 @@ test.describe('5. Model/Mode Compatibility', () => {
 
     // Switch to Voice Clone
     await nav.getByRole('button', { name: 'Voice Clone' }).click();
-    await expect(page.getByText('Reference Audio')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Reference Audio').first()).toBeVisible({ timeout: 5000 });
 
     // Switch to Voice Design
     await nav.getByRole('button', { name: 'Voice Design' }).click();
@@ -567,7 +567,7 @@ test.describe('6. Settings Panel', () => {
     await page.locator('button[aria-label="Settings"]').click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
-    await page.locator('button[aria-label="Close settings"]').click();
+    await page.locator('button[aria-label="Close settings"]').nth(1).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -766,6 +766,6 @@ test.describe('9. Cross-cutting Concerns', () => {
     await cloneBtn.focus();
     await cloneBtn.press('Enter');
 
-    await expect(page.getByText('Reference Audio')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Reference Audio').first()).toBeVisible({ timeout: 5000 });
   });
 });

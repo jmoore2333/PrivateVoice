@@ -11,6 +11,22 @@ import { test, expect, Page } from '@playwright/test';
 // HELPERS (shared with example.spec.ts patterns)
 // =============================================================================
 
+async function setupTauriMocks(page: Page, { failFs = false }: { failFs?: boolean } = {}) {
+  await page.addInitScript((opts) => {
+    (window as any).__TAURI_INTERNALS__ = {
+      invoke: async (cmd: string) => {
+        // If failFs is true, reject any FS plugin calls so the library store
+        // falls back to localStorage (where seeded test data lives).
+        if (opts.failFs && cmd.startsWith('plugin:fs|')) {
+          throw new Error('Mock: Tauri FS not available in test');
+        }
+        return undefined;
+      },
+      transformCallback: () => 0,
+    };
+  }, { failFs });
+}
+
 async function setupApiMocks(page: Page) {
   await page.route('**/127.0.0.1:8765/**', async (route) => {
     const url = route.request().url();
@@ -51,6 +67,15 @@ async function setupApiMocks(page: Page) {
           cache_dir: '~/.cache/huggingface',
         }),
       });
+    } else if (url.includes('/speakers-info')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { name: 'aiden', description: 'Warm and friendly', native_language: 'English', personality: 'Conversational', gender: 'Male' },
+          { name: 'serena', description: 'Clear and professional', native_language: 'English', personality: 'Professional', gender: 'Female' },
+        ]),
+      });
     } else if (url.includes('/speakers')) {
       await route.fulfill({
         status: 200,
@@ -58,6 +83,18 @@ async function setupApiMocks(page: Page) {
         body: JSON.stringify({
           speakers: ['aiden', 'dylan', 'eric', 'ono_anna', 'ryan', 'serena', 'sohee', 'uncle_fu', 'vivian'],
         }),
+      });
+    } else if (url.includes('/languages')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ languages: ['english', 'chinese', 'japanese', 'korean'] }),
+      });
+    } else if (url.includes('/download-progress')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'idle', file_name: '', bytes_downloaded: 0, bytes_total: 0, speed_mbps: 0, eta: 0 }),
       });
     } else if (url.includes('/load-model')) {
       await route.fulfill({
@@ -97,7 +134,7 @@ async function setupBypassOnboarding(page: Page) {
       enableTranslation: false,
       hasCompletedOnboarding: true,
     };
-    localStorage.setItem('qwen3-tts-settings', JSON.stringify(settings));
+    localStorage.setItem('privatevoice-settings', JSON.stringify(settings));
   });
 }
 
@@ -124,13 +161,17 @@ async function seedLibrary(page: Page, items: Array<{
 
 async function navigateAndWait(page: Page) {
   await page.goto('/');
-  // Wait for app to be ready (nav visible)
-  await expect(page.locator('nav')).toBeVisible({ timeout: 20000 });
+  // Wait for app to be ready — use waitForSelector instead of toBeVisible
+  // because the library drawer overlay (z-50) can cover the nav,
+  // making it appear "hidden" to Playwright visibility checks.
+  await page.waitForSelector('nav', { state: 'attached', timeout: 20000 });
+  // Also wait for the app to settle (main content rendered)
+  await page.waitForLoadState('networkidle');
 }
 
 async function openLibraryDrawer(page: Page) {
-  // Library button is in the header — look for a button with "Library" text or library icon
-  const libraryButton = page.getByRole('button', { name: /library/i });
+  // Library button is a floating button with title="Voice Library"
+  const libraryButton = page.locator('button[title="Voice Library"]');
   await libraryButton.click();
   // Wait for drawer to appear
   await expect(page.getByRole('heading', { name: 'Voice Library' })).toBeVisible({ timeout: 5000 });
@@ -142,6 +183,7 @@ async function openLibraryDrawer(page: Page) {
 
 test.describe('Voice Library Drawer', () => {
   test.beforeEach(async ({ page }) => {
+    await setupTauriMocks(page);
     await setupApiMocks(page);
     await setupBypassOnboarding(page);
   });
@@ -264,6 +306,9 @@ test.describe('Voice Library with data', () => {
   ];
 
   test.beforeEach(async ({ page }) => {
+    // Use failFs: true so the library store falls back to localStorage,
+    // where seeded test data lives (Tauri FS mock would bypass localStorage).
+    await setupTauriMocks(page, { failFs: true });
     await setupApiMocks(page);
     await setupBypassOnboarding(page);
     await seedLibrary(page, testItems);

@@ -144,7 +144,7 @@ async function setupBypassOnboarding(page: Page) {
       enableTranslation: false,
       hasCompletedOnboarding: true,
     };
-    localStorage.setItem('qwen3-tts-settings', JSON.stringify(settings));
+    localStorage.setItem('privatevoice-settings', JSON.stringify(settings));
   });
 }
 
@@ -208,7 +208,7 @@ test.describe('Onboarding Flow', () => {
 
     // Verify localStorage was updated
     const settings = await page.evaluate(() => {
-      const stored = localStorage.getItem('qwen3-tts-settings');
+      const stored = localStorage.getItem('privatevoice-settings');
       return stored ? JSON.parse(stored) : null;
     });
 
@@ -225,11 +225,9 @@ test.describe('Onboarding Flow', () => {
 
 test.describe('PrivateVoice Application', () => {
   test.beforeEach(async ({ page }) => {
-    // Set up mocks BEFORE navigation
-    if (isCI) {
-      await setupTauriMocks(page);
-      await setupApiMocks(page);
-    }
+    // Set up mocks BEFORE navigation (always mock — real server tests are below)
+    await setupTauriMocks(page);
+    await setupApiMocks(page);
     await setupBypassOnboarding(page);
   });
 
@@ -264,7 +262,7 @@ test.describe('PrivateVoice Application', () => {
     await nav.getByRole('button', { name: 'Voice Clone' }).click();
 
     // Verify Voice Clone panel appears
-    await expect(page.getByText('Reference Audio')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Reference Audio').first()).toBeVisible({ timeout: 5000 });
 
     // Click Voice Design mode
     await nav.getByRole('button', { name: 'Voice Design' }).click();
@@ -333,9 +331,9 @@ test.describe('PrivateVoice Application', () => {
 // =============================================================================
 
 test.describe('TTS Generation (requires server)', () => {
-  test.skip(isCI, 'Skipped in CI - requires real TTS server');
-
   test.beforeEach(async ({ page }) => {
+    await setupTauriMocks(page);
+    await setupApiMocks(page);
     await setupBypassOnboarding(page);
   });
 

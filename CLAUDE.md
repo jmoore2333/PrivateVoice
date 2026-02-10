@@ -80,7 +80,7 @@ Voice library uses two-tier storage:
 
 - **Svelte 5 runes only** — all stores use `$state()`, `$derived()`, `$effect()`. No legacy `writable()`/`readable()` stores.
 - **Tailwind CSS 4** — uses `@tailwindcss/vite` plugin, not PostCSS config.
-- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright in `e2e/` directory with full API mocking (CI-compatible). Visual validation tests capture screenshots at 4 resolutions (900x650 to 1920x1080).
+- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright (90 tests across 4 spec files) in `e2e/` directory with full Tauri + API mocking (CI-compatible). Visual validation generates 46 screenshots at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080) with an HTML report at `docs/e2e-visual-validation-report.html`.
 - **Pre-commit hook** (Husky) runs `svelte-check` on staged `.ts`/`.svelte` files.
 - **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
 - The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
@@ -118,9 +118,15 @@ Multi-column layout with fixed-width input panel (380px) and flexible output pan
 
 ## Testing
 
-309 automated tests total:
+343 automated tests total:
 - **216 unit tests** (Vitest): Stores, components, API client, audio
-- **56 E2E functional tests** (Playwright): Startup, generation, modes, settings, library, debug
-- **37 visual validation tests** (Playwright): Module visibility at 4 resolutions, interaction checks, screenshots
+- **90 E2E tests** (Playwright across 4 spec files):
+  - `example.spec.ts` (8): Basic app loading and navigation
+  - `library.spec.ts` (14): Library save, search, tabs, persistence
+  - `production.spec.ts` (34): Startup, generation, modes, settings, debug
+  - `visual-validation.spec.ts` (34): Module visibility, mode switching, settings, library, debug, help panels, generate button accessibility, input/output layout
+- **Visual validation**: 46 screenshots captured at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080), saved to `e2e/screenshots/`
+- **HTML report**: `docs/e2e-visual-validation-report.html` — visual review of all captured screenshots
+- All E2E tests mock Tauri internals + API routes for full CI compatibility
 
 See `PRODUCTION_TEST_PROCEDURE.md` for manual pre-release checklist (93+ test cases).

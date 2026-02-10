@@ -43,9 +43,12 @@ PrivateVoice v1.0.0 is a fully local, private text-to-speech desktop application
 - Persistent settings (theme, audio format, export folder, default model)
 
 ### Developer Experience
-- 309 automated tests (216 unit + 56 E2E functional + 37 visual validation)
-- Full API mocking for CI-compatible E2E tests
-- Visual validation at 4 resolutions with screenshot capture
+- 343 automated tests (216 unit + 90 Playwright E2E across 4 spec files)
+- E2E spec breakdown: example (8), library (14), production (34), visual-validation (34)
+- 46 screenshots captured at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080)
+- Visual validation covers: core modules, mode switching, settings, library, debug, help panels, generate button accessibility, input/output layout
+- HTML validation report at `docs/e2e-visual-validation-report.html`
+- All tests mock Tauri internals + API routes for full CI compatibility
 - Production test procedure with 93+ manual test cases
 
 ## System Requirements

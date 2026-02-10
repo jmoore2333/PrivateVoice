@@ -316,7 +316,7 @@ Navigation:
   ></button>
 
   <!-- Panel -->
-  <div class="fixed inset-y-0 right-0 w-full max-w-lg z-50 bg-[var(--color-bg-surface)] border-l border-[var(--color-border-default)] shadow-2xl overflow-y-auto animate-slide-left">
+  <div class="fixed inset-y-0 right-0 w-full max-w-lg z-50 bg-[var(--color-bg-surface)] border-l border-[var(--color-border-default)] shadow-2xl overflow-y-auto overflow-x-hidden animate-slide-left">
     <!-- Header -->
     <div class="sticky top-0 flex items-center justify-between p-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
       <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">Help</h2>
@@ -454,6 +454,6 @@ Navigation:
   }
 
   .animate-slide-left {
-    animation: slide-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: slide-left 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   }
 </style>
