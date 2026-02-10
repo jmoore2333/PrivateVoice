@@ -14,6 +14,8 @@
     isGenerating: boolean;
     elapsedTime?: number;
     hasWhisper: boolean;
+    isTranscribing?: boolean;
+    transcriptionError?: string | null;
     modelSupported?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
@@ -37,6 +39,8 @@
     isGenerating,
     elapsedTime = 0,
     hasWhisper = false,
+    isTranscribing = false,
+    transcriptionError = null,
     modelSupported = true,
     modelLoading = false,
     recommendedModelLabel = "0.6B Base",
@@ -132,10 +136,19 @@
 
       {#if hasWhisper && referenceAudioBlob}
         <button
-          class="text-xs text-[var(--color-accent)] hover:underline"
+          class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline flex items-center gap-1"
           onclick={onAutoTranscribe}
+          disabled={isTranscribing}
         >
-          Auto-transcribe
+          {#if isTranscribing}
+            <svg class="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Transcribing...
+          {:else}
+            Auto-transcribe
+          {/if}
         </button>
       {/if}
     </div>
@@ -146,9 +159,13 @@
       oninput={(e) => onReferenceTextChange?.((e.target as HTMLTextAreaElement).value)}
       placeholder="Enter the exact words spoken in the reference audio..."
       rows={3}
-      disabled={lowQualityMode}
+      disabled={lowQualityMode || isTranscribing}
       class="w-full px-4 py-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors resize-none disabled:opacity-50"
     ></textarea>
+
+    {#if transcriptionError}
+      <p class="text-xs text-[var(--color-error)]">{transcriptionError}</p>
+    {/if}
 
     <label class="flex items-start gap-2 text-sm text-[var(--color-text-muted)]">
       <input

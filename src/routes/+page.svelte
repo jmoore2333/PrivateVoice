@@ -58,6 +58,10 @@
   let referenceAudioBlob = $state<Blob | null>(null);
   let referenceAudioUrl = $state<string | null>(null);
 
+  // Whisper transcription state
+  let isTranscribing = $state(false);
+  let transcriptionError = $state<string | null>(null);
+
   // Local text/language state for binding
   let localText = $state(ttsState.text);
   let localLanguage = $state(ttsState.language);
@@ -430,6 +434,27 @@
     ttsStore.setCloneLowQualityMode(enabled);
   }
 
+  async function handleAutoTranscribe() {
+    if (!referenceAudioBlob) return;
+    isTranscribing = true;
+    transcriptionError = null;
+    try {
+      // Auto-load Whisper if not loaded
+      const status = await ttsClient.whisperStatus();
+      if (!status.loaded) {
+        await ttsClient.loadWhisper("base");
+      }
+      const file = new File([referenceAudioBlob], "reference.wav", { type: referenceAudioBlob.type || "audio/wav" });
+      const result = await ttsClient.transcribe(file);
+      localReferenceText = result.text;
+      ttsStore.setReferenceText(result.text);
+    } catch (e) {
+      transcriptionError = e instanceof Error ? e.message : "Transcription failed";
+    } finally {
+      isTranscribing = false;
+    }
+  }
+
   function handleDescriptionChange(description: string) {
     localVoiceDescription = description;
     ttsStore.setVoiceDescription(description);
@@ -525,12 +550,15 @@
           recommendedModelHint={recommendedCloneHint}
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
-          hasWhisper={false}
+          hasWhisper={settingsStore.state.enableWhisper}
+          {isTranscribing}
+          {transcriptionError}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
           onReferenceTextChange={handleReferenceTextChange}
           onReferenceAudioChange={handleReferenceAudioChange}
+          onAutoTranscribe={handleAutoTranscribe}
           onLowQualityModeChange={handleCloneQualityChange}
           onLoadModel={handleLoadVoiceCloneModel}
         />

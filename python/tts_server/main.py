@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS
+from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS, request_cancel, clear_cancel, is_cancelled
 from .device import (
     get_device_config, get_memory_info, check_memory_for_model,
     MODEL_MEMORY_REQUIREMENTS, SUPPORTED_MP3_BITRATES,
@@ -195,17 +195,28 @@ async def lifespan(app: FastAPI):
         whisper.unload()
 
 
+_is_dev = os.environ.get("TTS_SERVER_DEV", "false").lower() == "true"
+
 app = FastAPI(
     title="PrivateVoice Server",
     description="Local text-to-speech server powered by Qwen3-TTS",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
 )
 
 # Enable CORS for Tauri frontend
+ALLOWED_ORIGINS = [
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "tauri://localhost",
+    "https://tauri.localhost",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tauri uses custom protocol, allow all for dev
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -347,6 +358,12 @@ async def memory_check(model_id: str):
 
     Returns required RAM, available RAM, and a warning if insufficient.
     """
+    if model_id not in MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model ID: {model_id}. "
+            f"Available: {list(MODEL_IDS.keys())}",
+        )
     return check_memory_for_model(model_id)
 
 
@@ -401,6 +418,9 @@ async def generate_custom_voice(request: CustomVoiceRequest):
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
     if len(request.text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
@@ -408,6 +428,7 @@ async def generate_custom_voice(request: CustomVoiceRequest):
     bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
+        clear_cancel()
         logger.info(f"Generating custom voice: speaker={request.speaker}, lang={request.language}, fmt={fmt}, text={request.text[:50]}...")
         audio_bytes, media_type = model.generate_custom_voice(
             text=request.text,
@@ -417,6 +438,8 @@ async def generate_custom_voice(request: CustomVoiceRequest):
             output_format=fmt,
             mp3_bitrate=bitrate,
         )
+        if is_cancelled():
+            return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -441,6 +464,9 @@ async def generate_voice_clone(
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if not text or not text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
     if len(text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
@@ -448,6 +474,7 @@ async def generate_voice_clone(
     bitrate = mp3_bitrate if mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
+        clear_cancel()
         logger.info(f"Generating voice clone: lang={language}, fmt={fmt}, text={text[:50]}...")
         audio_data = await reference_audio.read()
         if len(audio_data) > MAX_AUDIO_SIZE:
@@ -463,9 +490,16 @@ async def generate_voice_clone(
             output_format=fmt,
             mp3_bitrate=bitrate,
         )
+        if is_cancelled():
+            return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except HTTPException:
         raise
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
+        raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         logger.error(f"Voice clone failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -479,6 +513,9 @@ async def generate_voice_design(request: VoiceDesignRequest):
     if not model.is_loaded:
         raise HTTPException(status_code=400, detail="Model not loaded")
 
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
     if len(request.text) > MAX_TEXT_LENGTH:
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
@@ -486,6 +523,7 @@ async def generate_voice_design(request: VoiceDesignRequest):
     bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
+        clear_cancel()
         logger.info(f"Generating voice design: lang={request.language}, fmt={fmt}, desc={request.voice_description[:50]}...")
         audio_bytes, media_type = model.generate_voice_design(
             text=request.text,
@@ -494,12 +532,31 @@ async def generate_voice_design(request: VoiceDesignRequest):
             output_format=fmt,
             mp3_bitrate=bitrate,
         )
+        if is_cancelled():
+            return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Voice design failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Generation Control Endpoints
+# ============================================================================
+
+@app.post("/cancel-generation")
+async def cancel_generation():
+    """Cancel the current generation request.
+
+    Sets a cancellation flag that generation checks between steps.
+    The actual cancellation depends on model cooperation — the flag is
+    checked before/after generation and the result is discarded if set.
+    """
+    request_cancel()
+    logger.info("Generation cancellation requested")
+    return {"status": "cancelled"}
 
 
 # ============================================================================

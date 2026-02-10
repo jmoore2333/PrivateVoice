@@ -574,3 +574,228 @@ class TestMP3Bitrate:
         assert resp.status_code == 200
         call_kwargs = mock_model.generate_voice_design.call_args[1]
         assert call_kwargs["mp3_bitrate"] == 256
+
+
+# ---------------------------------------------------------------------------
+# Empty text validation
+# ---------------------------------------------------------------------------
+
+class TestEmptyTextValidation:
+    """All generation endpoints reject empty or whitespace-only text."""
+
+    @patch("tts_server.main.get_model")
+    def test_custom_voice_empty_text(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/custom-voice",
+            json={"text": "", "speaker": "serena"},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_model")
+    def test_custom_voice_whitespace_text(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/custom-voice",
+            json={"text": "   \n\t  ", "speaker": "serena"},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_model")
+    def test_voice_clone_whitespace_text(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-clone",
+            data={
+                "text": "   ",
+                "reference_text": "ref text",
+                "language": "english",
+                "format": "wav",
+                "x_vector_only_mode": "false",
+            },
+            files={"reference_audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_model")
+    def test_voice_design_empty_text(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-design",
+            json={"text": "  ", "voice_description": "A warm voice"},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Normalized error status codes (voice clone)
+# ---------------------------------------------------------------------------
+
+class TestVoiceCloneErrorCodes:
+    """Voice clone returns 400 for model compatibility, 500 for real errors."""
+
+    @patch("tts_server.main.get_model")
+    def test_runtime_error_model_compat_returns_400(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_model.generate_voice_clone.side_effect = RuntimeError(
+            "Model compatibility error: expected Base model"
+        )
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-clone",
+            data={
+                "text": "Hello",
+                "reference_text": "ref",
+                "language": "english",
+                "format": "wav",
+                "x_vector_only_mode": "false",
+            },
+            files={"reference_audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 400
+        assert "Base model" in resp.json()["detail"]
+
+    @patch("tts_server.main.get_model")
+    def test_runtime_error_non_compat_returns_500(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_model.generate_voice_clone.side_effect = RuntimeError("CUDA out of memory")
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-clone",
+            data={
+                "text": "Hello",
+                "reference_text": "ref",
+                "language": "english",
+                "format": "wav",
+                "x_vector_only_mode": "false",
+            },
+            files={"reference_audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 500
+
+    @patch("tts_server.main.get_model")
+    def test_generic_exception_returns_500(self, mock_get_model):
+        mock_model = _make_mock_model(loaded=True)
+        mock_model.generate_voice_clone.side_effect = Exception("Something went wrong")
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-clone",
+            data={
+                "text": "Hello",
+                "reference_text": "ref",
+                "language": "english",
+                "format": "wav",
+                "x_vector_only_mode": "false",
+            },
+            files={"reference_audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Memory check model ID validation
+# ---------------------------------------------------------------------------
+
+class TestMemoryCheckValidation:
+    """GET /memory-check/{model_id} rejects invalid model IDs."""
+
+    def test_invalid_model_id_returns_400(self):
+        client = _get_client()
+        resp = client.get("/memory-check/invalid_id")
+        assert resp.status_code == 400
+        assert "Unknown model ID" in resp.json()["detail"]
+        assert "Available" in resp.json()["detail"]
+
+    @patch("tts_server.main.check_memory_for_model")
+    def test_valid_model_id_still_works(self, mock_check):
+        mock_check.return_value = {
+            "required_gb": 8,
+            "available_gb": 16.0,
+            "sufficient": True,
+            "warning": None,
+        }
+
+        client = _get_client()
+        resp = client.get("/memory-check/0.6b")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Cancel generation
+# ---------------------------------------------------------------------------
+
+class TestCancelGeneration:
+    """POST /cancel-generation."""
+
+    def test_cancel_returns_status(self):
+        client = _get_client()
+        resp = client.post("/cancel-generation")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# CORS origins
+# ---------------------------------------------------------------------------
+
+class TestCORSOrigins:
+    """CORS middleware restricts origins to localhost and Tauri."""
+
+    def test_allowed_origin(self):
+        client = _get_client()
+        resp = client.get(
+            "/health",
+            headers={"Origin": "http://localhost:1420"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:1420"
+
+    def test_disallowed_origin(self):
+        client = _get_client()
+        resp = client.get(
+            "/health",
+            headers={"Origin": "http://evil.com"},
+        )
+        assert resp.status_code == 200
+        # Disallowed origins should not get the CORS header
+        assert "access-control-allow-origin" not in resp.headers
+
+
+# ---------------------------------------------------------------------------
+# Swagger/ReDoc disabled in production
+# ---------------------------------------------------------------------------
+
+class TestDocsDisabledInProd:
+    """Swagger and ReDoc are disabled when TTS_SERVER_DEV is not set."""
+
+    def test_docs_disabled_by_default(self):
+        client = _get_client()
+        resp = client.get("/docs")
+        assert resp.status_code == 404
+
+    def test_redoc_disabled_by_default(self):
+        client = _get_client()
+        resp = client.get("/redoc")
+        assert resp.status_code == 404

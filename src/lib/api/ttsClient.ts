@@ -74,6 +74,25 @@ export interface VoiceDesignRequest {
   format?: string;
 }
 
+export interface WhisperStatus {
+  loaded: boolean;
+  model_size: string | null;
+  device: string;
+}
+
+export interface WhisperModelInfo {
+  size: string;
+  parameters: string;
+  download_size_mb: number;
+}
+
+export interface TranscriptionResult {
+  text: string;
+  language: string;
+  confidence: number;
+  duration_seconds: number;
+}
+
 export const PRESET_SPEAKERS = [
   "aiden",
   "dylan",
@@ -314,6 +333,57 @@ class TTSClient {
     } finally {
       this._abortController = null;
     }
+  }
+
+  // ============================================================================
+  // Whisper Transcription
+  // ============================================================================
+
+  async whisperStatus(): Promise<WhisperStatus> {
+    const res = await fetch(`${this.baseUrl}/whisper-status`);
+    if (!res.ok) throw new Error("Failed to get Whisper status");
+    return res.json();
+  }
+
+  async whisperModels(): Promise<WhisperModelInfo[]> {
+    const res = await fetch(`${this.baseUrl}/whisper-models`);
+    if (!res.ok) throw new Error("Failed to get Whisper models");
+    return res.json();
+  }
+
+  async loadWhisper(modelSize: string = "base"): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/load-whisper`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_size: modelSize }),
+    });
+    if (!res.ok) {
+      throw new Error(await this.readErrorMessage(res, "Failed to load Whisper model"));
+    }
+  }
+
+  async unloadWhisper(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/unload-whisper`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Failed to unload Whisper model");
+  }
+
+  async transcribe(audioFile: File | Blob): Promise<TranscriptionResult> {
+    const formData = new FormData();
+    const file = audioFile instanceof File
+      ? audioFile
+      : new File([audioFile], "audio.wav", { type: audioFile.type || "audio/wav" });
+    formData.append("audio", file);
+
+    const res = await fetch(`${this.baseUrl}/transcribe`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) {
+      throw new Error(await this.readErrorMessage(res, "Failed to transcribe audio"));
+    }
+    return res.json();
   }
 
   // ============================================================================

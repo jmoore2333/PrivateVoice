@@ -206,6 +206,7 @@ async fn start_tts_server(
             .args(["-u", "-m", "tts_server.main"])  // -u for unbuffered output
             .current_dir(&python_dir)
             .env("PYTHONUNBUFFERED", "1")
+            .env("TTS_SERVER_DEV", "true")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()

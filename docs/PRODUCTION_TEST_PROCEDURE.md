@@ -110,7 +110,11 @@ Platform: macOS (Apple Silicon)
 | H4 | Default model persists | Change default model, restart, still set | |
 | H5 | Reset to defaults works | Click Reset, all settings revert | |
 | H6 | System info is accurate | GPU shows "Apple Silicon (MPS)", memory matches actual | |
-| H7 | Whisper/Translation show "Coming Soon" | Toggles are visually disabled, say "coming in a future update" | |
+| H7 | Whisper toggle enables | Settings > Optional Features > toggle "Auto-transcription" on, Whisper controls appear | |
+| H8 | Whisper model selector works | Dropdown shows sizes (tiny, base, small, medium, large) with download sizes | |
+| H9 | Load Whisper model | Click "Load Model", spinner + "Loading..." shown, status turns green with model + device info | |
+| H10 | Unload Whisper model | Click "Unload", status returns to gray "No model loaded" | |
+| H11 | Translation shows "Coming Soon" | Translation toggle is grayed out, says "coming in a future update" | |
 
 ## I. Keyboard Shortcuts
 
@@ -135,6 +139,10 @@ Platform: macOS (Apple Silicon)
 | J4 | Model switch during generation | Should queue or show warning | |
 | J5 | Offline after model cached | Disconnect network, generate, works normally | |
 | J6 | Port conflict recovery | Start another process on 8765, launch app, app kills it and starts | |
+| J7 | Empty text returns error | All modes: clear text, click Generate — error "Text cannot be empty" | |
+| J8 | Model compatibility error is user-friendly | Load CustomVoice model, switch to Voice Clone, generate — error says "Voice Clone requires a Base model" (no internal metadata) | |
+| J9 | Cancel button visible during generation | Start generation, "Cancel" button appears below elapsed timer | |
+| J10 | Cancel stops generation cleanly | Click "Cancel" during generation — generation stops, no error banner shown | |
 
 ## K. Automated Tests
 
@@ -145,6 +153,18 @@ Platform: macOS (Apple Silicon)
 | K3 | Python backend tests | `cd python && pytest tests/` — all pass | |
 | K4 | Python syntax check | `python3 -c "import ast; ..."` for all .py files | |
 
+## L. Whisper Transcription
+
+| # | Check | Expected | Pass |
+|---|-------|----------|------|
+| L1 | Load Whisper from Settings | Settings > enable Whisper > select "base" > Load Model > green status dot | |
+| L2 | Auto-transcribe button visible | Voice Clone mode with reference audio imported — "Auto-transcribe" link appears | |
+| L3 | Auto-transcribe fills transcript | Click "Auto-transcribe", spinner shown, transcript textarea fills with text | |
+| L4 | Transcription result is editable | After auto-transcribe, modify the transcript text freely | |
+| L5 | Auto-transcribe without Whisper loaded | Import audio in Voice Clone, click "Auto-transcribe" — auto-loads base model first | |
+| L6 | Transcription error handling | If transcription fails, red error text appears below transcript | |
+| L7 | Unload Whisper after use | Settings > Unload Whisper > status returns to gray | |
+
 ---
 
 ## Sign-off
@@ -154,4 +174,4 @@ Platform: macOS (Apple Silicon)
 | Tester | | | |
 | Developer | | | |
 
-All sections A-K must pass before v1.0.0 release.
+**92 manual test cases** across sections A-L must pass before v1.0.0 release.

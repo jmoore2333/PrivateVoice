@@ -1,6 +1,7 @@
 """PrivateVoice inference wrapper (Qwen3-TTS on MPS/CUDA/CPU)."""
 
 import signal
+import threading
 import torch
 import numpy as np
 from typing import Optional
@@ -303,7 +304,7 @@ class TTSModel:
 
         mp3_data = encoder.encode(pcm_data)
         mp3_data += encoder.flush()
-        return mp3_data
+        return bytes(mp3_data)
 
     def audio_to_format(
         self, audio, sample_rate: int, fmt: str = "wav", mp3_bitrate: int = 192
@@ -317,6 +318,9 @@ class TTSModel:
 # Global model instance
 _model: Optional[TTSModel] = None
 
+# Cancellation flag for generation requests
+_cancel_event = threading.Event()
+
 
 def get_model() -> TTSModel:
     """Get or create the global model instance."""
@@ -324,3 +328,18 @@ def get_model() -> TTSModel:
     if _model is None:
         _model = TTSModel()
     return _model
+
+
+def request_cancel() -> None:
+    """Signal that the current generation should be cancelled."""
+    _cancel_event.set()
+
+
+def clear_cancel() -> None:
+    """Clear the cancellation flag (called before starting generation)."""
+    _cancel_event.clear()
+
+
+def is_cancelled() -> bool:
+    """Check whether cancellation has been requested."""
+    return _cancel_event.is_set()

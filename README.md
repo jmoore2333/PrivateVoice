@@ -258,7 +258,6 @@ v1.0 release candidate. All core features complete and tested.
 - **Voice Clone Recording:** Microphone recording requires a production build (macOS WebView security). Use the **Import** button in development mode.
 - **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace. Progress is now displayed during download.
 - **Streaming Generation:** The models support streaming, but the app uses non-streaming generation with elapsed time display.
-- **MP3 Export:** MP3 export has a known issue in v1.0 and may produce incorrect output. WAV export is recommended.
 - **Cross-platform:** Device detection supports CUDA/CPU but Windows/Linux builds are not yet tested.
 
 ### TTS Round-Trip Validation (Implemented)
@@ -276,7 +275,7 @@ Whisper-based transcription is integrated into the Python backend using faster-w
 2. Transcribe audio: `POST /transcribe` with multipart form upload
 3. Compare transcription against original text to compute accuracy metrics
 
-> **Note:** Whisper transcription is currently API-only. A desktop UI for transcription is planned for a future release.
+> Whisper transcription is accessible in the desktop UI via Settings > Optional Features (auto-transcription toggle with model selector) and as an "Auto-transcribe" button in Voice Clone mode.
 
 See `docs/e2e-visual-validation-report.html` for E2E visual validation results.
 
@@ -306,6 +305,7 @@ The Python backend exposes a REST API at `http://127.0.0.1:8765`. See [docs/API_
 | `/generate/custom-voice` | POST | Generate with preset voice |
 | `/generate/voice-clone` | POST | Clone from reference audio |
 | `/generate/voice-design` | POST | Generate from description |
+| `/cancel-generation` | POST | Cancel in-progress generation |
 | `/whisper-status` | GET | Whisper model status |
 | `/whisper-models` | GET | Available Whisper model sizes |
 | `/load-whisper` | POST | Load a Whisper model |

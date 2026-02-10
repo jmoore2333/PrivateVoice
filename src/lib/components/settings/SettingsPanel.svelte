@@ -2,9 +2,83 @@
   import { settingsStore, type Settings } from "$lib/stores/settingsStore.svelte";
   import StudioButton from "$lib/components/ui/StudioButton.svelte";
   import StudioSelect from "$lib/components/ui/StudioSelect.svelte";
-  import { PRESET_SPEAKERS } from "$lib/api/ttsClient";
+  import Spinner from "$lib/components/ui/Spinner.svelte";
+  import { PRESET_SPEAKERS, ttsClient, type WhisperStatus, type WhisperModelInfo } from "$lib/api/ttsClient";
   import { MODEL_OPTIONS } from "$lib/stores/ttsStore.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
+
+  // Whisper state
+  let whisperStatus = $state<WhisperStatus | null>(null);
+  let whisperModels = $state<WhisperModelInfo[]>([]);
+  let selectedWhisperModel = $state("base");
+  let isLoadingWhisper = $state(false);
+  let whisperError = $state<string | null>(null);
+
+  const whisperModelOptions = $derived(
+    whisperModels.map((m) => ({
+      value: m.size,
+      label: `${m.size} (${m.download_size_mb >= 1000 ? `${(m.download_size_mb / 1000).toFixed(1)} GB` : `${m.download_size_mb} MB`})`,
+      description: m.parameters,
+    }))
+  );
+
+  async function fetchWhisperState() {
+    try {
+      whisperError = null;
+      const [status, models] = await Promise.all([
+        ttsClient.whisperStatus(),
+        ttsClient.whisperModels(),
+      ]);
+      whisperStatus = status;
+      whisperModels = models;
+      if (status.loaded && status.model_size) {
+        selectedWhisperModel = status.model_size;
+      }
+    } catch (e) {
+      whisperError = e instanceof Error ? e.message : "Failed to fetch Whisper status";
+    }
+  }
+
+  async function handleLoadWhisper() {
+    isLoadingWhisper = true;
+    whisperError = null;
+    try {
+      await ttsClient.loadWhisper(selectedWhisperModel);
+      whisperStatus = await ttsClient.whisperStatus();
+    } catch (e) {
+      whisperError = e instanceof Error ? e.message : "Failed to load Whisper model";
+    } finally {
+      isLoadingWhisper = false;
+    }
+  }
+
+  async function handleUnloadWhisper() {
+    isLoadingWhisper = true;
+    whisperError = null;
+    try {
+      await ttsClient.unloadWhisper();
+      whisperStatus = await ttsClient.whisperStatus();
+    } catch (e) {
+      whisperError = e instanceof Error ? e.message : "Failed to unload Whisper model";
+    } finally {
+      isLoadingWhisper = false;
+    }
+  }
+
+  function handleWhisperToggle() {
+    const enabling = !settingsStore.state.enableWhisper;
+    settingsStore.updateSetting("enableWhisper", enabling);
+    if (enabling) {
+      fetchWhisperState();
+    }
+  }
+
+  // Fetch whisper state when panel opens if enabled
+  $effect(() => {
+    if (settingsStore.isOpen && settingsStore.state.enableWhisper) {
+      fetchWhisperState();
+    }
+  });
 
   const MODELS = MODEL_OPTIONS.map((model) => ({
     value: model.id,
@@ -211,24 +285,94 @@
         </div>
       </section>
 
-      <!-- Optional Features Section (Coming Soon) -->
+      <!-- Optional Features Section -->
       <section>
         <h3 class="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-3">
           Optional Features
         </h3>
         <div class="space-y-3">
-          <!-- Whisper transcription (coming soon) -->
-          <div class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] opacity-60">
-            <div>
-              <span class="text-sm font-medium text-[var(--color-text-primary)]">Auto-transcription</span>
-              <p class="text-xs text-[var(--color-text-muted)]">Whisper integration — coming in a future update</p>
-            </div>
-            <div
-              class="relative w-11 h-6 rounded-full bg-[var(--color-bg-hover)] cursor-not-allowed"
-              title="Coming soon"
-            >
-              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white/50 shadow"></span>
-            </div>
+          <!-- Whisper auto-transcription toggle -->
+          <div class="rounded-lg bg-[var(--color-bg-elevated)] overflow-hidden">
+            <label class="flex items-center justify-between p-3 cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+              <div>
+                <span class="text-sm font-medium text-[var(--color-text-primary)]">Auto-transcription</span>
+                <p class="text-xs text-[var(--color-text-muted)]">Whisper-powered transcription for Voice Clone</p>
+              </div>
+              <button
+                onclick={handleWhisperToggle}
+                class="relative w-11 h-6 rounded-full transition-colors
+                  {settingsStore.state.enableWhisper ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+                role="switch"
+                aria-checked={settingsStore.state.enableWhisper}
+                aria-label="Toggle Whisper auto-transcription"
+              >
+                <span
+                  class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                    {settingsStore.state.enableWhisper ? 'translate-x-5' : ''}"
+                ></span>
+              </button>
+            </label>
+
+            {#if settingsStore.state.enableWhisper}
+              <div class="px-3 pb-3 space-y-3 border-t border-[var(--color-border-subtle)]">
+                <!-- Model selector -->
+                <div class="pt-3">
+                  <StudioSelect
+                    value={selectedWhisperModel}
+                    options={whisperModelOptions.length > 0 ? whisperModelOptions : [{ value: "base", label: "base (145 MB)", description: "74M" }]}
+                    label="Whisper Model"
+                    disabled={isLoadingWhisper || whisperStatus?.loaded === true}
+                    onchange={(v) => { selectedWhisperModel = v; }}
+                  />
+                </div>
+
+                <!-- Load / Unload button -->
+                <div class="flex items-center gap-3">
+                  {#if whisperStatus?.loaded}
+                    <StudioButton
+                      variant="secondary"
+                      size="sm"
+                      loading={isLoadingWhisper}
+                      onclick={handleUnloadWhisper}
+                      class="flex-1"
+                    >
+                      Unload
+                    </StudioButton>
+                  {:else}
+                    <StudioButton
+                      variant="primary"
+                      size="sm"
+                      loading={isLoadingWhisper}
+                      onclick={handleLoadWhisper}
+                      class="flex-1"
+                    >
+                      {isLoadingWhisper ? 'Loading...' : 'Load Model'}
+                    </StudioButton>
+                  {/if}
+                </div>
+
+                <!-- Status display -->
+                <div class="flex items-center gap-2 text-xs">
+                  {#if isLoadingWhisper}
+                    <Spinner size="sm" />
+                    <span class="text-[var(--color-text-muted)]">Loading {selectedWhisperModel}...</span>
+                  {:else if whisperStatus?.loaded}
+                    <span class="w-2 h-2 rounded-full bg-[var(--color-success)]"></span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Model: {whisperStatus.model_size} &bull; Device: {whisperStatus.device}
+                    </span>
+                  {:else}
+                    <span class="w-2 h-2 rounded-full bg-[var(--color-text-muted)]"></span>
+                    <span class="text-[var(--color-text-muted)]">No model loaded</span>
+                  {/if}
+                </div>
+
+                <!-- Error -->
+                {#if whisperError}
+                  <p class="text-xs text-[var(--color-error)]">{whisperError}</p>
+                {/if}
+              </div>
+            {/if}
           </div>
 
           <!-- Translation support (coming soon) -->
