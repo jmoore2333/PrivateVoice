@@ -498,6 +498,12 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_shell::init());
     }
 
+    // Add MCP bridge plugin for AI-driven testing (feature-gated)
+    #[cfg(feature = "mcp-bridge")]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
     builder
         .manage(Mutex::new(SidecarState { child: None }))
         .manage(Mutex::new(LogBuffer::new()))
