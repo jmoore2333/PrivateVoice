@@ -18,6 +18,9 @@ fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
 
+# Transcription
+faster-whisper>=1.0.0
+
 # Utilities
 huggingface-hub>=0.20.0
 pydantic>=2.0.0

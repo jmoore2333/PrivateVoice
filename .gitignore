@@ -48,6 +48,10 @@ Thumbs.db
 *.log
 logs/
 
+# Claude Code
+.claude/
+.mcp.json
+
 # Environment
 .env
 .env.local

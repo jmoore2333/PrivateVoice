@@ -71,6 +71,9 @@ hiddenimports = [
     'scipy',
     # Audio encoding
     'lameenc',
+    # Whisper transcription (faster-whisper / CTranslate2)
+    'faster_whisper',
+    'ctranslate2',
 ]
 
 # Collect all submodules for complex packages
@@ -79,12 +82,15 @@ hiddenimports += collect_submodules('transformers')
 hiddenimports += collect_submodules('qwen_tts')
 hiddenimports += collect_submodules('uvicorn')
 hiddenimports += collect_submodules('librosa')
+hiddenimports += collect_submodules('faster_whisper')
+hiddenimports += collect_submodules('ctranslate2')
 
 # Collect data files (model configs, tokenizers, etc.)
 datas = []
 datas += collect_data_files('transformers')
 datas += collect_data_files('huggingface_hub')
 datas += collect_data_files('librosa')
+datas += collect_data_files('faster_whisper')
 
 # Exclude unnecessary packages to reduce size
 excludes = [

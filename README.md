@@ -27,7 +27,7 @@ PrivateVoice is a self-contained desktop application that runs Qwen3-TTS locally
 
 ## Installation
 
-Download the latest `.dmg` from [Releases](https://github.com/your-repo/releases) and drag to Applications.
+Download the latest `.dmg` from [Releases](https://github.com/jmoore/PrivateVoice/releases) and drag to Applications.
 
 **First launch notes:**
 - Initial startup takes ~60 seconds while the Python environment initializes
@@ -204,7 +204,7 @@ open src-tauri/target/release/bundle/macos/PrivateVoice.app
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Python Sidecar (FastAPI)                                   │
-│  - Bundled via PyInstaller (~243MB)                         │
+│  - Bundled via PyInstaller (~266MB)                         │
 │  - Qwen3-TTS with MPS optimization                          │
 │  - bfloat16 precision for M-series chips                    │
 └─────────────────────────────────────────────────────────────┘
@@ -249,6 +249,7 @@ v1.0 release candidate. All core features complete and tested.
 | Model Compatibility UX | ✅ Complete | Visual indicators, one-click model switching |
 | Generation Feedback | ✅ Complete | Elapsed time spinner, cancel button |
 | Testing Infrastructure | ✅ Complete | 343 automated tests (216 unit + 90 E2E + visual validation) |
+| TTS Round-Trip Validation | ✅ Complete | Whisper transcription via faster-whisper API (see below) |
 | Code Signing & Distribution | 🔲 Planned | Required for public release |
 | Cross-Platform Support | 🔲 Planned | Device detection ready; builds not yet tested |
 
@@ -257,7 +258,27 @@ v1.0 release candidate. All core features complete and tested.
 - **Voice Clone Recording:** Microphone recording requires a production build (macOS WebView security). Use the **Import** button in development mode.
 - **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace. Progress is now displayed during download.
 - **Streaming Generation:** The models support streaming, but the app uses non-streaming generation with elapsed time display.
+- **MP3 Export:** MP3 export has a known issue in v1.0 and may produce incorrect output. WAV export is recommended.
 - **Cross-platform:** Device detection supports CUDA/CPU but Windows/Linux builds are not yet tested.
+
+### TTS Round-Trip Validation (Implemented)
+
+Whisper-based transcription is integrated into the Python backend using faster-whisper (CTranslate2). Generated audio can be transcribed back to text via the REST API to validate TTS output quality.
+
+**Implementation:**
+- **STT Engine:** faster-whisper (CTranslate2-based, runs on CPU to avoid competing with TTS GPU memory)
+- **Models:** 6 Whisper variants from tiny (75MB) to large-v3 (3.1GB), downloaded from HuggingFace on demand
+- **API Endpoints:** 5 endpoints for model management and transcription (`/whisper-status`, `/whisper-models`, `/load-whisper`, `/unload-whisper`, `/transcribe`)
+- **Output:** Transcribed text, detected language, confidence score (0-1), and audio duration
+
+**Usage:**
+1. Load a Whisper model: `POST /load-whisper` with `{"model_size": "base"}`
+2. Transcribe audio: `POST /transcribe` with multipart form upload
+3. Compare transcription against original text to compute accuracy metrics
+
+> **Note:** Whisper transcription is currently API-only. A desktop UI for transcription is planned for a future release.
+
+See `docs/e2e-visual-validation-report.html` for E2E visual validation results.
 
 ### Cross-Platform Roadmap
 
@@ -285,6 +306,11 @@ The Python backend exposes a REST API at `http://127.0.0.1:8765`. See [docs/API_
 | `/generate/custom-voice` | POST | Generate with preset voice |
 | `/generate/voice-clone` | POST | Clone from reference audio |
 | `/generate/voice-design` | POST | Generate from description |
+| `/whisper-status` | GET | Whisper model status |
+| `/whisper-models` | GET | Available Whisper model sizes |
+| `/load-whisper` | POST | Load a Whisper model |
+| `/unload-whisper` | POST | Unload Whisper model |
+| `/transcribe` | POST | Transcribe audio file |
 
 ## Troubleshooting
 

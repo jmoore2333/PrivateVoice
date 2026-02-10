@@ -18,8 +18,8 @@ Complete guide for testing, running, and releasing PrivateVoice (formerly Qwen3-
 
 ```bash
 # Clone and install
-git clone https://github.com/your-repo/Qwen3-TTS.git
-cd Qwen3-TTS
+git clone https://github.com/jmoore/PrivateVoice.git
+cd PrivateVoice
 pnpm install
 
 # Run tests
@@ -142,27 +142,36 @@ pnpm test:all
 
 # Or manually:
 pnpm check          # Type checking
-pnpm test:run       # Unit tests (28 tests)
-pnpm test:e2e       # E2E tests (requires dev server)
+pnpm test:run       # Unit tests (216 tests)
+pnpm test:e2e       # E2E tests (90 tests, requires dev server)
 ```
 
 ### Test Structure
 
+**216 unit tests** across stores, components, API client, and audio modules:
+
 ```
 src/
 ├── lib/
-│   ├── stores/
-│   │   ├── appStore.test.ts
-│   │   └── libraryStore.test.ts
-│   ├── components/
-│   │   ├── layout/Header.test.ts
-│   │   ├── input/TextInput.test.ts
-│   │   └── output/OutputPanel.test.ts
-│   └── audio/
-│       └── wavesurfer.test.ts
-e2e/
-└── example.spec.ts    # Playwright E2E tests
+│   ├── stores/          # Store tests (appStore, ttsStore, settingsStore, libraryStore, etc.)
+│   ├── components/      # Component tests (layout, input, output, library, settings, etc.)
+│   ├── api/             # API client tests (ttsClient)
+│   └── audio/           # Audio utility tests (wavesurfer)
 ```
+
+**90 E2E tests** across 4 Playwright spec files:
+
+```
+e2e/
+├── example.spec.ts              #  8 tests - Basic app loading and navigation
+├── library.spec.ts              # 14 tests - Library save, search, tabs, persistence
+├── production.spec.ts           # 34 tests - Startup, generation, modes, settings, debug
+└── visual-validation.spec.ts    # 34 tests - Module visibility, mode switching, visual checks
+```
+
+**37 Python backend tests** in `python/tests/`.
+
+**343 automated tests total** (216 unit + 90 E2E + 37 Python).
 
 ### Writing Tests
 
@@ -220,7 +229,7 @@ The easiest way to build a distributable app:
 ```
 
 This script:
-1. Builds the Python sidecar using PyInstaller (~243MB binary)
+1. Builds the Python sidecar using PyInstaller (~266MB binary)
 2. Installs frontend dependencies
 3. Builds the Tauri application
 4. Creates both `.app` bundle and `.dmg` installer
@@ -245,19 +254,19 @@ pnpm tauri build
 ```
 src-tauri/target/release/bundle/
 ├── macos/
-│   └── Qwen3-TTS.app        # ~253MB app bundle
+│   └── PrivateVoice.app        # ~253MB app bundle
 └── dmg/
-    └── Qwen3-TTS_0.1.0_aarch64.dmg  # ~256MB installer
+    └── PrivateVoice_1.0.0_aarch64.dmg  # ~256MB installer
 ```
 
 ### Testing the Built App
 
 ```bash
 # Open the app bundle directly
-open src-tauri/target/release/bundle/macos/Qwen3-TTS.app
+open src-tauri/target/release/bundle/macos/PrivateVoice.app
 
 # Or mount and test the DMG
-open src-tauri/target/release/bundle/dmg/Qwen3-TTS_*.dmg
+open src-tauri/target/release/bundle/dmg/PrivateVoice_*.dmg
 ```
 
 ---
@@ -280,7 +289,8 @@ open src-tauri/target/release/bundle/dmg/Qwen3-TTS_*.dmg
 1. Update version in `package.json`
 2. Update version in `src-tauri/tauri.conf.json`
 3. Update version in `src-tauri/Cargo.toml`
-4. Commit: `git commit -m "chore: bump version to X.Y.Z"`
+4. Update version in `python/tts_server/__init__.py`
+5. Commit: `git commit -m "chore: bump version to X.Y.Z"`
 
 ### Build Release Artifacts
 
@@ -302,23 +312,23 @@ For distribution outside the App Store:
 # Sign the app (requires Apple Developer certificate)
 codesign --deep --force --verify --verbose \
   --sign "Developer ID Application: Your Name (TEAM_ID)" \
-  src-tauri/target/release/bundle/macos/Qwen3-TTS.app
+  src-tauri/target/release/bundle/macos/PrivateVoice.app
 
 # Notarize the app
 xcrun notarytool submit \
-  src-tauri/target/release/bundle/dmg/Qwen3-TTS_*.dmg \
+  src-tauri/target/release/bundle/dmg/PrivateVoice_*.dmg \
   --apple-id "your@email.com" \
   --team-id "TEAM_ID" \
   --password "app-specific-password" \
   --wait
 
 # Staple the notarization
-xcrun stapler staple src-tauri/target/release/bundle/macos/Qwen3-TTS.app
+xcrun stapler staple src-tauri/target/release/bundle/macos/PrivateVoice.app
 ```
 
 ### Create GitHub Release
 
-1. Tag the release: `git tag v0.1.0 && git push --tags`
+1. Tag the release: `git tag v1.0.0 && git push --tags`
 2. Create release on GitHub
 3. Upload DMG as release asset
 4. Write release notes

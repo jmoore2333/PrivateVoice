@@ -20,12 +20,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .inference import get_model, PRESET_SPEAKERS
+from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS
 from .device import (
     get_device_config, get_memory_info, check_memory_for_model,
     MODEL_MEMORY_REQUIREMENTS, SUPPORTED_MP3_BITRATES,
 )
 from .download_tracker import get_download_tracker, DownloadProgress
+from .transcription import (
+    get_whisper_model, WHISPER_MODEL_REPOS, WHISPER_MODEL_SIZES,
+)
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
 
@@ -118,6 +121,29 @@ class SpeakerInfoResponse(BaseModel):
     gender: str
 
 
+class WhisperStatusResponse(BaseModel):
+    loaded: bool
+    model_size: Optional[str]
+    device: str
+
+
+class WhisperModelInfoResponse(BaseModel):
+    size: str
+    parameters: str
+    download_size_mb: int
+
+
+class LoadWhisperRequest(BaseModel):
+    model_size: str = "base"
+
+
+class TranscriptionResponse(BaseModel):
+    text: str
+    language: str
+    confidence: float
+    duration_seconds: float
+
+
 # ============================================================================
 # Startup State
 # ============================================================================
@@ -164,6 +190,9 @@ async def lifespan(app: FastAPI):
     model = get_model()
     if model.is_loaded:
         model.unload()
+    whisper = get_whisper_model()
+    if whisper.is_loaded:
+        whisper.unload()
 
 
 app = FastAPI(
@@ -328,6 +357,13 @@ async def load_model(request: LoadModelRequest):
     Runs model download + loading in a background thread so the event loop
     remains free to serve /download-progress polling requests.
     """
+    if request.model_id not in MODEL_IDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model ID: {request.model_id}. "
+            f"Available: {list(MODEL_IDS.keys())}",
+        )
+
     model = get_model()
     state = get_startup_state()
 
@@ -467,6 +503,103 @@ async def generate_voice_design(request: VoiceDesignRequest):
 
 
 # ============================================================================
+# Whisper Transcription Endpoints
+# ============================================================================
+
+@app.get("/whisper-status", response_model=WhisperStatusResponse)
+async def whisper_status():
+    """Get current Whisper model status."""
+    whisper = get_whisper_model()
+    return WhisperStatusResponse(
+        loaded=whisper.is_loaded,
+        model_size=whisper.model_size if whisper.is_loaded else None,
+        device="cpu",  # CTranslate2 does not support MPS
+    )
+
+
+@app.get("/whisper-models", response_model=List[WhisperModelInfoResponse])
+async def whisper_models():
+    """List available Whisper model sizes with download info."""
+    return [
+        WhisperModelInfoResponse(
+            size=size,
+            parameters=info["parameters"],
+            download_size_mb=info["download_size_mb"],
+        )
+        for size, info in WHISPER_MODEL_SIZES.items()
+    ]
+
+
+@app.post("/load-whisper")
+async def load_whisper(request: LoadWhisperRequest):
+    """Load a Whisper model for transcription.
+
+    Runs download + loading in a background thread so the event loop
+    remains free to serve /download-progress polling requests.
+    """
+    if request.model_size not in WHISPER_MODEL_REPOS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown model size: {request.model_size}. "
+            f"Available: {list(WHISPER_MODEL_REPOS.keys())}",
+        )
+
+    whisper = get_whisper_model()
+
+    try:
+        logger.info(f"Loading Whisper model: {request.model_size}")
+        await asyncio.to_thread(whisper.load, request.model_size)
+        return {"status": "loaded", "model_size": request.model_size}
+    except Exception as e:
+        logger.error(f"Failed to load Whisper model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/unload-whisper")
+async def unload_whisper():
+    """Unload the Whisper model to free memory."""
+    whisper = get_whisper_model()
+    whisper.unload()
+    return {"status": "unloaded"}
+
+
+@app.post("/transcribe", response_model=TranscriptionResponse)
+async def transcribe(
+    audio: UploadFile = File(...),
+):
+    """Transcribe an audio file using the loaded Whisper model."""
+    whisper = get_whisper_model()
+
+    if not whisper.is_loaded:
+        raise HTTPException(status_code=400, detail="Whisper model not loaded")
+
+    audio_data = await audio.read()
+    if len(audio_data) > MAX_AUDIO_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio file exceeds maximum size of {MAX_AUDIO_SIZE // (1024*1024)} MB",
+        )
+
+    try:
+        logger.info("Transcribing audio...")
+        result = await asyncio.to_thread(whisper.transcribe, audio_data)
+        logger.info(
+            f"Transcription complete: lang={result.language}, "
+            f"duration={result.duration_seconds}s, "
+            f"text={result.text[:80]}..."
+        )
+        return TranscriptionResponse(
+            text=result.text,
+            language=result.language,
+            confidence=result.language_probability,
+            duration_seconds=result.duration_seconds,
+        )
+    except Exception as e:
+        logger.error(f"Transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Lifecycle Endpoints
 # ============================================================================
 
@@ -476,6 +609,9 @@ async def shutdown():
     model = get_model()
     if model.is_loaded:
         model.unload()
+    whisper = get_whisper_model()
+    if whisper.is_loaded:
+        whisper.unload()
 
     logger.info("Shutdown requested")
     # Signal the process to exit
@@ -499,7 +635,7 @@ def main():
 
     # Suppress noisy polling endpoints from uvicorn access logs
     class SuppressPollingFilter(logging.Filter):
-        _suppressed = {"/health", "/startup-status", "/model-status", "/download-progress"}
+        _suppressed = {"/health", "/startup-status", "/model-status", "/download-progress", "/whisper-status"}
 
         def filter(self, record: logging.LogRecord) -> bool:
             msg = record.getMessage()
