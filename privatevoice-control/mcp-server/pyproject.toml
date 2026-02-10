@@ -1,0 +1,19 @@
+[project]
+name = "privatevoice-mcp"
+version = "0.1.0"
+description = "MCP server for AI-driven control and testing of the PrivateVoice desktop app"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.0,<3",
+    "httpx>=0.27",
+    "websockets>=13.0",
+    "mlx-whisper>=0.4",
+    "jiwer>=3.0",
+]
+
+[project.scripts]
+privatevoice-mcp = "privatevoice_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

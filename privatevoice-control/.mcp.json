@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "privatevoice": {
+      "command": "uv",
+      "args": ["run", "--directory", "${CLAUDE_PLUGIN_ROOT}/mcp-server", "privatevoice-mcp"],
+      "env": {
+        "PRIVATEVOICE_APP_PATH": "${PRIVATEVOICE_APP_PATH}",
+        "PRIVATEVOICE_API_PORT": "${PRIVATEVOICE_API_PORT}",
+        "PRIVATEVOICE_BRIDGE_PORT": "${PRIVATEVOICE_BRIDGE_PORT}"
+      }
+    }
+  }
+}

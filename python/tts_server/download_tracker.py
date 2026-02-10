@@ -175,13 +175,32 @@ def create_hf_tqdm_class():
         def close(self):
             pass
 
+        def __iter__(self):
+            return iter([])
+
+        def __len__(self):
+            return 0
+
+        def __bool__(self):
+            return True
+
         def __enter__(self):
             return self
 
         def __exit__(self, *args):
             self.close()
 
-        # tqdm compatibility stubs
+        # tqdm compatibility stubs — huggingface_hub calls these as class methods
+        _lock = Lock()
+
+        @classmethod
+        def get_lock(cls):
+            return cls._lock
+
+        @classmethod
+        def set_lock(cls, lock):
+            cls._lock = lock
+
         def set_description(self, desc=None, refresh=True):
             if desc:
                 self.desc = desc

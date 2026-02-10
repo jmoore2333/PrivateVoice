@@ -1,0 +1,8 @@
+{
+  "name": "privatevoice-control",
+  "version": "0.1.0",
+  "description": "MCP server for native control of the PrivateVoice desktop app. Enables AI-driven round-trip testing: launch, generate audio, capture screenshots, and verify speech accuracy.",
+  "author": {
+    "name": "jmoore"
+  }
+}
