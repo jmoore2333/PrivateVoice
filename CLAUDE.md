@@ -48,7 +48,7 @@ Tauri 2 Rust Shell (sidecar lifecycle, native APIs)
 
 **Tauri Rust** (`src-tauri/`): Manages the Python sidecar process lifecycle. In dev mode (`debug_assertions`), spawns Python directly from venv. In release mode, uses `tauri-plugin-shell` to run the PyInstaller-bundled binary. Streams sidecar stdout/stderr as Tauri events (`sidecar-log`, `sidecar-startup`). Uses `tauri-plugin-dialog` for native save/open dialogs and `tauri-plugin-fs` for file system access (library persistence, export).
 
-**Python Backend** (`python/tts_server/`): FastAPI server wrapping Qwen3-TTS. `inference.py` handles model loading and audio generation (WAV and MP3 via lameenc). `device.py` auto-detects Apple Silicon MPS, NVIDIA CUDA, or CPU and configures dtype/attention accordingly. Models downloaded from HuggingFace Hub on first use (~1.2-3.4GB).
+**Python Backend** (`python/tts_server/`): FastAPI server wrapping Qwen3-TTS. `inference.py` handles model loading (two-phase: `snapshot_download` with progress tracking, then `from_pretrained` from local cache) and audio generation (WAV and MP3 via lameenc). `device.py` auto-detects Apple Silicon MPS, NVIDIA CUDA, or CPU and configures dtype/attention accordingly. `download_tracker.py` provides real-time download progress via `/download-progress` endpoint. Models downloaded from HuggingFace Hub on first use (~1.2-3.4GB).
 
 ### Three TTS Modes
 
@@ -68,7 +68,7 @@ Tauri 2 Rust Shell (sidecar lifecycle, native APIs)
 
 ### Audio Export
 
-Generation produces audio in the format selected in Settings (default WAV). MP3 export uses `lameenc` (192kbps, pure Python, no ffmpeg dependency). Export uses native Tauri save dialog in production, browser download fallback in dev.
+Generation produces audio in the format selected in Settings (default WAV). MP3 export uses `lameenc` with configurable bitrate (128/192/256/320 kbps, default 192). Export uses native Tauri save dialog in production, browser download fallback in dev.
 
 ### Library Persistence
 
@@ -80,7 +80,7 @@ Voice library uses two-tier storage:
 
 - **Svelte 5 runes only** — all stores use `$state()`, `$derived()`, `$effect()`. No legacy `writable()`/`readable()` stores.
 - **Tailwind CSS 4** — uses `@tailwindcss/vite` plugin, not PostCSS config.
-- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`.
+- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright in `e2e/` directory with full API mocking (CI-compatible). Visual validation tests capture screenshots at 4 resolutions (900x650 to 1920x1080).
 - **Pre-commit hook** (Husky) runs `svelte-check` on staged `.ts`/`.svelte` files.
 - **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
 - The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
@@ -94,9 +94,33 @@ Voice library uses two-tier storage:
 | `tauri-plugin-dialog` | Native save/open file dialogs |
 | `tauri-plugin-fs` | File system access for library persistence |
 
+### Model/Mode Compatibility
+
+Mode tabs show visual indicators (orange dots) when incompatible with the loaded model. Switching to an incompatible mode shows a banner with a one-click "Load compatible model" action.
+
+| Model | Custom Voice | Voice Clone | Voice Design |
+|-------|--------------|-------------|--------------|
+| 0.6B / 1.7B | Yes | No | No |
+| 0.6B-base / 1.7B-base | No | Yes | No |
+| 1.7B-design | No | No | Yes |
+
+### Responsive Layout
+
+Multi-column layout with fixed-width input panel (380px) and flexible output panel. Stacks vertically below 768px (md breakpoint). All overlay panels (Library, Settings, Help) use fixed positioning for resolution independence. Tested at 900x650, 1280x800, 1440x900, 1920x1080.
+
 ## Platform Support
 
 - **macOS** (12.3+): Apple Silicon primary target (MPS). Intel falls back to CPU.
 - **Cross-platform ready**: Device detection supports CUDA (Linux/Windows), build scripts detect OS/arch dynamically. Windows/Linux builds not yet tested.
+- **Memory check**: `/memory-check/{model_id}` endpoint validates available RAM before model load (0.6B needs ~8GB, 1.7B needs ~12GB).
 - Voice Clone recording requires a production build (WebView security blocks mic in dev mode).
-- 0.6B model needs ~8GB RAM, 1.7B needs ~12GB. 16GB+ recommended.
+- 16GB+ RAM recommended.
+
+## Testing
+
+309 automated tests total:
+- **216 unit tests** (Vitest): Stores, components, API client, audio
+- **56 E2E functional tests** (Playwright): Startup, generation, modes, settings, library, debug
+- **37 visual validation tests** (Playwright): Module visibility at 4 resolutions, interaction checks, screenshots
+
+See `PRODUCTION_TEST_PROCEDURE.md` for manual pre-release checklist (93+ test cases).

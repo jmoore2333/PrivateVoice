@@ -95,10 +95,40 @@ class TestSystemInfoEndpoint:
             "memory_total_gb",
             "memory_available_gb",
             "cache_dir",
+            "model_memory_requirements",
+            "supported_mp3_bitrates",
         }
         assert expected_keys.issubset(data.keys())
         assert isinstance(data["memory_total_gb"], (int, float))
         assert isinstance(data["memory_available_gb"], (int, float))
+
+    @patch("tts_server.main.get_device_config")
+    @patch("tts_server.main.get_memory_info")
+    def test_system_info_model_memory_requirements(self, mock_mem, mock_cfg):
+        """System info includes memory requirements for all model variants."""
+        mock_cfg.return_value = MagicMock(device="cpu")
+        mock_mem.return_value = {"device": "cpu", "total_gb": 16, "available_gb": 8}
+
+        client = _get_client()
+        resp = client.get("/system-info")
+        data = resp.json()
+        reqs = data["model_memory_requirements"]
+        assert "0.6b" in reqs
+        assert "1.7b" in reqs
+        assert reqs["0.6b"] == 8
+        assert reqs["1.7b"] == 12
+
+    @patch("tts_server.main.get_device_config")
+    @patch("tts_server.main.get_memory_info")
+    def test_system_info_mp3_bitrates(self, mock_mem, mock_cfg):
+        """System info includes supported MP3 bitrates."""
+        mock_cfg.return_value = MagicMock(device="cpu")
+        mock_mem.return_value = {"device": "cpu", "total_gb": 16, "available_gb": 8}
+
+        client = _get_client()
+        resp = client.get("/system-info")
+        data = resp.json()
+        assert data["supported_mp3_bitrates"] == [128, 192, 256, 320]
 
 
 # ---------------------------------------------------------------------------
@@ -434,3 +464,113 @@ class TestDownloadProgress:
         data = resp.json()
         assert "status" in data
         assert "bytes_downloaded" in data
+
+
+# ---------------------------------------------------------------------------
+# Memory check
+# ---------------------------------------------------------------------------
+
+class TestMemoryCheck:
+    """GET /memory-check/{model_id}."""
+
+    @patch("tts_server.main.check_memory_for_model")
+    def test_memory_check_sufficient(self, mock_check):
+        """Returns sufficient=True when enough RAM."""
+        mock_check.return_value = {
+            "required_gb": 8,
+            "available_gb": 16.0,
+            "sufficient": True,
+            "warning": None,
+        }
+
+        client = _get_client()
+        resp = client.get("/memory-check/0.6b")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sufficient"] is True
+        assert data["warning"] is None
+
+    @patch("tts_server.main.check_memory_for_model")
+    def test_memory_check_insufficient(self, mock_check):
+        """Returns warning when not enough RAM."""
+        mock_check.return_value = {
+            "required_gb": 12,
+            "available_gb": 6.0,
+            "sufficient": False,
+            "warning": "Model requires ~12GB RAM, only 6.0GB available",
+        }
+
+        client = _get_client()
+        resp = client.get("/memory-check/1.7b")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sufficient"] is False
+        assert "12GB" in data["warning"]
+
+
+# ---------------------------------------------------------------------------
+# MP3 bitrate in generation
+# ---------------------------------------------------------------------------
+
+class TestMP3Bitrate:
+    """Verify mp3_bitrate is passed through to the model."""
+
+    @patch("tts_server.main.get_model")
+    def test_custom_voice_bitrate(self, mock_get_model):
+        """Custom voice passes mp3_bitrate to model."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/custom-voice",
+            json={
+                "text": "Hello",
+                "speaker": "serena",
+                "format": "mp3",
+                "mp3_bitrate": 320,
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args[1]
+        assert call_kwargs["mp3_bitrate"] == 320
+
+    @patch("tts_server.main.get_model")
+    def test_custom_voice_invalid_bitrate_defaults(self, mock_get_model):
+        """Invalid bitrate falls back to 192."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/custom-voice",
+            json={
+                "text": "Hello",
+                "speaker": "serena",
+                "format": "mp3",
+                "mp3_bitrate": 999,
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args[1]
+        assert call_kwargs["mp3_bitrate"] == 192
+
+    @patch("tts_server.main.get_model")
+    def test_voice_design_bitrate(self, mock_get_model):
+        """Voice design passes mp3_bitrate to model."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-design",
+            json={
+                "text": "Hello",
+                "voice_description": "A warm voice",
+                "format": "mp3",
+                "mp3_bitrate": 256,
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_voice_design.call_args[1]
+        assert call_kwargs["mp3_bitrate"] == 256

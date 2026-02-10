@@ -62,5 +62,24 @@ Version: 1.0.0
 - **Whisper auto-transcription**: Settings toggle exists but disabled (coming in future release)
 - **Translation support**: Settings toggle exists but disabled (coming in future release)
 - **Cross-platform**: Device detection and build scripts support CUDA/Windows/Linux but not yet tested on those platforms
-- **MP3 quality**: Fixed at 192kbps, not configurable
+- **MP3 quality**: Now configurable (128/192/256/320 kbps) via API; frontend bitrate selector in Settings is a future enhancement
 - **Library in dev mode**: Falls back to localStorage (metadata only, no audio persistence)
+- **Streaming generation**: Models support streaming but app uses non-streaming with elapsed time display
+
+## v1.0-release Sprint Fixes
+
+| Issue | Resolution |
+|-------|------------|
+| Model/mode incompatibility shows cryptic error | Orange dot indicators + one-click model switch banner |
+| No download progress for HuggingFace models | Two-phase loading with snapshot_download + progress tracking |
+| No generation progress feedback | Elapsed time spinner on all generate buttons + cancel |
+| UI is themed stubs, not production layout | Multi-column macOS layout with information hierarchy |
+| No help system | 6 troubleshooting guides, speaker gallery, keyboard shortcuts |
+| Voice Design/Clone panels lack guidance | Description templates, step-flow indicators, character counter |
+| MP3 bitrate not configurable | Configurable 128-320 kbps via API parameter |
+| No memory check before model load | `/memory-check/{model_id}` endpoint with RAM validation |
+| Library writeAudioFile has no error handling | Added try/catch with re-throw to prevent orphaned metadata |
+| Non-atomic library save can desync | Audio write failure now aborts before index update |
+| Missing audio files silently dropped | Logged with warnings including item name/id |
+| App unusable at many resolutions | Responsive layout with md breakpoint stacking, tested at 4 sizes |
+| Only 1 E2E test | 93 E2E tests (56 functional + 37 visual validation) |

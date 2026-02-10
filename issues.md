@@ -7,95 +7,32 @@ Tracking issues discovered during development for future work.
 ## High Priority
 
 ### Model/Mode Compatibility UX
-**Status:** Open
-**Found:** Phase 3 testing
+**Status:** Resolved (v1.0-release)
 
-When user has Voice Design model (1.7b-design) loaded and switches to Custom Voice mode, they get error:
-```
-model with tokenizer_type: qwen3_tts_tokenizer_12hz tts_model_size: 1b7 tts_model_type: voice_design does not support generate_custom_voice
-```
-
-**Expected behavior:** Either:
-- Auto-load compatible model when switching modes
-- Disable incompatible modes for current model
-- Show clear warning with "Load compatible model?" prompt
-
-**Model compatibility matrix:**
-| Model | Custom Voice | Voice Clone | Voice Design |
-|-------|--------------|-------------|--------------|
-| 0.6B | ✓ | ✓ | ✗ |
-| 1.7B | ✓ | ✓ | ✗ |
-| 1.7B-Design | ✗ | ✗ | ✓ |
+Mode tabs now show orange dot indicators when incompatible with current model. Clicking an incompatible mode shows a banner with one-click "Load compatible model" action. ModeSelector cards also have compatibility awareness.
 
 ---
 
 ### Download Progress Monitoring
-**Status:** Open (Research Complete)
-**Found:** Phase 3 testing
+**Status:** Resolved (v1.0-release)
 
-HuggingFace model downloads show no progress. The `download_tracker.py` was created but not fully integrated.
-
-**Research Findings:**
-- `huggingface_hub` supports `tqdm_class` parameter for custom progress tracking
-- Can use `dry_run=True` to get file sizes before downloading
-- Best approach: `snapshot_download()` with custom tqdm, then `from_pretrained(local_path)`
-
-**Implementation Plan:**
-```python
-from huggingface_hub import snapshot_download
-from tqdm.auto import tqdm as base_tqdm
-
-class ProgressCallback(base_tqdm):
-    callback = None
-    def update(self, n=1):
-        super().update(n)
-        if self.callback and self.total:
-            self.callback(current=self.n, total=self.total, filename=self.desc)
-
-# Use: snapshot_download(repo_id, tqdm_class=ProgressCallback)
-```
-
-**Requirements:**
-- Modify `inference.py` to use `snapshot_download` with progress callback
-- Poll `/download-progress` endpoint during model loading
-- Show in debug console and UI
+Implemented two-phase model loading: `snapshot_download()` with custom tqdm class for real progress tracking, then `from_pretrained(local_path)`. Download tracker integrated with `/download-progress` endpoint. Model loading runs in background thread via `asyncio.to_thread()` to keep event loop responsive for polling.
 
 ---
 
 ### Generation Progress Indicator
-**Status:** Open (Research Complete)
-**Found:** Phase 3 testing
+**Status:** Resolved (v1.0-release)
 
-No visual feedback while audio is "baking" (generating). User sees frozen UI.
-
-**Research Findings:**
-- qwen_tts does NOT expose progress callbacks, streaming, or generator patterns
-- Methods return complete `(wavs, sample_rate)` tuples
-- The `non_streaming_mode` parameter only affects internal generation, not output format
-- vLLM-Omni has streaming but requires separate deployment
-
-**Workaround Options:**
-1. **Time-based estimation** - Measure avg time per character, estimate progress
-2. **Text chunking** - For long texts, split into sentences, show per-sentence progress
-3. **Indeterminate spinner** - Show elapsed time with "Generating..." state
-
-**Recommended approach for now:** Indeterminate spinner with elapsed time display
+Implemented indeterminate spinner with elapsed time display. Header status badge shows "Generating... (12.3s)". Generate buttons in all three input panels show elapsed time. OutputPanel has spinner + elapsed time + cancel button.
 
 ---
 
 ## Medium Priority
 
 ### UI Redesign Needed
-**Status:** Open
-**Found:** Phase 3 review
+**Status:** Resolved (v1.0-release)
 
-Current UI is just themed stubs - needs comprehensive redesign:
-- Layout composition (not just single column form)
-- Information hierarchy
-- Visual rhythm and spacing
-- Unique character/identity
-
-**Approach:** Wireframe/sketch before components, not style-first.
+Redesigned to multi-column macOS layout: fixed-width input panel (380px, 320-440px range) with output panel filling remaining space. Responsive stacking below 768px breakpoint. Proper flex overflow handling. Tighter header padding with responsive controls. All overlay panels (Library, Settings, Help) use fixed positioning for resolution independence.
 
 ---
 
@@ -112,33 +49,17 @@ wavesurfer.js integration prepared but not bundled due to npm issues.
 
 ---
 
-## Deferred to UI Redesign
+## Resolved (Previously Deferred)
 
 ### Voice Library (Phase 3G)
-**Status:** Deferred
-**Reason:** Requires proper gallery/card UI - would be another stub if built now
+**Status:** Resolved (v1.0-release)
 
-**Requirements:**
-- Save voice clone configurations (reference audio + text + settings)
-- Gallery view of saved voices with preview/play
-- Import/export voice profiles
-- Organize into folders/tags
-
-**Backend needed:**
-- `voiceLibraryStore.svelte.ts` - State management
-- File storage via Tauri fs plugin
-- Voice metadata schema
+Two-tier storage implemented: in-memory recent cache + file-based persistence via Tauri FS plugin ({appData}/library/{id}.wav + index.json). Error handling improved: audio write failures abort before updating index, missing audio files logged with warnings. Library drawer with tabs (Recent/Audio/Voices), search, and filtering.
 
 ### Help Panel (Phase 3H)
-**Status:** Deferred
-**Reason:** Content should match final UI design
+**Status:** Resolved (v1.0-release)
 
-**Requirements:**
-- Getting started guide
-- Mode explanations (Custom Voice vs Clone vs Design)
-- Speaker guide with audio samples
-- Troubleshooting section
-- Keyboard shortcuts
+Expanded with 6 troubleshooting guides (model loading, audio output, voice clone recording, generation speed, wrong model for mode, slow first launch). Context-sensitive help links from panels. Keyboard shortcuts reference. Speaker gallery.
 
 ## Future Phases
 

@@ -50,6 +50,7 @@ def _install_other_mocks():
         "accelerate",
         "transformers",
         "safetensors",
+        "huggingface_hub",
     ):
         if mod_name not in sys.modules:
             sys.modules[mod_name] = MagicMock()
@@ -99,3 +100,15 @@ def reset_startup_state():
     state.message = "Starting Python environment..."
     state.progress = 0
     yield
+
+
+@pytest.fixture
+def reset_download_tracker():
+    """
+    Reset the download tracker singleton between tests.
+    """
+    from tts_server.download_tracker import get_download_tracker
+    tracker = get_download_tracker()
+    tracker.reset()
+    yield
+    tracker.reset()

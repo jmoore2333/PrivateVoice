@@ -261,14 +261,33 @@ Getting the best quality:
     {
       id: 'troubleshooting',
       title: 'Troubleshooting',
-      type: 'text',
-      content: `Slow first launch? The Python environment and models are unpacked on first run. This can take several minutes.
-
-Mic recording not available in dev mode? Use a production build on macOS to access microphone APIs.
-
-Model download stuck? Check your network; models can be 1.2-3.4GB.
-
-Streaming note: The models support streaming, but the app currently uses non-streaming generation.`
+      type: 'voice-guides',
+      subsections: [
+        {
+          title: "Model won't load",
+          text: "Check available memory: 0.6B models need ~8GB RAM, 1.7B models need ~12GB. Close other apps to free memory. If the download stalls, check your network — models are 1.2-3.4GB. On first launch, the Python environment also needs to unpack, which can take several minutes."
+        },
+        {
+          title: "No audio output",
+          text: "Check your system audio output device in System Settings > Sound. Try playing audio in another app. If the generate button completes but no waveform appears, check the error banner at the top of the window."
+        },
+        {
+          title: "Voice Clone recording not working",
+          text: "Microphone recording requires a production build due to macOS WebView security restrictions. In development mode, use the Import button to load a pre-recorded audio file instead."
+        },
+        {
+          title: "Generation taking too long",
+          text: "Typical times: 0.6B model 5-15s, 1.7B model 15-60s depending on text length. CPU-only (Intel Mac) is significantly slower. Longer text takes more time — try shorter passages first. You can cancel generation with the Cancel button."
+        },
+        {
+          title: "Wrong model for mode",
+          text: "Each mode requires specific models: Custom Voice needs CustomVoice models (0.6B/1.7B), Voice Clone needs Base models, Voice Design needs the 1.7B-Design model. The app shows a warning banner with a one-click model switch when you're in an incompatible mode."
+        },
+        {
+          title: "Slow first launch",
+          text: "On first run, PrivateVoice unpacks its Python environment and downloads models. This can take 5-10 minutes depending on your internet connection. Subsequent launches are much faster."
+        },
+      ]
     },
     {
       id: 'keyboard',

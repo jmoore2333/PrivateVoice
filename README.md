@@ -229,31 +229,35 @@ open src-tauri/target/release/bundle/macos/PrivateVoice.app
 
 ## Project Status
 
-### Current State (January 2026)
+### Current State (February 2026)
 
-The app is functional for local development and testing. Core TTS generation works across all three modes.
+v1.0 release candidate. All core features complete and tested.
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | Core Infrastructure | ✅ Complete | Tauri + Svelte 5 + Python sidecar |
 | Python TTS Server | ✅ Complete | FastAPI with Qwen3-TTS |
-| UI Implementation | ✅ Complete | Dark theme, all three TTS modes |
+| UI Implementation | ✅ Complete | Multi-column macOS layout, responsive (900x650 to 1920x1080) |
 | Settings & Debug Tools | ✅ Complete | Persistent settings, debug console |
-| Model Management | ✅ Complete | Load/switch models, auto-load on startup |
+| Model Management | ✅ Complete | Load/switch with download progress, memory check, auto-load |
 | Custom Voice Mode | ✅ Complete | 9 preset speakers + style instructions |
-| Voice Clone Mode | ⚠️ Partial | Works with imported audio; recording requires production build |
-| Voice Design Mode | ✅ Complete | Text-based voice description |
-| Audio Export | ✅ Complete | WAV export with descriptive filenames |
-| Testing Infrastructure | ✅ Complete | Unit tests + E2E tests (CI-compatible) |
+| Voice Clone Mode | ✅ Complete | Import + recording (production build), low-quality mode |
+| Voice Design Mode | ✅ Complete | Description templates, character counter |
+| Audio Export | ✅ Complete | WAV + MP3 (configurable 128-320 kbps) |
+| Voice Library | ✅ Complete | File-based persistence, search, tabs |
+| Help System | ✅ Complete | Troubleshooting, speaker gallery, keyboard shortcuts |
+| Model Compatibility UX | ✅ Complete | Visual indicators, one-click model switching |
+| Generation Feedback | ✅ Complete | Elapsed time spinner, cancel button |
+| Testing Infrastructure | ✅ Complete | 309 automated tests (unit + E2E + visual) |
 | Code Signing & Distribution | 🔲 Planned | Required for public release |
-| Cross-Platform Support | 🔲 Planned | Currently macOS only |
+| Cross-Platform Support | 🔲 Planned | Device detection ready; builds not yet tested |
 
 ### Known Limitations
 
-- **Voice Clone Recording:** Microphone recording doesn't work in development mode due to macOS WebView security restrictions. Use the **Import** button to upload audio files, or test with a production build.
-- **MP3 Export:** Currently only WAV export is supported. MP3 encoding requires backend implementation.
-- **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace.
-- **Streaming Generation:** The models support streaming, but the app currently uses non-streaming generation.
+- **Voice Clone Recording:** Microphone recording requires a production build (macOS WebView security). Use the **Import** button in development mode.
+- **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace. Progress is now displayed during download.
+- **Streaming Generation:** The models support streaming, but the app uses non-streaming generation with elapsed time display.
+- **Cross-platform:** Device detection supports CUDA/CPU but Windows/Linux builds are not yet tested.
 
 ### Cross-Platform Roadmap
 
@@ -266,14 +270,18 @@ The app is functional for local development and testing. Core TTS generation wor
 
 ## API Reference
 
-The Python backend exposes a REST API at `http://127.0.0.1:8765`:
+The Python backend exposes a REST API at `http://127.0.0.1:8765`. See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for full endpoint documentation including request/response schemas.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Server health check |
 | `/model-status` | GET | Current model info |
+| `/download-progress` | GET | Model download progress |
+| `/memory-check/{model_id}` | GET | Check RAM requirements before loading |
+| `/system-info` | GET | Device, memory, supported settings |
 | `/speakers` | GET | List preset speakers |
-| `/load-model` | POST | Load model by ID |
+| `/speakers-info` | GET | Speaker metadata with descriptions |
+| `/load-model` | POST | Load model by ID (background thread) |
 | `/generate/custom-voice` | POST | Generate with preset voice |
 | `/generate/voice-clone` | POST | Clone from reference audio |
 | `/generate/voice-design` | POST | Generate from description |
@@ -299,7 +307,7 @@ Check your internet connection. Models are 1.2-3.4GB from HuggingFace Hub.
 Ensure you're on Apple Silicon with macOS 12.3+. Intel Macs use slower CPU inference.
 
 **Export always saves as WAV?**
-Only WAV export is currently supported. The format selector is prepared for future MP3 support.
+Check Settings > Audio > Default Format. Both WAV and MP3 (128-320 kbps) are supported.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#troubleshooting) for more solutions.
 

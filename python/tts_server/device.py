@@ -107,6 +107,40 @@ def get_memory_info() -> dict:
     return info
 
 
+# Minimum recommended RAM (GB) per model variant
+MODEL_MEMORY_REQUIREMENTS: dict[str, int] = {
+    "0.6b": 8,
+    "0.6b-base": 8,
+    "1.7b": 12,
+    "1.7b-base": 12,
+    "1.7b-design": 12,
+}
+
+SUPPORTED_MP3_BITRATES = [128, 192, 256, 320]
+
+
+def check_memory_for_model(model_id: str) -> dict:
+    """Check if the system has enough memory for a given model.
+
+    Returns a dict with required_gb, available_gb, sufficient (bool),
+    and an optional warning message.
+    """
+    required_gb = MODEL_MEMORY_REQUIREMENTS.get(model_id, 8)
+    info = get_memory_info()
+    available = info.get("available_gb", 0)
+    sufficient = available >= required_gb
+
+    return {
+        "required_gb": required_gb,
+        "available_gb": available,
+        "sufficient": sufficient,
+        "warning": (
+            f"Model requires ~{required_gb}GB RAM, only {available:.1f}GB available"
+            if not sufficient else None
+        ),
+    }
+
+
 def synchronize_device(device: str) -> None:
     """Synchronize the device to ensure all operations are complete."""
     if device == "mps":

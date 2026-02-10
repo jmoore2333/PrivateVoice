@@ -1,5 +1,6 @@
 """PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
+import asyncio
 import logging
 import os
 import platform
@@ -20,7 +21,10 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .inference import get_model, PRESET_SPEAKERS
-from .device import get_device_config, get_memory_info
+from .device import (
+    get_device_config, get_memory_info, check_memory_for_model,
+    MODEL_MEMORY_REQUIREMENTS, SUPPORTED_MP3_BITRATES,
+)
 from .download_tracker import get_download_tracker, DownloadProgress
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
@@ -62,6 +66,7 @@ class CustomVoiceRequest(BaseModel):
     instruction: str = ""
     language: str = "english"
     format: str = "wav"
+    mp3_bitrate: int = 192
 
 
 class VoiceDesignRequest(BaseModel):
@@ -69,6 +74,7 @@ class VoiceDesignRequest(BaseModel):
     voice_description: str
     language: str = "english"
     format: str = "wav"
+    mp3_bitrate: int = 192
 
 
 class StartupStatusResponse(BaseModel):
@@ -94,6 +100,8 @@ class SystemInfoResponse(BaseModel):
     memory_total_gb: float
     memory_available_gb: float
     cache_dir: str
+    model_memory_requirements: dict[str, int]
+    supported_mp3_bitrates: list[int]
 
 
 class LogEntryResponse(BaseModel):
@@ -258,6 +266,8 @@ async def system_info():
         memory_total_gb=memory.get("total_gb", 0),
         memory_available_gb=memory.get("available_gb", 0),
         cache_dir=cache_dir,
+        model_memory_requirements=MODEL_MEMORY_REQUIREMENTS,
+        supported_mp3_bitrates=SUPPORTED_MP3_BITRATES,
     )
 
 
@@ -302,15 +312,28 @@ async def list_languages():
 # Model Management Endpoints
 # ============================================================================
 
+@app.get("/memory-check/{model_id}")
+async def memory_check(model_id: str):
+    """Check if the system has enough memory for a given model.
+
+    Returns required RAM, available RAM, and a warning if insufficient.
+    """
+    return check_memory_for_model(model_id)
+
+
 @app.post("/load-model")
 async def load_model(request: LoadModelRequest):
-    """Load or switch the TTS model."""
+    """Load or switch the TTS model.
+
+    Runs model download + loading in a background thread so the event loop
+    remains free to serve /download-progress polling requests.
+    """
     model = get_model()
     state = get_startup_state()
 
     try:
-        state.set_phase("loading-model", f"Loading {request.model_id} model...", 85)
-        model.load(request.model_id)
+        state.set_phase("downloading-model", f"Downloading {request.model_id} model...", 40)
+        await asyncio.to_thread(model.load, request.model_id)
         state.set_phase("ready", "Model loaded and ready", 100)
         return {"status": "loaded", "model_id": request.model_id}
     except Exception as e:
@@ -346,6 +369,7 @@ async def generate_custom_voice(request: CustomVoiceRequest):
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
     fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+    bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
         logger.info(f"Generating custom voice: speaker={request.speaker}, lang={request.language}, fmt={fmt}, text={request.text[:50]}...")
@@ -355,6 +379,7 @@ async def generate_custom_voice(request: CustomVoiceRequest):
             instruction=request.instruction,
             language=request.language,
             output_format=fmt,
+            mp3_bitrate=bitrate,
         )
         return Response(content=audio_bytes, media_type=media_type)
     except ValueError as e:
@@ -372,6 +397,7 @@ async def generate_voice_clone(
     x_vector_only_mode: bool = Form(False),
     language: str = Form("english"),
     format: str = Form("wav"),
+    mp3_bitrate: int = Form(192),
 ):
     """Generate speech by cloning a reference voice."""
     model = get_model()
@@ -383,6 +409,7 @@ async def generate_voice_clone(
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
     fmt = format if format in SUPPORTED_FORMATS else "wav"
+    bitrate = mp3_bitrate if mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
         logger.info(f"Generating voice clone: lang={language}, fmt={fmt}, text={text[:50]}...")
@@ -398,6 +425,7 @@ async def generate_voice_clone(
             language=language,
             x_vector_only_mode=x_vector_only_mode,
             output_format=fmt,
+            mp3_bitrate=bitrate,
         )
         return Response(content=audio_bytes, media_type=media_type)
     except HTTPException:
@@ -419,6 +447,7 @@ async def generate_voice_design(request: VoiceDesignRequest):
         raise HTTPException(status_code=400, detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters")
 
     fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+    bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
 
     try:
         logger.info(f"Generating voice design: lang={request.language}, fmt={fmt}, desc={request.voice_description[:50]}...")
@@ -427,6 +456,7 @@ async def generate_voice_design(request: VoiceDesignRequest):
             voice_description=request.voice_description,
             language=request.language,
             output_format=fmt,
+            mp3_bitrate=bitrate,
         )
         return Response(content=audio_bytes, media_type=media_type)
     except RuntimeError as e:

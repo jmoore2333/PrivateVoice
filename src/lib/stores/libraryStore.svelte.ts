@@ -109,10 +109,15 @@ async function writeAudioFile(id: string, blob: Blob): Promise<void> {
   const fs = await getTauriFs();
   if (!fs) return;
 
-  const arrayBuffer = await blob.arrayBuffer();
-  await fs.writeFile(`${LIBRARY_DIR}/${id}.wav`, new Uint8Array(arrayBuffer), {
-    baseDir: fs.BaseDirectory.AppData,
-  });
+  try {
+    const arrayBuffer = await blob.arrayBuffer();
+    await fs.writeFile(`${LIBRARY_DIR}/${id}.wav`, new Uint8Array(arrayBuffer), {
+      baseDir: fs.BaseDirectory.AppData,
+    });
+  } catch (e) {
+    console.error(`Failed to write audio file ${id}:`, e);
+    throw e; // Re-throw so saveToLibrary knows the write failed
+  }
 }
 
 async function readAudioFile(id: string): Promise<string | null> {
@@ -214,6 +219,7 @@ function createLibraryStore() {
       const storedItems = await readIndex();
       const loadedItems: LibraryItem[] = [];
 
+      let skippedCount = 0;
       for (const stored of storedItems) {
         const audioUrl = await readAudioFile(stored.id);
         if (audioUrl) {
@@ -222,8 +228,13 @@ function createLibraryStore() {
             audioUrl,
             createdAt: new Date(stored.createdAt),
           });
+        } else {
+          skippedCount++;
+          console.warn(`Library item "${stored.name || stored.id}" has missing audio file, skipping`);
         }
-        // Skip items whose audio files are missing
+      }
+      if (skippedCount > 0) {
+        console.warn(`${skippedCount} library item(s) skipped due to missing audio files`);
       }
 
       saved = loadedItems;
@@ -269,7 +280,14 @@ function createLibraryStore() {
 
     async saveToLibrary(item: LibraryItem, audioBlob?: Blob) {
       if (useTauriFs && audioBlob) {
-        await writeAudioFile(item.id, audioBlob);
+        // Write audio file first, then update index. If audio write fails,
+        // we don't update the index (prevents orphaned metadata).
+        try {
+          await writeAudioFile(item.id, audioBlob);
+        } catch {
+          console.error(`Failed to save audio for ${item.id}, skipping library save`);
+          return;
+        }
         // Re-read from file to get a persistent URL
         const persistentUrl = await readAudioFile(item.id);
         if (persistentUrl) {

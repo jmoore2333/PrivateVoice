@@ -176,3 +176,69 @@ class TestClearCache:
         torch_mock.cuda.empty_cache.reset_mock()
         clear_cache("cuda")
         torch_mock.cuda.empty_cache.assert_called_once()
+
+
+class TestCheckMemoryForModel:
+    """Tests for check_memory_for_model()."""
+
+    @patch("tts_server.device.get_memory_info")
+    def test_sufficient_memory(self, mock_mem, torch_mock):
+        """Returns sufficient=True when enough RAM."""
+        mock_mem.return_value = {"device": "mps", "total_gb": 32, "available_gb": 20}
+
+        from tts_server.device import check_memory_for_model
+
+        result = check_memory_for_model("0.6b")
+        assert result["required_gb"] == 8
+        assert result["sufficient"] is True
+        assert result["warning"] is None
+
+    @patch("tts_server.device.get_memory_info")
+    def test_insufficient_memory(self, mock_mem, torch_mock):
+        """Returns warning when not enough RAM for 1.7b."""
+        mock_mem.return_value = {"device": "mps", "total_gb": 8, "available_gb": 6}
+
+        from tts_server.device import check_memory_for_model
+
+        result = check_memory_for_model("1.7b")
+        assert result["required_gb"] == 12
+        assert result["sufficient"] is False
+        assert result["warning"] is not None
+        assert "12GB" in result["warning"]
+
+    @patch("tts_server.device.get_memory_info")
+    def test_unknown_model_defaults_to_8gb(self, mock_mem, torch_mock):
+        """Unknown model IDs default to 8GB requirement."""
+        mock_mem.return_value = {"device": "cpu", "total_gb": 16, "available_gb": 10}
+
+        from tts_server.device import check_memory_for_model
+
+        result = check_memory_for_model("unknown-model")
+        assert result["required_gb"] == 8
+        assert result["sufficient"] is True
+
+
+class TestModelMemoryRequirements:
+    """Tests for MODEL_MEMORY_REQUIREMENTS constant."""
+
+    def test_all_model_ids_covered(self, torch_mock):
+        """All known model IDs have memory requirements."""
+        from tts_server.device import MODEL_MEMORY_REQUIREMENTS
+
+        expected_ids = {"0.6b", "0.6b-base", "1.7b", "1.7b-base", "1.7b-design"}
+        assert set(MODEL_MEMORY_REQUIREMENTS.keys()) == expected_ids
+
+    def test_0_6b_models_require_8gb(self, torch_mock):
+        """0.6B models require 8GB."""
+        from tts_server.device import MODEL_MEMORY_REQUIREMENTS
+
+        assert MODEL_MEMORY_REQUIREMENTS["0.6b"] == 8
+        assert MODEL_MEMORY_REQUIREMENTS["0.6b-base"] == 8
+
+    def test_1_7b_models_require_12gb(self, torch_mock):
+        """1.7B models require 12GB."""
+        from tts_server.device import MODEL_MEMORY_REQUIREMENTS
+
+        assert MODEL_MEMORY_REQUIREMENTS["1.7b"] == 12
+        assert MODEL_MEMORY_REQUIREMENTS["1.7b-base"] == 12
+        assert MODEL_MEMORY_REQUIREMENTS["1.7b-design"] == 12

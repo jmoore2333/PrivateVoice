@@ -467,6 +467,7 @@
     currentMode={ttsState.mode}
     modelId={ttsState.modelId}
     status={currentStatus}
+    statusDetail={ttsState.isGenerating ? `${elapsedTime.toFixed(1)}s` : undefined}
     isLoadingModel={ttsState.isLoadingModel}
     onModeChange={handleModeChange}
     onModelChange={(modelId) => ttsStore.loadModel(modelId)}
@@ -503,6 +504,7 @@
           recommendedModelLabel={recommendedCustomModelLabel}
           currentModelId={ttsState.modelId}
           isGenerating={ttsState.isGenerating}
+          {elapsedTime}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
@@ -522,6 +524,7 @@
           recommendedModelLabel={recommendedCloneModelLabel}
           recommendedModelHint={recommendedCloneHint}
           isGenerating={ttsState.isGenerating}
+          {elapsedTime}
           hasWhisper={false}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
@@ -537,6 +540,7 @@
           bind:language={localLanguage}
           bind:voiceDescription={localVoiceDescription}
           isGenerating={ttsState.isGenerating}
+          {elapsedTime}
           modelLoaded={voiceDesignModelLoaded}
           modelLoading={ttsState.isLoadingModel}
           recommendedModelLabel={recommendedDesignModelLabel}

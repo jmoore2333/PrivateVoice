@@ -12,6 +12,7 @@
     referenceAudioUrl: string | null;
     referenceAudioBlob: Blob | null;
     isGenerating: boolean;
+    elapsedTime?: number;
     hasWhisper: boolean;
     modelSupported?: boolean;
     modelLoading?: boolean;
@@ -34,6 +35,7 @@
     referenceAudioUrl,
     referenceAudioBlob,
     isGenerating,
+    elapsedTime = 0,
     hasWhisper = false,
     modelSupported = true,
     modelLoading = false,
@@ -90,23 +92,29 @@
     </div>
   {/if}
 
-  <!-- Reference Audio Section -->
-  <AudioRecorder
-    onRecordingComplete={(blob, url) => onReferenceAudioChange?.(blob, url)}
-    onImport={(file) => {
-      const url = URL.createObjectURL(file);
-      // Convert file to blob for consistency
-      file.arrayBuffer().then(buffer => {
-        const blob = new Blob([buffer], { type: file.type });
-        onReferenceAudioChange?.(blob, url);
-      });
-    }}
-  />
+  <!-- Step 1: Reference Audio -->
+  <div class="space-y-2">
+    <div class="flex items-center gap-2">
+      <span class="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold {referenceAudioBlob ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]'}">1</span>
+      <span class="text-sm font-medium text-[var(--color-text-primary)]">Reference Audio</span>
+    </div>
+    <AudioRecorder
+      onRecordingComplete={(blob, url) => onReferenceAudioChange?.(blob, url)}
+      onImport={(file) => {
+        const url = URL.createObjectURL(file);
+        file.arrayBuffer().then(buffer => {
+          const blob = new Blob([buffer], { type: file.type });
+          onReferenceAudioChange?.(blob, url);
+        });
+      }}
+    />
+  </div>
 
-  <!-- Transcript Section -->
+  <!-- Step 2: Transcript -->
   <div class="space-y-2">
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-2">
+        <span class="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold {lowQualityMode || referenceText.trim() ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]'}">2</span>
         <label
           class="block text-sm font-medium text-[var(--color-text-primary)]"
           for={transcriptId}
@@ -142,24 +150,32 @@
       class="w-full px-4 py-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors resize-none disabled:opacity-50"
     ></textarea>
 
-    <label class="flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+    <label class="flex items-start gap-2 text-sm text-[var(--color-text-muted)]">
       <input
         type="checkbox"
         bind:checked={lowQualityMode}
         onchange={() => onLowQualityModeChange?.(lowQualityMode)}
-        class="rounded border-[var(--color-border-default)]"
+        class="rounded border-[var(--color-border-default)] mt-0.5"
       />
-      Low-quality mode (no transcript required)
+      <span>
+        Low-quality mode
+        <span class="block text-xs text-[var(--color-text-muted)]">Uses x-vector only. No transcript needed, but voice match is less accurate.</span>
+      </span>
     </label>
   </div>
 
   <hr class="border-[var(--color-border-subtle)]" />
 
-  <!-- Target Text Section -->
+  <!-- Step 3: Text to generate -->
+  <div class="flex items-center gap-2 -mb-4">
+    <span class="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold {text.trim() ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]'}">3</span>
+    <span class="text-sm font-medium text-[var(--color-text-primary)]">Text to generate</span>
+  </div>
+
   <TextInput
     bind:value={text}
     onInput={onTextChange}
-    label="Text to generate"
+    label=""
     placeholder="Enter the text you want the cloned voice to speak..."
     maxLength={2000}
   />
@@ -175,6 +191,6 @@
     disabled={!canGenerate || isGenerating || modelLoading}
     onclick={onGenerate}
   >
-    {isGenerating ? 'Generating...' : 'Generate'}
+    {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
   </button>
 </div>

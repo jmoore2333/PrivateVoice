@@ -1,12 +1,15 @@
 <script lang="ts">
+  import { modelSupportsMode } from '$lib/stores/ttsStore.svelte';
+
   type Mode = "custom-voice" | "voice-clone" | "voice-design";
 
   interface Props {
     mode: Mode;
+    modelId?: string | null;
     onchange?: (mode: Mode) => void;
   }
 
-  let { mode, onchange }: Props = $props();
+  let { mode, modelId = null, onchange }: Props = $props();
 
   const modes: Array<{ id: Mode; label: string; icon: string; desc: string }> = [
     {
@@ -32,12 +35,14 @@
 
 <div class="grid grid-cols-3 gap-3">
   {#each modes as m}
+    {@const isCompatible = !modelId || modelSupportsMode(modelId, m.id)}
     <button
       onclick={() => onchange?.(m.id)}
       class="group relative flex flex-col items-center gap-2 p-4 rounded-xl transition-all duration-200
         {mode === m.id
           ? 'bg-[var(--color-bg-elevated)] border-2 border-[var(--color-accent-cyan)] shadow-[0_0_20px_rgba(0,212,255,0.15)]'
           : 'bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] hover:bg-[var(--color-bg-elevated)] hover:border-[var(--color-border-default)]'}"
+      title={isCompatible ? m.desc : `${m.desc} (requires model switch)`}
     >
       <!-- Icon -->
       <div
@@ -58,6 +63,11 @@
       >
         {m.label}
       </span>
+
+      <!-- Incompatible indicator -->
+      {#if !isCompatible && mode !== m.id}
+        <span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-[var(--color-warning)]" title="Requires model switch"></span>
+      {/if}
 
       <!-- Active indicator -->
       {#if mode === m.id}

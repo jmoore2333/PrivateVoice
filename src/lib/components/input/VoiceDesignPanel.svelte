@@ -4,11 +4,19 @@
   import { helpStore } from '$lib/stores/helpStore.svelte';
   const descriptionId = "voice-design-description";
 
+  const DESCRIPTION_TEMPLATES = [
+    { label: "Narrator", value: "Warm baritone male voice, mid-40s, calm and authoritative, clear enunciation, nature documentary style." },
+    { label: "Young female", value: "Bright, energetic young female voice, early 20s, slightly breathy, friendly and conversational." },
+    { label: "British gentleman", value: "Older gentleman, early 60s, refined British accent, measured pace, slightly gravelly texture." },
+    { label: "News anchor", value: "Professional female voice, mid-30s, neutral American accent, confident and clear, moderate pace." },
+  ];
+
   interface Props {
     text: string;
     language: string;
     voiceDescription: string;
     isGenerating: boolean;
+    elapsedTime?: number;
     modelLoaded: boolean;
     modelLoading: boolean;
     recommendedModelLabel?: string;
@@ -24,6 +32,7 @@
     language = $bindable(),
     voiceDescription = $bindable(),
     isGenerating,
+    elapsedTime = 0,
     modelLoaded,
     modelLoading,
     recommendedModelLabel = "1.7B Design",
@@ -37,6 +46,13 @@
   const canGenerate = $derived(
     text.trim() && voiceDescription.trim() && modelLoaded
   );
+
+  const descriptionLength = $derived(voiceDescription.length);
+
+  function applyTemplate(value: string) {
+    voiceDescription = value;
+    onDescriptionChange?.(value);
+  }
 </script>
 
 <div class="space-y-6">
@@ -84,6 +100,21 @@
       </button>
     </div>
 
+    <!-- Template chips -->
+    <div class="flex flex-wrap gap-1.5">
+      {#each DESCRIPTION_TEMPLATES as template}
+        <button
+          class="px-2.5 py-1 text-xs rounded-full border transition-colors
+            {voiceDescription === template.value
+              ? 'bg-[var(--color-accent)]/15 border-[var(--color-accent)]/40 text-[var(--color-accent)]'
+              : 'bg-[var(--color-bg-elevated)] border-[var(--color-border-subtle)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-default)] hover:text-[var(--color-text-primary)]'}"
+          onclick={() => voiceDescription === template.value ? applyTemplate('') : applyTemplate(template.value)}
+        >
+          {template.label}
+        </button>
+      {/each}
+    </div>
+
     <textarea
       id={descriptionId}
       bind:value={voiceDescription}
@@ -93,9 +124,14 @@
       class="w-full px-4 py-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] text-[var(--color-text-primary)] placeholder-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors resize-none"
     ></textarea>
 
-    <p class="text-xs text-[var(--color-text-muted)]">
-      Tip: Be specific about gender, age, accent, emotion, and speaking style.
-    </p>
+    <div class="flex items-center justify-between">
+      <p class="text-xs text-[var(--color-text-muted)]">
+        Tip: Be specific about gender, age, accent, emotion, and speaking style.
+      </p>
+      <span class="text-xs {descriptionLength > 200 ? 'text-[var(--color-warning)]' : 'text-[var(--color-text-muted)]'}">
+        {descriptionLength} chars
+      </span>
+    </div>
   </div>
 
   <hr class="border-[var(--color-border-subtle)]" />
@@ -120,6 +156,6 @@
     disabled={!canGenerate || isGenerating || modelLoading}
     onclick={onGenerate}
   >
-    {isGenerating ? 'Generating...' : 'Generate'}
+    {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
   </button>
 </div>

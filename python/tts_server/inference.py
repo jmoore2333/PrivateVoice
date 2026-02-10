@@ -49,9 +49,16 @@ class TTSModel:
         return self._loaded
 
     def load(self, model_id: Optional[str] = None) -> None:
-        """Load the TTS model with MPS-compatible settings."""
+        """Load the TTS model with MPS-compatible settings.
+
+        Two-phase process:
+        1. Download model files via snapshot_download (with progress tracking)
+        2. Load model into memory from the local snapshot
+        """
         import os
         import sys
+        from huggingface_hub import snapshot_download
+        from .download_tracker import get_download_tracker, create_hf_tqdm_class
 
         if model_id:
             self.model_id = model_id
@@ -63,6 +70,22 @@ class TTSModel:
         self.config = get_device_config()
         hf_model_id = MODEL_IDS.get(self.model_id, MODEL_IDS["0.6b"])
 
+        # Phase 1: Download model files with progress tracking
+        tracker = get_download_tracker()
+        tracker.start_session()
+
+        logger.info(f"Downloading model {hf_model_id}...")
+        try:
+            local_path = snapshot_download(
+                repo_id=hf_model_id,
+                tqdm_class=create_hf_tqdm_class(),
+            )
+            tracker.complete_download()
+        except Exception:
+            tracker.error(f"Failed to download {hf_model_id}")
+            raise
+
+        # Phase 2: Load model from local snapshot
         logger.info(f"Loading model {hf_model_id} on {self.config.device}...")
 
         # Suppress stdout/stderr during model loading to prevent broken pipe errors
@@ -75,9 +98,9 @@ class TTSModel:
                 sys.stdout = devnull
                 sys.stderr = devnull
 
-                # Load model with MPS-compatible settings
+                # Load model from local path with MPS-compatible settings
                 self.model = Qwen3TTSModel.from_pretrained(
-                    hf_model_id,
+                    local_path,
                     device_map=self.config.device_map,
                     dtype=self.config.dtype,
                     attn_implementation=self.config.attn_implementation,
@@ -113,6 +136,7 @@ class TTSModel:
         instruction: str = "",
         language: str = "english",
         output_format: str = "wav",
+        mp3_bitrate: int = 192,
     ) -> tuple[bytes, str]:
         """
         Generate speech using a preset speaker voice.
@@ -123,6 +147,7 @@ class TTSModel:
             instruction: Optional style instruction (e.g., "speaks slowly and calmly")
             language: Language for synthesis
             output_format: Output audio format ("wav" or "mp3")
+            mp3_bitrate: MP3 bitrate in kbps (128/192/256/320). Ignored for WAV.
 
         Returns:
             Tuple of (audio bytes, media type)
@@ -142,7 +167,7 @@ class TTSModel:
             )
 
         synchronize_device(self.config.device)
-        return self.audio_to_format(wavs[0], sr, output_format)
+        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
     def generate_voice_clone(
         self,
@@ -152,6 +177,7 @@ class TTSModel:
         language: str = "english",
         x_vector_only_mode: bool = False,
         output_format: str = "wav",
+        mp3_bitrate: int = 192,
     ) -> tuple[bytes, str]:
         """
         Generate speech by cloning a reference voice.
@@ -165,6 +191,7 @@ class TTSModel:
                 audio (ignores reference_text). Lower quality but doesn't
                 require a transcript.
             output_format: Output audio format ("wav" or "mp3")
+            mp3_bitrate: MP3 bitrate in kbps (128/192/256/320). Ignored for WAV.
 
         Returns:
             Tuple of (audio bytes, media type)
@@ -189,7 +216,7 @@ class TTSModel:
                 )
 
             synchronize_device(self.config.device)
-            return self.audio_to_format(wavs[0], sr, output_format)
+            return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
         finally:
             import os
             os.unlink(ref_audio_path)
@@ -200,6 +227,7 @@ class TTSModel:
         voice_description: str,
         language: str = "english",
         output_format: str = "wav",
+        mp3_bitrate: int = 192,
     ) -> tuple[bytes, str]:
         """
         Generate speech with a novel voice from natural language description.
@@ -211,6 +239,7 @@ class TTSModel:
             voice_description: Natural language description of the voice
             language: Language for synthesis
             output_format: Output audio format ("wav" or "mp3")
+            mp3_bitrate: MP3 bitrate in kbps (128/192/256/320). Ignored for WAV.
 
         Returns:
             Tuple of (audio bytes, media type)
@@ -229,7 +258,7 @@ class TTSModel:
             )
 
         synchronize_device(self.config.device)
-        return self.audio_to_format(wavs[0], sr, output_format)
+        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
     def _prepare_audio(self, audio, sample_rate: int) -> tuple[np.ndarray, int]:
         """Normalize audio tensor/array to float32 numpy."""
@@ -276,10 +305,12 @@ class TTSModel:
         mp3_data += encoder.flush()
         return mp3_data
 
-    def audio_to_format(self, audio, sample_rate: int, fmt: str = "wav") -> tuple[bytes, str]:
+    def audio_to_format(
+        self, audio, sample_rate: int, fmt: str = "wav", mp3_bitrate: int = 192
+    ) -> tuple[bytes, str]:
         """Convert audio to requested format. Returns (bytes, media_type)."""
         if fmt == "mp3":
-            return self._audio_to_mp3(audio, sample_rate), "audio/mpeg"
+            return self._audio_to_mp3(audio, sample_rate, bitrate=mp3_bitrate), "audio/mpeg"
         return self._audio_to_wav(audio, sample_rate), "audio/wav"
 
 

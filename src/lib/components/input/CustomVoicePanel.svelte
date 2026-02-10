@@ -24,6 +24,7 @@
     speaker: string;
     instruction: string;
     isGenerating: boolean;
+    elapsedTime?: number;
     modelSupported?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
@@ -42,6 +43,7 @@
     speaker = $bindable(),
     instruction = $bindable(),
     isGenerating,
+    elapsedTime = 0,
     modelSupported = true,
     modelLoading = false,
     recommendedModelLabel = "0.6B Custom",
@@ -177,6 +179,6 @@
     disabled={!text.trim() || isGenerating || modelLoading || !modelSupported}
     onclick={onGenerate}
   >
-    {isGenerating ? 'Generating...' : 'Generate'}
+    {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
   </button>
 </div>

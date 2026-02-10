@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MODEL_OPTIONS, modelSupportsMode, type TTSMode } from '$lib/stores/ttsStore.svelte';
+  import { MODEL_OPTIONS, modelSupportsMode, getRecommendedModel, type TTSMode } from '$lib/stores/ttsStore.svelte';
 
   type Status = 'ready' | 'generating' | 'downloading' | 'loading' | 'error';
 
@@ -28,6 +28,7 @@
   }: Props = $props();
 
   let showModelMenu = $state(false);
+  let modelSwitchPrompt = $state<{ mode: TTSMode; recommendedModel: string; label: string } | null>(null);
 
   const modes: { id: TTSMode; label: string }[] = [
     { id: 'custom-voice', label: 'Custom Voice' },
@@ -55,26 +56,62 @@
     showModelMenu = false;
     onModelChange?.(id);
   }
+
+  function handleModeClick(mode: TTSMode) {
+    if (mode === currentMode) return;
+
+    const compatible = modelSupportsMode(modelId, mode);
+
+    if (compatible || !modelId) {
+      // Model supports this mode (or no model loaded yet) — switch directly
+      modelSwitchPrompt = null;
+      onModeChange?.(mode);
+    } else {
+      // Incompatible — switch mode but show prompt to load correct model
+      onModeChange?.(mode);
+      const recommended = getRecommendedModel(mode);
+      const label = getModelLabel(recommended);
+      modelSwitchPrompt = { mode, recommendedModel: recommended, label };
+    }
+  }
+
+  function acceptModelSwitch() {
+    if (modelSwitchPrompt) {
+      onModelChange?.(modelSwitchPrompt.recommendedModel);
+      modelSwitchPrompt = null;
+    }
+  }
+
+  function dismissModelSwitch() {
+    modelSwitchPrompt = null;
+  }
 </script>
 
-<header class="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
+<header class="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)] gap-2 min-w-0">
   <!-- Mode Selector -->
-  <nav class="flex gap-1 bg-[var(--color-bg-deep)] rounded-lg p-1">
+  <nav class="flex gap-0.5 bg-[var(--color-bg-deep)] rounded-lg p-0.5 flex-shrink-0">
     {#each modes as mode}
+      {@const isCompatible = !modelId || modelSupportsMode(modelId, mode.id)}
       <button
-        class="px-4 py-2 rounded-md text-sm font-medium transition-colors
+        class="relative px-3 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap
           {currentMode === mode.id
             ? 'bg-[var(--color-accent)] text-white'
-            : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'}"
-        onclick={() => onModeChange?.(mode.id)}
+            : isCompatible
+              ? 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]'
+              : 'text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]'}"
+        onclick={() => handleModeClick(mode.id)}
+        title={isCompatible ? mode.label : `${mode.label} — requires a different model`}
       >
         {mode.label}
+        {#if !isCompatible && currentMode !== mode.id}
+          <span class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-[var(--color-warning)]" title="Requires model switch"></span>
+        {/if}
       </button>
     {/each}
   </nav>
 
   <!-- Right section -->
-  <div class="flex items-center gap-4">
+  <div class="flex items-center gap-2 min-w-0 flex-shrink-0">
     <!-- Model Selector -->
     <div class="relative">
       <button
@@ -171,3 +208,26 @@
     </div>
   </div>
 </header>
+
+<!-- Model switch prompt -->
+{#if modelSwitchPrompt && !isLoadingModel}
+  <div class="flex items-center justify-between px-4 py-2 bg-[var(--color-accent)]/10 border-b border-[var(--color-accent)]/30">
+    <span class="text-sm text-[var(--color-text-secondary)]">
+      This mode requires a different model.
+    </span>
+    <div class="flex items-center gap-3">
+      <button
+        class="text-sm font-medium text-[var(--color-accent)] hover:underline"
+        onclick={acceptModelSwitch}
+      >
+        Load {modelSwitchPrompt.label}
+      </button>
+      <button
+        class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+        onclick={dismissModelSwitch}
+      >
+        Dismiss
+      </button>
+    </div>
+  </div>
+{/if}
