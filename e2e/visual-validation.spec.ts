@@ -35,7 +35,29 @@ async function setupMocks(page: Page, mockState: MockServerState = {
 }) {
   await page.addInitScript(() => {
     (window as any).__TAURI_INTERNALS__ = {
-      invoke: async () => Promise.resolve(),
+      invoke: async (cmd: string, args?: any) => {
+        if (cmd === 'get_environment_status') {
+          return {
+            setup_complete: true,
+            gpu_target: 'mps',
+            gpu_display: 'Apple Silicon (MPS)',
+            python_path: '/mock/venv/bin/python',
+            venv_path: '/mock/venv',
+            disk_usage_mb: 2500,
+            uv_version: '0.6.6',
+            uv_needs_update: false,
+            state: 'ready',
+            state_detail: null,
+          };
+        }
+        if (cmd === 'repair_environment') {
+          return 'Environment marked for repair.';
+        }
+        if (cmd === 'detect_gpu') {
+          return JSON.stringify({ target: 'mps', display: 'Apple Silicon (MPS)' });
+        }
+        return Promise.resolve();
+      },
       transformCallback: () => 0,
     };
   });

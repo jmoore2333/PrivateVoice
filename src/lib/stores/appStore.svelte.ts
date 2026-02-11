@@ -4,12 +4,25 @@
 
 export type StartupPhase =
   | "initializing"
+  | "setup-detecting-hardware"
+  | "setup-checking-disk"
+  | "setup-copying-source"
+  | "setup-installing-python"
+  | "setup-creating-venv"
+  | "setup-installing-deps"
+  | "setup-verifying"
+  | "setup-complete"
   | "starting-server"
   | "checking-models"
   | "downloading"
   | "loading-model"
   | "ready"
   | "error";
+
+/** Whether a phase is part of the first-run setup wizard. */
+export function isSetupPhase(phase: StartupPhase): boolean {
+  return phase.startsWith("setup-");
+}
 
 export interface StartupProgress {
   phase: StartupPhase;
@@ -41,19 +54,37 @@ export interface AppState {
   theme: "light" | "dark" | "system";
 }
 
-// Progress percentages for each phase
+// Progress percentages for each phase.
+// On first run, setup phases occupy 0–70%, server phases 70–100%.
+// On subsequent runs, setup phases are skipped entirely.
 const PHASE_PROGRESS: Record<StartupPhase, [number, number]> = {
-  initializing: [0, 5],
-  "starting-server": [5, 15],
-  "checking-models": [15, 20],
-  downloading: [20, 85],
-  "loading-model": [85, 95],
+  initializing: [0, 2],
+  "setup-detecting-hardware": [2, 5],
+  "setup-checking-disk": [5, 6],
+  "setup-copying-source": [6, 8],
+  "setup-installing-python": [8, 18],
+  "setup-creating-venv": [18, 22],
+  "setup-installing-deps": [22, 65],
+  "setup-verifying": [65, 68],
+  "setup-complete": [68, 70],
+  "starting-server": [70, 78],
+  "checking-models": [78, 82],
+  downloading: [82, 94],
+  "loading-model": [94, 98],
   ready: [100, 100],
   error: [0, 0],
 };
 
 const PHASE_MESSAGES: Record<StartupPhase, string> = {
   initializing: "Starting Python environment...",
+  "setup-detecting-hardware": "Detecting hardware (GPU/CPU)...",
+  "setup-checking-disk": "Checking available disk space...",
+  "setup-copying-source": "Copying Python source files...",
+  "setup-installing-python": "Installing Python 3.11...",
+  "setup-creating-venv": "Creating virtual environment...",
+  "setup-installing-deps": "Installing dependencies (this may take a few minutes)...",
+  "setup-verifying": "Verifying Python environment...",
+  "setup-complete": "Setup complete!",
   "starting-server": "Starting TTS server...",
   "checking-models": "Checking model cache...",
   downloading: "Downloading model from HuggingFace...",

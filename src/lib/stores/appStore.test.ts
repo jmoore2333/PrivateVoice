@@ -19,15 +19,15 @@ describe('appStore', () => {
     it('transitions through startup phases with correct progress ranges', () => {
       appStore.setStartupPhase('starting-server');
       expect(appStore.state.startup.phase).toBe('starting-server');
-      expect(appStore.state.startup.progress).toBe(5);
+      expect(appStore.state.startup.progress).toBe(70);
 
       appStore.setStartupPhase('checking-models');
       expect(appStore.state.startup.phase).toBe('checking-models');
-      expect(appStore.state.startup.progress).toBe(15);
+      expect(appStore.state.startup.progress).toBe(78);
 
       appStore.setStartupPhase('loading-model');
       expect(appStore.state.startup.phase).toBe('loading-model');
-      expect(appStore.state.startup.progress).toBe(85);
+      expect(appStore.state.startup.progress).toBe(94);
 
       appStore.setStartupPhase('ready');
       expect(appStore.state.startup.phase).toBe('ready');
@@ -55,16 +55,16 @@ describe('appStore', () => {
     });
 
     it('maps sub-progress within phase range', () => {
-      appStore.setStartupPhase('downloading'); // range: 20-85
+      appStore.setStartupPhase('downloading'); // range: 82-94
       appStore.setStartupProgress(50); // 50% of download phase
-      // 20 + (50/100) * (85-20) = 20 + 32.5 = 52.5
-      expect(appStore.state.startup.progress).toBe(52.5);
+      // 82 + (50/100) * (94-82) = 82 + 6 = 88
+      expect(appStore.state.startup.progress).toBe(88);
     });
 
     it('clamps progress to phase maximum', () => {
-      appStore.setStartupPhase('downloading'); // range: 20-85
+      appStore.setStartupPhase('downloading'); // range: 82-94
       appStore.setStartupProgress(200); // over 100%
-      expect(appStore.state.startup.progress).toBe(85);
+      expect(appStore.state.startup.progress).toBe(94);
     });
   });
 
@@ -95,8 +95,8 @@ describe('appStore', () => {
         bytesDownloaded: 500_000_000,
         bytesTotal: 1_000_000_000,
       });
-      // 50% download maps to: 20 + (50/100) * (85-20) = 52.5
-      expect(appStore.state.startup.progress).toBe(52.5);
+      // 50% download maps to: 82 + (50/100) * (94-82) = 82 + 6 = 88
+      expect(appStore.state.startup.progress).toBe(88);
     });
 
     it('resets download state', () => {
