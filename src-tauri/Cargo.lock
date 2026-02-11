@@ -2884,6 +2884,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-mcp-bridge",
  "tauri-plugin-opener",
+ "webview2-com",
 ]
 
 [[package]]

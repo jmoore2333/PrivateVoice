@@ -217,9 +217,11 @@ function createTTSStore() {
     } catch (e) {
       // Don't show error for user-initiated cancellation
       if (e instanceof DOMException && e.name === "AbortError") {
-        // Cancelled — no error
+        console.debug("[generate] AbortError (cancelled):", (e as DOMException).message);
       } else {
-        state.error = e instanceof Error ? e.message : "Generation failed";
+        const msg = e instanceof Error ? e.message : "Generation failed";
+        console.error("[generate] Error:", e);
+        state.error = msg;
       }
     } finally {
       state.isGenerating = false;

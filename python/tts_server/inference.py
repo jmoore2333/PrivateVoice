@@ -132,6 +132,39 @@ class TTSModel:
         self._loaded = False
         logger.info("Model unloaded")
 
+    @staticmethod
+    def _ensure_wav(audio_bytes: bytes) -> str:
+        """Write audio bytes to a temp WAV file, converting if needed.
+
+        The frontend should send WAV (converted via Web Audio API), but as a
+        safety net this attempts conversion via soundfile/librosa for other formats.
+        """
+        import tempfile
+
+        # Quick check: WAV files start with "RIFF"
+        if audio_bytes[:4] == b"RIFF":
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                f.write(audio_bytes)
+                return f.name
+
+        # Non-WAV input — try converting via librosa (supports many formats)
+        logger.info("Reference audio is not WAV format, attempting conversion...")
+        try:
+            import librosa
+            data, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                sf.write(f, data, sr, format="WAV")
+                logger.info(f"Converted reference audio to WAV ({sr}Hz, {len(data)} samples)")
+                return f.name
+        except Exception as e:
+            logger.warning(f"Audio conversion failed: {e}")
+
+        # Last resort: write raw bytes and hope the model can handle it
+        logger.warning("Could not convert reference audio — writing raw bytes as .wav")
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            return f.name
+
     def generate_custom_voice(
         self,
         text: str,
@@ -205,9 +238,8 @@ class TTSModel:
         effective_ref_text = "" if x_vector_only_mode else reference_text
 
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(reference_audio)
-            ref_audio_path = f.name
+
+        ref_audio_path = self._ensure_wav(audio_bytes=reference_audio)
 
         try:
             with torch.no_grad():

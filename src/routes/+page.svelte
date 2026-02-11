@@ -436,12 +436,71 @@
     ttsStore.loadModel(recommendedCustomModelId);
   }
 
-  function handleReferenceAudioChange(blob: Blob, url: string) {
+  async function handleReferenceAudioChange(blob: Blob, url: string) {
     referenceAudioBlob = blob;
     referenceAudioUrl = url;
-    // Convert blob to File for ttsStore
-    const file = new File([blob], 'reference.wav', { type: blob.type });
-    ttsStore.setReferenceAudio(file);
+
+    // Convert to WAV for the TTS server (WebView2 records WebM/Opus, model expects WAV)
+    let audioFile: File;
+    if (blob.type && !blob.type.includes('wav')) {
+      try {
+        const wavBlob = await convertBlobToWav(blob);
+        audioFile = new File([wavBlob], 'reference.wav', { type: 'audio/wav' });
+      } catch (e) {
+        console.warn('[audio] WAV conversion failed, sending original format:', e);
+        audioFile = new File([blob], 'reference.wav', { type: blob.type });
+      }
+    } else {
+      audioFile = new File([blob], 'reference.wav', { type: 'audio/wav' });
+    }
+    ttsStore.setReferenceAudio(audioFile);
+  }
+
+  /** Convert an audio Blob (WebM/Opus, etc.) to WAV using the Web Audio API. */
+  async function convertBlobToWav(blob: Blob): Promise<Blob> {
+    const arrayBuffer = await blob.arrayBuffer();
+    const audioCtx = new AudioContext();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    await audioCtx.close();
+
+    // Encode AudioBuffer to WAV
+    const numChannels = audioBuffer.numberOfChannels;
+    const sampleRate = audioBuffer.sampleRate;
+    const length = audioBuffer.length;
+    const bytesPerSample = 2; // 16-bit PCM
+    const dataSize = length * numChannels * bytesPerSample;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    // WAV header
+    const writeString = (offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    };
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // chunk size
+    view.setUint16(20, 1, true);  // PCM format
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+    view.setUint16(32, numChannels * bytesPerSample, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    writeString(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    // Interleave channels and write 16-bit PCM samples
+    let offset = 44;
+    for (let i = 0; i < length; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(ch)[i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+        offset += 2;
+      }
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
   }
 
   function handleLanguageChange(language: string) {
