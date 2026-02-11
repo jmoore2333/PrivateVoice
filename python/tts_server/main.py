@@ -17,8 +17,11 @@ import warnings
 # Suppress expected warnings from optional dependencies on Windows:
 # - sox: not needed for core TTS (only used by some audio preprocessing)
 # - flash_attn: optional CUDA optimization, falls back to SDPA
+# - HuggingFace symlink warning: Windows doesn't support symlinks without
+#   Developer Mode, but the degraded cache still works fine
 warnings.filterwarnings("ignore", message=".*sox.*", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*flash.attn.*", category=UserWarning)
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import torch
 from contextlib import asynccontextmanager

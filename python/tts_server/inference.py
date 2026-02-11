@@ -133,37 +133,38 @@ class TTSModel:
         logger.info("Model unloaded")
 
     @staticmethod
-    def _ensure_wav(audio_bytes: bytes) -> str:
-        """Write audio bytes to a temp WAV file, converting if needed.
+    def _load_audio_from_bytes(audio_bytes: bytes) -> tuple[np.ndarray, int]:
+        """Decode audio bytes into a numpy array + sample rate.
 
-        The frontend should send WAV (converted via Web Audio API), but as a
-        safety net this attempts conversion via soundfile/librosa for other formats.
+        Works entirely in-memory (no temp files) to avoid Windows file-locking
+        issues with NamedTemporaryFile that cause [Errno 22] Invalid argument.
         """
-        import tempfile
+        buf = io.BytesIO(audio_bytes)
 
-        # Quick check: WAV files start with "RIFF"
-        if audio_bytes[:4] == b"RIFF":
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                f.write(audio_bytes)
-                return f.name
+        # Try soundfile first (handles WAV, FLAC, OGG)
+        try:
+            data, sr = sf.read(buf)
+            # Ensure mono float32
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            logger.info(f"Loaded reference audio via soundfile ({sr}Hz, {len(data)} samples)")
+            return data.astype(np.float32), sr
+        except Exception as e:
+            logger.debug(f"soundfile couldn't read audio: {e}")
 
-        # Non-WAV input — try converting via librosa (supports many formats)
-        logger.info("Reference audio is not WAV format, attempting conversion...")
+        # Fall back to librosa (handles WebM, MP3, etc. via ffmpeg/audioread)
         try:
             import librosa
-            data, sr = librosa.load(io.BytesIO(audio_bytes), sr=None)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                sf.write(f, data, sr, format="WAV")
-                logger.info(f"Converted reference audio to WAV ({sr}Hz, {len(data)} samples)")
-                return f.name
+            buf.seek(0)
+            data, sr = librosa.load(buf, sr=None, mono=True)
+            logger.info(f"Loaded reference audio via librosa ({sr}Hz, {len(data)} samples)")
+            return data.astype(np.float32), sr
         except Exception as e:
-            logger.warning(f"Audio conversion failed: {e}")
+            logger.warning(f"librosa couldn't read audio: {e}")
 
-        # Last resort: write raw bytes and hope the model can handle it
-        logger.warning("Could not convert reference audio — writing raw bytes as .wav")
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(audio_bytes)
-            return f.name
+        raise RuntimeError(
+            "Could not decode reference audio. Please upload a WAV file."
+        )
 
     def generate_custom_voice(
         self,
@@ -237,24 +238,19 @@ class TTSModel:
 
         effective_ref_text = "" if x_vector_only_mode else reference_text
 
-        import tempfile
+        # Load audio into memory (avoids Windows temp file locking issues)
+        ref_audio_np, ref_sr = self._load_audio_from_bytes(reference_audio)
 
-        ref_audio_path = self._ensure_wav(audio_bytes=reference_audio)
+        with torch.no_grad():
+            wavs, sr = self.model.generate_voice_clone(
+                text=text,
+                language=language,
+                ref_audio=(ref_audio_np, ref_sr),
+                ref_text=effective_ref_text,
+            )
 
-        try:
-            with torch.no_grad():
-                wavs, sr = self.model.generate_voice_clone(
-                    text=text,
-                    language=language,
-                    ref_audio=ref_audio_path,
-                    ref_text=effective_ref_text,
-                )
-
-            synchronize_device(self.config.device)
-            return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
-        finally:
-            import os
-            os.unlink(ref_audio_path)
+        synchronize_device(self.config.device)
+        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
     def generate_voice_design(
         self,
