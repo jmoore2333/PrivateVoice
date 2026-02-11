@@ -2,87 +2,119 @@
 
 ## Context
 
-This is the continuation of the PrivateVoice v1.0 cross-platform effort. The macOS build is complete and shipping. The goal now is to get a working Windows build, starting on a Windows 11 desktop with WSL 2.
+This is the continuation of the PrivateVoice v1.0 cross-platform effort. The macOS build is complete and shipping. The goal now is to get a working Windows build on a Windows 11 desktop.
 
 ## Current State
 
-- **macOS**: Production-ready. All 13 GAP_ANALYSIS items resolved, Save-to-Library fixed, 216 unit + 78 backend + 90 E2E tests passing.
-- **Branch**: `claude/cross-platform-build-setup-Yd9FO` — contains two research handover docs and this file.
-- **Main branch**: Up to date with all v1.0 fixes (commits through `6d0eccf`).
+- **macOS**: Production-ready. All 13 GAP_ANALYSIS items resolved, 216 unit + 78 backend + 90 E2E tests passing.
+- **Main branch**: Up to date through commit `dc51378` — includes all cross-platform code fixes and --onedir sidecar architecture.
+- **Phase 1 (Code Fixes)**: COMPLETE — all 4 items done, merged to main.
+- **Phase 2 (Windows Build)**: READY TO BUILD — architecture in place, dev environment set up.
 
-## Handover Documents
+## What's Already Done
 
-Read these first:
+### Phase 1: Code Fixes (all complete)
 
-1. **`agent-handover-windows.md`** — Complete Windows 11 build guide, code changes, known issues, PowerShell scripts
-2. **`agent-handover-linux.md`** — Linux guide (relevant because WSL 2 is Ubuntu-based)
+1. ~~**Guard `signal.SIGPIPE`**~~ — Done. `hasattr(signal, 'SIGPIPE')` guard in `inference.py` and `main.py`.
+2. ~~**`multiprocessing.freeze_support()`**~~ — Done. First call in `tts_server_entry.py`.
+3. ~~**Update description strings**~~ — Done. Generic descriptions in spec and Cargo.toml.
+4. ~~**Cross-platform build scripts**~~ — Done. `build-release.sh` and `build_sidecar.sh` detect OS/arch dynamically.
 
-## What Needs to Happen
+### --onedir Sidecar Architecture (commit `dc51378`)
 
-### Phase 1: Code Fixes (apply to main, all platforms benefit)
+The PyInstaller build now uses platform-conditional modes:
 
-These are small, backward-compatible changes. Do them first:
+| Platform | PyInstaller Mode | Tauri Integration | Startup |
+|----------|-----------------|-------------------|---------|
+| macOS | `--onefile` | `externalBin` (shell plugin) | ~2-5s |
+| Windows/Linux | `--onedir` | `resources` (Command::new) | Instant |
 
-1. **Guard `signal.SIGPIPE`** — crashes on Windows at import time
-   - `python/tts_server/inference.py` line 17
-   - `python/tts_server/main.py` line 12
-   - Fix: `if hasattr(signal, 'SIGPIPE'): signal.signal(signal.SIGPIPE, signal.SIG_IGN)`
+Why: On Windows with CUDA, `--onefile` produces a 3-5 GB binary that self-extracts to temp on every launch (30-60s), hits 260-char path limits, and risks multiprocessing spawn loops. `--onedir` keeps libraries on disk.
 
-2. **Add `multiprocessing.freeze_support()`** to `python/tts_server_entry.py`
-   - Without this, PyInstaller on Windows causes infinite subprocess spawn loops
-   - Must be the very first call in `__main__`
+Key files changed:
+- `python/tts_server.spec` — platform-conditional EXE vs EXE+COLLECT
+- `python/build_sidecar.ps1` — copies `dist/tts-server/` dir to `src-tauri/sidecar/tts-server/`
+- `src-tauri/src/lib.rs` — `SidecarProcess` enum, 3 spawn paths (dev/macOS-release/win-release)
+- `src-tauri/tauri.conf.json` — no externalBin (moved to `tauri.macos.conf.json`)
+- `scripts/build-release.sh` — injects `--config` with resources glob for non-macOS
 
-3. **Update description strings**
-   - `python/tts_server.spec` line 6: change "macOS arm64" to "current platform"
-   - `src-tauri/Cargo.toml` line 4: change "Apple Silicon" to "Local text-to-speech desktop app"
+## What Needs to Happen Now
 
-4. **Make `scripts/build-release.sh` cross-platform**
-   - Currently hard-coded to `apple-darwin` targets and `open *.app`
-   - Add OS detection (the sidecar build script `python/build_sidecar.sh` already has this pattern to copy from)
+### Phase 2: Windows Production Build
 
-### Phase 2: Windows Build (the main goal)
+#### Prerequisites (verify these are installed)
 
-Follow `agent-handover-windows.md` sections 4-6:
+- Visual Studio Build Tools 2022 (with "Desktop development with C++" workload)
+- Rust (via rustup)
+- Node.js 18+ and pnpm
+- Python 3.11+ with venv
+- WebView2 Runtime (usually pre-installed on Windows 11)
 
-1. **Set up dev environment** — Visual Studio Build Tools 2022, Rust, Node.js, Python 3.11+, pnpm
-2. **Build Python sidecar** — CPU-only first (`pip install torch --index-url https://download.pytorch.org/whl/cpu`)
-3. **Build Tauri app** — `pnpm tauri build --bundles nsis`
-4. **Test** — Run the NSIS installer, verify app launches, test generation with a model
+#### Step 1: Build the Python sidecar
+
+```powershell
+cd python
+.\build_sidecar.ps1
+```
+
+This will:
+1. Create/activate `.venv`
+2. Install dependencies from `requirements.txt`
+3. Run `pyinstaller tts_server.spec` (produces `dist/tts-server/` directory)
+4. Copy the `--onedir` output to `src-tauri/sidecar/tts-server/`
+
+**CPU-only first run**: If you don't have CUDA torch installed, that's fine — the sidecar will work with CPU inference. For CUDA support, install torch with CUDA index before building:
+```powershell
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+```
+
+#### Step 2: Build the Tauri app
+
+```powershell
+cd <project_root>
+pnpm install
+pnpm tauri build --bundles nsis --config '{"bundle":{"resources":["sidecar/tts-server/**/*"]}}'
+```
+
+The `--config` flag injects the resources configuration to bundle the `--onedir` sidecar output. Without it, the sidecar won't be included in the installer.
+
+Or use the full build script (from Git Bash/MSYS2):
+```bash
+./scripts/build-release.sh
+```
+
+#### Step 3: Test
+
+1. Run the NSIS installer from `src-tauri/target/release/bundle/nsis/`
+2. Launch the app
+3. Verify sidecar starts (check /health endpoint at localhost:8765)
+4. Test TTS generation with a model
+
+#### What to Watch For
+
+- **Console window**: The Rust code uses `CREATE_NO_WINDOW` flag — no console should appear
+- **Sidecar path**: In release mode, sidecar resolves to `<resource_dir>/sidecar/tts-server/tts-server.exe`
+- **CUDA detection**: `device.py` auto-detects CUDA if available, falls back to CPU
+- **Model download**: First run downloads models from HuggingFace (~1.2-3.4 GB)
 
 ### Phase 3: CI/CD (after build works)
 
-The existing CI has gaps beyond just being macOS-only:
+The existing CI has gaps:
 - No Python backend tests (78 pytest tests never run in CI)
 - `build` job only runs `pnpm build` (Vite), not `pnpm tauri build` (Rust)
 
-Fix these first on `ubuntu-latest`, then expand to the multi-OS matrix. See `agent-handover-linux.md` section 11 for details.
+Fix these on `ubuntu-latest` first, then expand to multi-OS matrix.
 
-## WSL 2 Notes
-
-The Windows workstation has WSL 2 available. This is useful for:
-- Running the existing bash build scripts (`build_sidecar.sh`) if preferred over PowerShell
-- Testing the Linux build path in parallel with the native Windows build
-- Running pytest and other Python tooling in a familiar environment
-
-However, the **Tauri Windows build must be done natively** (not in WSL), because:
-- Tauri needs MSVC and WebView2, which are Windows-native
-- The sidecar binary must be a native `.exe` (PyInstaller can't cross-compile)
-- WSL builds produce Linux ELF binaries, not Windows PE executables
-
-**Recommended workflow**:
-- Use WSL 2 for git operations, code editing, running tests
-- Use native PowerShell for `build_sidecar.ps1` and `pnpm tauri build`
-
-## Key Files to Know
+## Key Files
 
 | File | Purpose |
 |------|---------|
 | `CLAUDE.md` | Full project architecture and conventions |
-| `GAP_ANALYSIS.md` | All 13 v1.0 items (resolved) |
-| `python/tts_server/device.py` | Device detection — already has CUDA fallback |
-| `python/tts_server/inference.py:17` | SIGPIPE line that crashes on Windows |
-| `python/tts_server/main.py:12` | Same SIGPIPE issue |
-| `python/tts_server_entry.py` | Needs `freeze_support()` for Windows |
-| `src-tauri/src/lib.rs` | Sidecar management — already has Windows branches |
-| `src-tauri/capabilities/default.json` | FS permissions — just fixed for recursive AppData |
-| `.github/workflows/ci.yml` | CI — needs Python tests + Tauri build + multi-OS |
+| `python/tts_server.spec` | PyInstaller spec — platform-conditional --onefile/--onedir |
+| `python/build_sidecar.ps1` | Windows sidecar build script |
+| `python/tts_server/device.py` | Device detection (CUDA/MPS/CPU) |
+| `src-tauri/src/lib.rs` | Sidecar spawn — SidecarProcess enum, 3 code paths |
+| `src-tauri/tauri.conf.json` | Base config (no externalBin, no resources) |
+| `src-tauri/tauri.macos.conf.json` | macOS override (adds externalBin) |
+| `scripts/build-release.sh` | Full release build (injects --config for resources) |
+| `src-tauri/capabilities/default.json` | FS + shell permissions |
