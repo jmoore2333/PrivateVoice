@@ -122,16 +122,10 @@ excludes = [
     'tensorflow',
     'tensorboard',
     'keras',
-    # Unused torch subsystems (significant size savings)
-    'torch._dynamo',
-    'torch._inductor',
-    'torch.compiler',
-    'triton',
-    'torch.distributed',
-    'torch.testing',
+    # Unused torch subsystems — only exclude packages truly not imported at runtime.
+    # NOTE: torch submodules have deep cross-imports; most cannot be safely excluded.
     'torch.utils.tensorboard',
-    'torch.profiler',
-    'torch.onnx',
+    'triton',
 ]
 
 a = Analysis(
