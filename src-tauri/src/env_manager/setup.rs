@@ -338,74 +338,66 @@ fn create_venv(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
 }
 
 /// Find the Python binary inside a uv-managed Python installation directory.
+///
+/// uv installs Python to a versioned subdirectory like:
+///   python/cpython-3.11.11-windows-x86_64-none/python.exe
+///   python/cpython-3.11.11-macos-aarch64-none/bin/python3
+///
+/// We search the known layout (one `cpython-*` subdirectory) rather than
+/// recursing the entire tree, because the stdlib includes template copies
+/// of `python.exe` under `Lib/venv/scripts/nt/` that are NOT real interpreters.
 fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
-    // uv installs Python to a versioned subdirectory, e.g.,
-    // python/cpython-3.11.9-macos-aarch64-none/bin/python3
-    // python/cpython-3.11.9-windows-x86_64-none/python.exe
-
     if !python_dir.exists() {
         return Err(format!("Python directory not found: {:?}", python_dir));
     }
 
-    // Look for python3 or python.exe recursively
-    let binary_name = if cfg!(target_os = "windows") {
-        "python.exe"
+    // Find the cpython-* subdirectory (uv always creates exactly one)
+    let cpython_dir = std::fs::read_dir(python_dir)
+        .map_err(|e| format!("Failed to read {:?}: {}", python_dir, e))?
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("cpython-")
+                && e.path().is_dir()
+        })
+        .map(|e| e.path())
+        .ok_or_else(|| {
+            format!(
+                "No cpython-* directory found in {:?}. uv python install may have failed.",
+                python_dir
+            )
+        })?;
+
+    // On Windows: python.exe is at the root of the cpython dir
+    // On Unix: python3 is in the bin/ subdirectory
+    let candidates = if cfg!(target_os = "windows") {
+        vec![
+            cpython_dir.join("python.exe"),
+        ]
     } else {
-        "python3"
+        vec![
+            cpython_dir.join("bin").join("python3"),
+            cpython_dir.join("bin").join("python"),
+        ]
     };
 
-    for entry in walkdir(python_dir)? {
-        if entry.file_name().map(|n| n == binary_name).unwrap_or(false) {
-            if entry.is_file() {
-                return Ok(entry);
-            }
-        }
-    }
-
-    // Fallback: try python3.11 on Unix
-    if !cfg!(target_os = "windows") {
-        for entry in walkdir(python_dir)? {
-            if entry
-                .file_name()
-                .map(|n| n.to_string_lossy().starts_with("python3."))
-                .unwrap_or(false)
-            {
-                if entry.is_file() {
-                    return Ok(entry);
-                }
-            }
+    for candidate in &candidates {
+        if candidate.is_file() {
+            println!(
+                "[env_manager::setup] Found Python binary: {:?}",
+                candidate
+            );
+            return Ok(candidate.clone());
         }
     }
 
     Err(format!(
-        "Could not find Python binary in {:?}. Installation may have failed.",
-        python_dir
+        "Could not find Python binary in {:?}. Checked: {:?}",
+        cpython_dir, candidates
     ))
 }
 
-/// Simple recursive directory walk (no external crate needed).
-fn walkdir(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
-    let mut results = Vec::new();
-
-    if !dir.is_dir() {
-        return Ok(results);
-    }
-
-    for entry in std::fs::read_dir(dir)
-        .map_err(|e| format!("Failed to read {:?}: {}", dir, e))?
-    {
-        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
-        let path = entry.path();
-
-        results.push(path.clone());
-
-        if path.is_dir() {
-            results.extend(walkdir(&path)?);
-        }
-    }
-
-    Ok(results)
-}
 
 /// Install all Python dependencies via uv pip.
 fn install_dependencies(

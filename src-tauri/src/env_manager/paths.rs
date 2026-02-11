@@ -4,6 +4,20 @@ use tauri::Manager;
 /// All paths live under `{appData}/PrivateVoice/python_env/`.
 /// This keeps the entire Python environment self-contained and removable.
 
+/// Resolve the bundled resources subdirectory.
+///
+/// Tauri's `resource_dir()` returns the bundle root, but our `tauri.conf.json`
+/// uses glob patterns like `"resources/uv*"` (relative to `src-tauri/`). Tauri
+/// preserves the relative directory structure, so bundled files end up at
+/// `{resource_dir}/resources/...` on all platforms.
+fn bundled_resources_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    Ok(resource_dir.join("resources"))
+}
+
 /// Root of the python environment directory.
 pub fn python_env_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let app_data = app
@@ -30,10 +44,7 @@ pub fn venv_python(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Path to the uv binary in the Tauri resource directory.
 pub fn uv_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    let resources = bundled_resources_dir(app)?;
 
     let uv_name = if cfg!(target_os = "windows") {
         "uv.exe"
@@ -41,7 +52,7 @@ pub fn uv_binary(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         "uv"
     };
 
-    let path = resource_dir.join(uv_name);
+    let path = resources.join(uv_name);
     if !path.exists() {
         return Err(format!(
             "uv binary not found at {:?}. Ensure the build bundled it correctly.",
@@ -63,11 +74,7 @@ pub fn tts_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Path to the bundled TTS server source in resources.
 pub fn bundled_source_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    Ok(resource_dir.join("tts_server"))
+    Ok(bundled_resources_dir(app)?.join("tts_server"))
 }
 
 /// Path to the requirements.txt inside the python_env.
@@ -77,11 +84,7 @@ pub fn requirements_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Path to the bundled requirements.txt in resources.
 pub fn bundled_requirements_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let resource_dir = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    Ok(resource_dir.join("requirements.txt"))
+    Ok(bundled_resources_dir(app)?.join("requirements.txt"))
 }
 
 /// Path to the uv-managed standalone Python installation.
