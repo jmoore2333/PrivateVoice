@@ -23,6 +23,9 @@ chrono = "0.4"
 sha2 = "0.10"
 tauri-plugin-mcp-bridge = { version = "0.6", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.38"
+
 [features]
 default = []
 mcp-bridge = ["tauri-plugin-mcp-bridge"]

@@ -497,6 +497,49 @@ fn detect_gpu() -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Auto-grant microphone and camera permissions in WebView2 on Windows.
+///
+/// Desktop apps should not require a second browser-level permission prompt after the user
+/// has already chosen to install the application. This registers a `PermissionRequested`
+/// handler that auto-grants microphone and camera access while leaving all other permissions
+/// at their default behavior.
+#[cfg(target_os = "windows")]
+fn setup_webview2_permissions(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        unsafe {
+            use webview2_com::Microsoft::Web::WebView2::Win32::*;
+            use webview2_com::PermissionRequestedEventHandler;
+
+            let core = webview.controller().CoreWebView2().unwrap();
+
+            let mut token: i64 = 0;
+            let _ = core.add_PermissionRequested(
+                &PermissionRequestedEventHandler::create(Box::new(
+                    move |_webview, args| {
+                        if let Some(args) = args {
+                            let mut kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+                            let _ = args.PermissionKind(&mut kind);
+
+                            match kind {
+                                COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                                | COREWEBVIEW2_PERMISSION_KIND_CAMERA => {
+                                    let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+                                    println!("WebView2: auto-granted {:?} permission", kind);
+                                }
+                                _ => {
+                                    // Default behavior for other permissions
+                                }
+                            }
+                        }
+                        Ok(())
+                    },
+                )),
+                &mut token,
+            );
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -512,6 +555,16 @@ pub fn run() {
     }
 
     builder
+        .setup(|app| {
+            // Auto-grant microphone/camera permissions on Windows
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    setup_webview2_permissions(&window);
+                }
+            }
+            Ok(())
+        })
         .manage(Mutex::new(SidecarState { child: None }))
         .manage(Mutex::new(LogBuffer::new()))
         .invoke_handler(tauri::generate_handler![
