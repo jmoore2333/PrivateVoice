@@ -81,23 +81,51 @@ esac
 
 echo "Detected platform: $TARGET_TRIPLE"
 
-# Copy binary to Tauri locations with correct naming
-SIDECAR_NAME="tts-server-$TARGET_TRIPLE$EXE_SUFFIX"
-BUILT_BINARY="dist/tts-server$EXE_SUFFIX"
-echo "Copying binary as $SIDECAR_NAME..."
-cp "$BUILT_BINARY" "$BINARIES_DIR/$SIDECAR_NAME"
-cp "$BUILT_BINARY" "$OUTPUT_DIR/$SIDECAR_NAME"
+# Copy build output to Tauri locations
+case "$OS" in
+    Darwin)
+        # macOS: --onefile produces a single binary → externalBin
+        SIDECAR_NAME="tts-server-$TARGET_TRIPLE"
+        BUILT_BINARY="dist/tts-server"
+        echo "Copying binary as $SIDECAR_NAME..."
+        cp "$BUILT_BINARY" "$BINARIES_DIR/$SIDECAR_NAME"
+        cp "$BUILT_BINARY" "$OUTPUT_DIR/$SIDECAR_NAME"
+        chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
 
-# Make executable (no-op on Windows)
-if [ -z "$EXE_SUFFIX" ]; then
-    chmod +x "$BINARIES_DIR/$SIDECAR_NAME"
-fi
+        echo ""
+        echo "=== Build Complete ==="
+        echo "Sidecar binary: $BINARIES_DIR/$SIDECAR_NAME"
+        echo "Size: $(du -h "$BINARIES_DIR/$SIDECAR_NAME" | cut -f1)"
+        ;;
+    *)
+        # Windows/Linux: --onedir produces a directory → Tauri resources
+        SIDECAR_DIR="$OUTPUT_DIR/sidecar/tts-server"
+        BUILT_DIR="dist/tts-server"
 
-echo ""
-echo "=== Build Complete ==="
-echo "Sidecar binary: $BINARIES_DIR/$SIDECAR_NAME"
-echo "Size: $(du -h "$BINARIES_DIR/$SIDECAR_NAME" | cut -f1)"
+        if [ ! -d "$BUILT_DIR" ]; then
+            echo "ERROR: Expected --onedir output at $BUILT_DIR but not found"
+            exit 1
+        fi
+
+        echo "Copying --onedir output to $SIDECAR_DIR..."
+        rm -rf "$SIDECAR_DIR"
+        mkdir -p "$OUTPUT_DIR/sidecar"
+        cp -r "$BUILT_DIR" "$SIDECAR_DIR"
+
+        # Make executable (no-op on Windows)
+        if [ -z "$EXE_SUFFIX" ]; then
+            chmod +x "$SIDECAR_DIR/tts-server"
+        fi
+
+        echo ""
+        echo "=== Build Complete ==="
+        echo "Sidecar directory: $SIDECAR_DIR"
+        echo "Contents: $(ls "$SIDECAR_DIR" | wc -l) items"
+        echo "Total size: $(du -sh "$SIDECAR_DIR" | cut -f1)"
+        ;;
+esac
+
 echo ""
 echo "Next steps:"
-echo "  1. Test the binary: $BINARIES_DIR/$SIDECAR_NAME"
+echo "  1. Test the sidecar: run tts-server directly"
 echo "  2. Build Tauri app: pnpm tauri build"

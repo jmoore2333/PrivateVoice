@@ -56,13 +56,31 @@ echo ""
 ./python/build_sidecar.sh
 
 # Verify sidecar was built
-SIDECAR_PATH="src-tauri/binaries/tts-server-$TARGET_TRIPLE$EXE_SUFFIX"
-if [ ! -f "$SIDECAR_PATH" ]; then
-    echo "ERROR: Sidecar binary not found at $SIDECAR_PATH"
-    exit 1
-fi
-echo ""
-echo "Sidecar ready: $SIDECAR_PATH"
+case "$OS" in
+    Darwin)
+        # macOS: --onefile single binary for externalBin
+        SIDECAR_PATH="src-tauri/binaries/tts-server-$TARGET_TRIPLE"
+        if [ ! -f "$SIDECAR_PATH" ]; then
+            echo "ERROR: Sidecar binary not found at $SIDECAR_PATH"
+            exit 1
+        fi
+        echo "Sidecar ready: $SIDECAR_PATH"
+        ;;
+    *)
+        # Windows/Linux: --onedir directory for Tauri resources
+        SIDECAR_DIR="src-tauri/sidecar/tts-server"
+        SIDECAR_EXE="$SIDECAR_DIR/tts-server$EXE_SUFFIX"
+        if [ ! -d "$SIDECAR_DIR" ]; then
+            echo "ERROR: Sidecar directory not found at $SIDECAR_DIR"
+            exit 1
+        fi
+        if [ ! -f "$SIDECAR_EXE" ]; then
+            echo "ERROR: Sidecar executable not found at $SIDECAR_EXE"
+            exit 1
+        fi
+        echo "Sidecar ready: $SIDECAR_DIR ($(ls "$SIDECAR_DIR" | wc -l) items)"
+        ;;
+esac
 echo ""
 
 # Step 2: Install frontend dependencies
@@ -74,12 +92,19 @@ echo ""
 # Step 3: Build Tauri app
 echo "=== Step 3/3: Building Tauri Application ==="
 echo ""
+# macOS: externalBin config loaded from tauri.macos.conf.json automatically
+# Windows/Linux: inject resources config at build time (not in base config to keep cargo check clean)
+RESOURCES_CONFIG='{"bundle":{"resources":["sidecar/tts-server/**/*"]}}'
+
 case "$OS" in
-    MINGW*|MSYS*|CYGWIN*)
-        pnpm tauri build --bundles nsis
-        ;;
-    *)
+    Darwin)
         pnpm tauri build
+        ;;
+    MINGW*|MSYS*|CYGWIN*)
+        pnpm tauri build --bundles nsis --config "$RESOURCES_CONFIG"
+        ;;
+    Linux)
+        pnpm tauri build --config "$RESOURCES_CONFIG"
         ;;
 esac
 

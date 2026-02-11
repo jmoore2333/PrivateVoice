@@ -1,16 +1,11 @@
 use std::collections::VecDeque;
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use std::thread;
 use tauri::{Emitter, Manager};
 
-#[cfg(debug_assertions)]
-use std::io::{BufRead, BufReader};
-#[cfg(debug_assertions)]
-use std::process::{Child, Stdio};
-#[cfg(debug_assertions)]
-use std::thread;
-
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), target_os = "macos"))]
 use tauri_plugin_shell::ShellExt;
 
 const MAX_LOG_ENTRIES: usize = 500;
@@ -29,11 +24,31 @@ struct StartupEvent {
     progress: u8,
 }
 
+/// Unified sidecar process handle supporting both std::process and Tauri shell plugin.
+enum SidecarProcess {
+    /// Used in dev mode (all platforms) and release mode (Windows/Linux --onedir).
+    Std(std::process::Child),
+    /// Used in release mode on macOS only (--onefile via Tauri shell plugin externalBin).
+    #[cfg(all(not(debug_assertions), target_os = "macos"))]
+    Shell(tauri_plugin_shell::process::CommandChild),
+}
+
+impl SidecarProcess {
+    fn kill(self) -> Result<(), String> {
+        match self {
+            SidecarProcess::Std(mut child) => {
+                child.kill().map_err(|e| format!("Failed to kill server: {}", e))
+            }
+            #[cfg(all(not(debug_assertions), target_os = "macos"))]
+            SidecarProcess::Shell(child) => {
+                child.kill().map_err(|e| format!("Failed to kill server: {}", e))
+            }
+        }
+    }
+}
+
 struct SidecarState {
-    #[cfg(debug_assertions)]
-    child: Option<Child>,
-    #[cfg(not(debug_assertions))]
-    child: Option<tauri_plugin_shell::process::CommandChild>,
+    child: Option<SidecarProcess>,
 }
 
 struct LogBuffer {
@@ -62,15 +77,7 @@ impl LogBuffer {
 impl Drop for SidecarState {
     fn drop(&mut self) {
         if let Some(child) = self.child.take() {
-            #[cfg(debug_assertions)]
-            {
-                let mut child = child;
-                let _ = child.kill();
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                let _ = child.kill();
-            }
+            let _ = child.kill();
         }
     }
 }
@@ -132,6 +139,112 @@ fn kill_process_on_port(port: u16) {
     }
 }
 
+/// Process a stdout line: emit log event, buffer it, and detect startup phases.
+fn process_stdout_line(app: &tauri::AppHandle, line: &str) {
+    let entry = LogEntry {
+        level: parse_log_level(line),
+        message: line.to_string(),
+        timestamp: get_timestamp(),
+    };
+
+    let _ = app.emit("sidecar-log", entry.clone());
+
+    if let Some(buffer) = app.try_state::<Mutex<LogBuffer>>() {
+        if let Ok(mut buf) = buffer.lock() {
+            buf.add(entry);
+        }
+    }
+
+    // Detect startup phases from server output
+    if line.contains("Starting TTS server") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "starting-server".to_string(),
+                message: "TTS server starting...".to_string(),
+                progress: 10,
+            },
+        );
+    } else if line.contains("Uvicorn running") || line.contains("Application startup complete") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "checking-models".to_string(),
+                message: "Server ready, checking models...".to_string(),
+                progress: 20,
+            },
+        );
+    } else if line.contains("Downloading") || line.contains("downloading") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "downloading".to_string(),
+                message: "Downloading model files...".to_string(),
+                progress: 40,
+            },
+        );
+    } else if line.contains("Loading model") || line.contains("loading-model") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "loading-model".to_string(),
+                message: "Loading model into memory...".to_string(),
+                progress: 70,
+            },
+        );
+    } else if line.contains("Model loaded successfully") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "ready".to_string(),
+                message: "Model loaded and ready".to_string(),
+                progress: 100,
+            },
+        );
+    }
+}
+
+/// Process a stderr line: emit log event and buffer it.
+fn process_stderr_line(app: &tauri::AppHandle, line: &str) {
+    let entry = LogEntry {
+        level: "ERROR".to_string(),
+        message: line.to_string(),
+        timestamp: get_timestamp(),
+    };
+
+    let _ = app.emit("sidecar-log", entry.clone());
+
+    if let Some(buffer) = app.try_state::<Mutex<LogBuffer>>() {
+        if let Ok(mut buf) = buffer.lock() {
+            buf.add(entry);
+        }
+    }
+}
+
+/// Set up thread-based stdout/stderr streaming for a std::process::Child.
+/// Used by dev mode (all platforms) and release mode (Windows/Linux).
+fn spawn_std_child_streaming(app: &tauri::AppHandle, child: &mut std::process::Child) {
+    if let Some(stdout) = child.stdout.take() {
+        let app_handle = app.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                process_stdout_line(&app_handle, &line);
+            }
+        });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let app_handle = app.clone();
+        thread::spawn(move || {
+            let reader = BufReader::new(stderr);
+            for line in reader.lines().map_while(Result::ok) {
+                process_stderr_line(&app_handle, &line);
+            }
+        });
+    }
+}
+
 #[tauri::command]
 async fn start_tts_server(
     app: tauri::AppHandle,
@@ -142,19 +255,8 @@ async fn start_tts_server(
     // Kill any existing server on our port first
     kill_process_on_port(8765);
 
-    if state_guard.child.is_some() {
-        // Also kill our tracked child if it exists
-        if let Some(child) = state_guard.child.take() {
-            #[cfg(debug_assertions)]
-            {
-                let mut child = child;
-                let _ = child.kill();
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                let _ = child.kill();
-            }
-        }
+    if let Some(child) = state_guard.child.take() {
+        let _ = child.kill();
     }
 
     // Small delay to let port be released
@@ -170,7 +272,7 @@ async fn start_tts_server(
         },
     );
 
-    // Development mode: run Python directly with output streaming
+    // Development mode: run Python directly from venv (all platforms)
     #[cfg(debug_assertions)]
     {
         let python_dir = app
@@ -212,109 +314,14 @@ async fn start_tts_server(
             .spawn()
             .map_err(|e| format!("Failed to spawn Python server: {}", e))?;
 
-        // Capture stdout in a separate thread
-        if let Some(stdout) = child.stdout.take() {
-            let app_handle = app.clone();
-            thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines().map_while(Result::ok) {
-                    let entry = LogEntry {
-                        level: parse_log_level(&line),
-                        message: line.clone(),
-                        timestamp: get_timestamp(),
-                    };
-
-                    // Emit log event
-                    let _ = app_handle.emit("sidecar-log", entry.clone());
-
-                    // Also add to buffer
-                    if let Some(buffer) = app_handle.try_state::<Mutex<LogBuffer>>() {
-                        if let Ok(mut buf) = buffer.lock() {
-                            buf.add(entry);
-                        }
-                    }
-
-                    // Check for startup phases in output
-                    if line.contains("Starting TTS server") {
-                        let _ = app_handle.emit(
-                            "sidecar-startup",
-                            StartupEvent {
-                                phase: "starting-server".to_string(),
-                                message: "TTS server starting...".to_string(),
-                                progress: 10,
-                            },
-                        );
-                    } else if line.contains("Uvicorn running") || line.contains("Application startup complete") {
-                        let _ = app_handle.emit(
-                            "sidecar-startup",
-                            StartupEvent {
-                                phase: "checking-models".to_string(),
-                                message: "Server ready, checking models...".to_string(),
-                                progress: 20,
-                            },
-                        );
-                    } else if line.contains("Downloading") || line.contains("downloading") {
-                        let _ = app_handle.emit(
-                            "sidecar-startup",
-                            StartupEvent {
-                                phase: "downloading".to_string(),
-                                message: "Downloading model files...".to_string(),
-                                progress: 40,
-                            },
-                        );
-                    } else if line.contains("Loading model") || line.contains("loading-model") {
-                        let _ = app_handle.emit(
-                            "sidecar-startup",
-                            StartupEvent {
-                                phase: "loading-model".to_string(),
-                                message: "Loading model into memory...".to_string(),
-                                progress: 70,
-                            },
-                        );
-                    } else if line.contains("Model loaded successfully") {
-                        let _ = app_handle.emit(
-                            "sidecar-startup",
-                            StartupEvent {
-                                phase: "ready".to_string(),
-                                message: "Model loaded and ready".to_string(),
-                                progress: 100,
-                            },
-                        );
-                    }
-                }
-            });
-        }
-
-        // Capture stderr in a separate thread
-        if let Some(stderr) = child.stderr.take() {
-            let app_handle = app.clone();
-            thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines().map_while(Result::ok) {
-                    let entry = LogEntry {
-                        level: "ERROR".to_string(),
-                        message: line.clone(),
-                        timestamp: get_timestamp(),
-                    };
-
-                    let _ = app_handle.emit("sidecar-log", entry.clone());
-
-                    if let Some(buffer) = app_handle.try_state::<Mutex<LogBuffer>>() {
-                        if let Ok(mut buf) = buffer.lock() {
-                            buf.add(entry);
-                        }
-                    }
-                }
-            });
-        }
-
-        state_guard.child = Some(child);
+        spawn_std_child_streaming(&app, &mut child);
+        state_guard.child = Some(SidecarProcess::Std(child));
     }
 
-    // Release mode: use bundled sidecar via shell plugin
-    #[cfg(not(debug_assertions))]
+    // Release mode macOS: shell plugin sidecar (--onefile externalBin)
+    #[cfg(all(not(debug_assertions), target_os = "macos"))]
     {
-        println!("Release mode: spawning tts-server sidecar");
+        println!("Release mode (macOS): spawning tts-server sidecar via shell plugin");
 
         let sidecar = app
             .shell()
@@ -325,7 +332,7 @@ async fn start_tts_server(
             .spawn()
             .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
 
-        // Stream sidecar output via events
+        // Stream sidecar output via async events (shell plugin provides its own buffered reader)
         let app_handle = app.clone();
         tauri::async_runtime::spawn(async move {
             use tauri_plugin_shell::process::CommandEvent;
@@ -334,83 +341,11 @@ async fn start_tts_server(
                 match event {
                     CommandEvent::Stdout(line) => {
                         let line_str = String::from_utf8_lossy(&line).to_string();
-                        let entry = LogEntry {
-                            level: parse_log_level(&line_str),
-                            message: line_str.clone(),
-                            timestamp: get_timestamp(),
-                        };
-
-                        let _ = app_handle.emit("sidecar-log", entry.clone());
-
-                        if let Some(buffer) = app_handle.try_state::<Mutex<LogBuffer>>() {
-                            if let Ok(mut buf) = buffer.lock() {
-                                buf.add(entry);
-                            }
-                        }
-
-                        // Check for startup phases
-                        if line_str.contains("Starting TTS server") {
-                            let _ = app_handle.emit(
-                                "sidecar-startup",
-                                StartupEvent {
-                                    phase: "starting-server".to_string(),
-                                    message: "TTS server starting...".to_string(),
-                                    progress: 10,
-                                },
-                            );
-                        } else if line_str.contains("Uvicorn running") || line_str.contains("Application startup complete") {
-                            let _ = app_handle.emit(
-                                "sidecar-startup",
-                                StartupEvent {
-                                    phase: "checking-models".to_string(),
-                                    message: "Server ready, checking models...".to_string(),
-                                    progress: 20,
-                                },
-                            );
-                        } else if line_str.contains("Downloading") || line_str.contains("downloading") {
-                            let _ = app_handle.emit(
-                                "sidecar-startup",
-                                StartupEvent {
-                                    phase: "downloading".to_string(),
-                                    message: "Downloading model files...".to_string(),
-                                    progress: 40,
-                                },
-                            );
-                        } else if line_str.contains("Loading model") || line_str.contains("loading-model") {
-                            let _ = app_handle.emit(
-                                "sidecar-startup",
-                                StartupEvent {
-                                    phase: "loading-model".to_string(),
-                                    message: "Loading model into memory...".to_string(),
-                                    progress: 70,
-                                },
-                            );
-                        } else if line_str.contains("Model loaded successfully") {
-                            let _ = app_handle.emit(
-                                "sidecar-startup",
-                                StartupEvent {
-                                    phase: "ready".to_string(),
-                                    message: "Model loaded and ready".to_string(),
-                                    progress: 100,
-                                },
-                            );
-                        }
+                        process_stdout_line(&app_handle, &line_str);
                     }
                     CommandEvent::Stderr(line) => {
                         let line_str = String::from_utf8_lossy(&line).to_string();
-                        let entry = LogEntry {
-                            level: "ERROR".to_string(),
-                            message: line_str,
-                            timestamp: get_timestamp(),
-                        };
-
-                        let _ = app_handle.emit("sidecar-log", entry.clone());
-
-                        if let Some(buffer) = app_handle.try_state::<Mutex<LogBuffer>>() {
-                            if let Ok(mut buf) = buffer.lock() {
-                                buf.add(entry);
-                            }
-                        }
+                        process_stderr_line(&app_handle, &line_str);
                     }
                     CommandEvent::Error(err) => {
                         let _ = app_handle.emit(
@@ -430,7 +365,51 @@ async fn start_tts_server(
             }
         });
 
-        state_guard.child = Some(child);
+        state_guard.child = Some(SidecarProcess::Shell(child));
+    }
+
+    // Release mode Windows/Linux: spawn bundled --onedir sidecar from resource directory
+    #[cfg(all(not(debug_assertions), not(target_os = "macos")))]
+    {
+        let resource_dir = app
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+
+        let sidecar_exe = if cfg!(target_os = "windows") {
+            resource_dir.join("sidecar").join("tts-server").join("tts-server.exe")
+        } else {
+            resource_dir.join("sidecar").join("tts-server").join("tts-server")
+        };
+
+        println!("Release mode (non-macOS): spawning sidecar from {:?}", sidecar_exe);
+
+        if !sidecar_exe.exists() {
+            return Err(format!(
+                "Sidecar not found at {:?}. Ensure the --onedir build was bundled correctly.",
+                sidecar_exe
+            ));
+        }
+
+        let mut cmd = Command::new(&sidecar_exe);
+        cmd.env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // Suppress console window on Windows
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn sidecar: {}", e))?;
+
+        spawn_std_child_streaming(&app, &mut child);
+        state_guard.child = Some(SidecarProcess::Std(child));
     }
 
     // Emit starting event
@@ -451,19 +430,7 @@ async fn stop_tts_server(state: tauri::State<'_, Mutex<SidecarState>>) -> Result
     let mut state = state.lock().map_err(|e| e.to_string())?;
 
     if let Some(child) = state.child.take() {
-        #[cfg(debug_assertions)]
-        {
-            let mut child = child;
-            child
-                .kill()
-                .map_err(|e| format!("Failed to kill server: {}", e))?;
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            child
-                .kill()
-                .map_err(|e| format!("Failed to kill server: {}", e))?;
-        }
+        child.kill()?;
         Ok("Server stopped".to_string())
     } else {
         Ok("Server not running".to_string())
@@ -493,7 +460,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init());
 
-    // Add shell plugin for release mode sidecar support
+    // Shell plugin: needed for macOS sidecar (externalBin) + shell permissions on all platforms
     #[cfg(not(debug_assertions))]
     {
         builder = builder.plugin(tauri_plugin_shell::init());
@@ -520,15 +487,7 @@ pub fn run() {
                 if let Some(state) = window.try_state::<Mutex<SidecarState>>() {
                     if let Ok(mut state) = state.lock() {
                         if let Some(child) = state.child.take() {
-                            #[cfg(debug_assertions)]
-                            {
-                                let mut child = child;
-                                let _ = child.kill();
-                            }
-                            #[cfg(not(debug_assertions))]
-                            {
-                                let _ = child.kill();
-                            }
+                            let _ = child.kill();
                         }
                     }
                 }

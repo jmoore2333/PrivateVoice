@@ -41,26 +41,36 @@ if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
 Write-Host "Running PyInstaller..."
 pyinstaller tts_server.spec
 
-# Determine target triple and copy binary
-$TargetTriple = "x86_64-pc-windows-msvc"
-$SidecarName = "tts-server-$TargetTriple.exe"
-$BuiltBinary = "dist\tts-server.exe"
+# Windows: --onedir produces a directory → copy to src-tauri/sidecar/tts-server/
+$BuiltDir = "dist\tts-server"
+$SidecarDir = Join-Path $ProjectRoot "src-tauri" "sidecar" "tts-server"
 
-if (-not (Test-Path $BuiltBinary)) {
-    Write-Error "Build failed: $BuiltBinary not found"
+if (-not (Test-Path $BuiltDir)) {
+    Write-Error "Build failed: Expected --onedir output at $BuiltDir but not found"
     exit 1
 }
 
-Write-Host "Copying binary as $SidecarName..."
-Copy-Item $BuiltBinary (Join-Path $BinariesDir $SidecarName)
-Copy-Item $BuiltBinary (Join-Path $ProjectRoot "src-tauri" $SidecarName)
+# Verify the exe exists inside the directory
+$BuiltExe = Join-Path $BuiltDir "tts-server.exe"
+if (-not (Test-Path $BuiltExe)) {
+    Write-Error "Build failed: $BuiltExe not found inside --onedir output"
+    exit 1
+}
 
-$Size = [math]::Round((Get-Item (Join-Path $BinariesDir $SidecarName)).Length / 1MB, 1)
+Write-Host "Copying --onedir output to $SidecarDir..."
+if (Test-Path $SidecarDir) { Remove-Item -Recurse -Force $SidecarDir }
+New-Item -ItemType Directory -Force -Path (Split-Path $SidecarDir) | Out-Null
+Copy-Item -Recurse $BuiltDir $SidecarDir
+
+$ItemCount = (Get-ChildItem $SidecarDir -Recurse -File).Count
+$SizeMB = [math]::Round((Get-ChildItem $SidecarDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+
 Write-Host ""
 Write-Host "=== Build Complete ==="
-Write-Host "Sidecar binary: $BinariesDir\$SidecarName"
-Write-Host "Size: $Size MB"
+Write-Host "Sidecar directory: $SidecarDir"
+Write-Host "Contents: $ItemCount files"
+Write-Host "Total size: $SizeMB MB"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Test the binary: $BinariesDir\$SidecarName"
+Write-Host "  1. Test the sidecar: $BuiltExe"
 Write-Host "  2. Build Tauri app: pnpm tauri build"

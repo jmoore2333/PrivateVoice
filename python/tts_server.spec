@@ -3,7 +3,9 @@
 
 Build with: pyinstaller tts_server.spec
 
-Output: dist/tts-server (single executable for current platform)
+Output:
+  macOS:         dist/tts-server (single --onefile executable, MPS-only)
+  Windows/Linux: dist/tts-server/ (--onedir directory with exe + _internal/)
 """
 
 import sys
@@ -150,24 +152,56 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='tts-server',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,  # UPX can cause issues with torch
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,  # Keep console for logging
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=_target_arch,  # Detected from current platform
-    codesign_identity=None,
-    entitlements_file=None,
-)
+if platform.system() == 'Darwin':
+    # macOS: --onefile (small MPS-only binary, no CUDA overhead, ~300-600 MB)
+    # All binaries/data packed into a single executable
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='tts-server',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,  # UPX can cause issues with torch
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=True,  # Keep console for logging
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=_target_arch,  # Detected from current platform
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+else:
+    # Windows/Linux: --onedir (CUDA libs loaded in-place, no temp extraction)
+    # Avoids 30-60s self-extraction startup, 260-char path limit on Windows,
+    # and multiprocessing spawn-loop risk with large --onefile bundles.
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],  # binaries/data go into COLLECT, not EXE
+        name='tts-server',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        console=True,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=_target_arch,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name='tts-server',
+    )
