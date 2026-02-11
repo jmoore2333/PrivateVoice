@@ -746,6 +746,65 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 ---
 
+## 11. Existing CI/CD Gaps
+
+> **Important context**: The current CI (`.github/workflows/ci.yml`) has gaps beyond just being single-OS. These should be addressed in the same pass as adding multi-platform builds.
+
+### Current State of `ci.yml`
+
+The workflow has 4 jobs, all on `ubuntu-latest`:
+
+| Job | What It Does | What's Missing |
+|-----|-------------|----------------|
+| `lint-and-typecheck` | `pnpm check` | Nothing — this is fine |
+| `unit-tests` | `pnpm test:coverage` (216 Vitest tests) | Nothing — this is fine |
+| `e2e-tests` | Playwright E2E (90 tests) | Nothing — this is fine |
+| `build` | **`pnpm build` only** | Only builds the Vite frontend. Does NOT run `pnpm tauri build` — no Rust compilation is validated in CI |
+
+### Gap 1: No Python Backend Tests in CI
+
+The 78 pytest tests (`python/tests/`) never run in CI. Any backend regression (endpoint changes, inference bugs, API contract breaks) goes undetected until manual testing.
+
+**Fix**: Add a `python-tests` job:
+```yaml
+python-tests:
+  name: Python Backend Tests
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        cd python
+        python -m venv .venv
+        source .venv/bin/activate
+        pip install -r requirements.txt
+        pip install pytest
+    - name: Run tests
+      run: |
+        cd python
+        source .venv/bin/activate
+        python -m pytest tests/ -v
+```
+
+### Gap 2: No Tauri/Rust Build Validation
+
+The `build` job runs `pnpm build` (Vite/SvelteKit) but not `pnpm tauri build`. This means Rust compilation errors, Cargo.toml dependency issues, and plugin configuration problems are never caught in CI.
+
+**Fix**: Replace or supplement the `build` job with a Tauri build that installs Linux system dependencies and compiles the Rust layer. This will require `libwebkit2gtk-4.1-dev` and other system packages on the runner. The sidecar binary can be stubbed for CI (touch an empty file with the right name) since the actual PyInstaller build is too slow/large for CI unless you need release artifacts.
+
+### Impact When Expanding to Multi-Platform
+
+These gaps compound when adding Windows and macOS runners:
+- Without Python tests, a SIGPIPE fix could regress on one platform silently
+- Without Tauri build validation, a Cargo.toml change could break Windows/Linux compilation without anyone knowing until release time
+
+**Recommendation**: Fix both gaps on the existing `ubuntu-latest` runner first, then expand to the multi-OS matrix.
+
+---
+
 ## Quick Reference: Complete Build from Scratch
 
 ```bash

@@ -917,6 +917,25 @@ Build the Python sidecar on Windows (since PyInstaller can't cross-compile), the
 
 **Note**: The Tauri Rust build must also be done on Windows (you can't cross-compile a Windows Tauri app from Linux/macOS due to MSVC/WebView2 dependencies).
 
+### Existing CI/CD Gaps (Fix Before Expanding)
+
+> **Important context**: Before adding Windows CI runners, the existing CI has gaps that should be fixed first.
+
+The current `.github/workflows/ci.yml` runs 4 jobs on `ubuntu-latest`:
+
+| Job | What It Does | Gap |
+|-----|-------------|-----|
+| `lint-and-typecheck` | `pnpm check` | None |
+| `unit-tests` | `pnpm test:coverage` (216 Vitest tests) | None |
+| `e2e-tests` | Playwright E2E (90 tests) | None |
+| `build` | **`pnpm build` only** | Only builds Vite frontend — does NOT run `pnpm tauri build`, so Rust compilation is never validated |
+
+**Gap 1: No Python backend tests in CI** — The 78 pytest tests never run. Backend regressions (like the SIGPIPE fix) go undetected.
+
+**Gap 2: No Tauri/Rust build validation** — `pnpm build` only builds the frontend. Cargo.toml dependency issues, Rust compilation errors, and plugin config problems are invisible in CI.
+
+**Recommendation**: Fix both gaps on the existing `ubuntu-latest` runner first (add a `python-tests` job and upgrade `build` to include `pnpm tauri build`), then expand to the multi-OS matrix. See the Linux handover doc section 11 for full YAML examples.
+
 ### Option C: GitHub Actions CI
 
 Use a Windows runner for automated builds:
