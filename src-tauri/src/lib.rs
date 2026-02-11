@@ -486,6 +486,63 @@ async fn repair_environment(
     Ok("Environment marked for repair. Restart the app to re-run setup.".to_string())
 }
 
+/// Reset cached WebView2 mic/camera permissions (Windows only).
+/// Called from the UI when the user is stuck with a denied microphone.
+/// Returns true if something was cleared and a restart is needed.
+#[tauri::command]
+fn reset_mic_permissions() -> Result<bool, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::PathBuf;
+
+        let local_app_data = std::env::var("LOCALAPPDATA")
+            .map_err(|_| "Could not find LOCALAPPDATA")?;
+        let prefs_path = PathBuf::from(&local_app_data)
+            .join("com.privatevoice.desktop")
+            .join("EBWebView")
+            .join("Default")
+            .join("Preferences");
+
+        if !prefs_path.exists() {
+            return Ok(false); // No Preferences file = nothing to clear
+        }
+
+        let contents = std::fs::read_to_string(&prefs_path)
+            .map_err(|e| format!("Failed to read Preferences: {}", e))?;
+
+        let mut prefs: serde_json::Value = serde_json::from_str(&contents)
+            .map_err(|e| format!("Failed to parse Preferences: {}", e))?;
+
+        let mut modified = false;
+        if let Some(profile) = prefs.get_mut("profile") {
+            if let Some(content_settings) = profile.get_mut("content_settings") {
+                if let Some(exceptions) = content_settings.get_mut("exceptions") {
+                    for key in &["media_stream_mic", "media_stream_camera"] {
+                        if exceptions.get(*key).is_some() {
+                            exceptions.as_object_mut().map(|obj| obj.remove(*key));
+                            modified = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if modified {
+            let json_str = serde_json::to_string(&prefs)
+                .map_err(|e| format!("Failed to serialize Preferences: {}", e))?;
+            std::fs::write(&prefs_path, json_str)
+                .map_err(|e| format!("Failed to write Preferences: {}", e))?;
+        }
+
+        Ok(modified)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(false) // No-op on non-Windows
+    }
+}
+
 /// Detect the current GPU target (for frontend display).
 #[tauri::command]
 fn detect_gpu() -> Result<String, String> {
@@ -495,6 +552,72 @@ fn detect_gpu() -> Result<String, String> {
         "display": gpu.display_name(),
     }))
     .map_err(|e| e.to_string())
+}
+
+/// Clear cached microphone/camera permission denials from the WebView2 Preferences file.
+///
+/// Must run BEFORE WebView2 initializes (before `tauri::Builder::run()`). If a user
+/// previously denied mic/camera access, WebView2 caches the denial and never fires the
+/// `PermissionRequested` event again, so our auto-grant handler can't help. This clears
+/// those cached denials so the event fires again on next request.
+#[cfg(target_os = "windows")]
+fn clear_cached_webview2_denials() {
+    use std::path::PathBuf;
+
+    let local_app_data = match std::env::var("LOCALAPPDATA") {
+        Ok(val) => PathBuf::from(val),
+        Err(_) => return,
+    };
+
+    let prefs_path = local_app_data
+        .join("com.privatevoice.desktop")
+        .join("EBWebView")
+        .join("Default")
+        .join("Preferences");
+
+    if !prefs_path.exists() {
+        return;
+    }
+
+    let contents = match std::fs::read_to_string(&prefs_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let mut prefs: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // WebView2 stores permission states under:
+    // profile.content_settings.exceptions.media_stream_mic
+    // profile.content_settings.exceptions.media_stream_camera
+    let mut modified = false;
+    if let Some(profile) = prefs.get_mut("profile") {
+        if let Some(content_settings) = profile.get_mut("content_settings") {
+            if let Some(exceptions) = content_settings.get_mut("exceptions") {
+                for key in &["media_stream_mic", "media_stream_camera"] {
+                    if exceptions.get(*key).is_some() {
+                        exceptions
+                            .as_object_mut()
+                            .map(|obj| obj.remove(*key));
+                        modified = true;
+                        println!(
+                            "WebView2: cleared cached {} permission denial",
+                            key
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if modified {
+        if let Ok(json_str) = serde_json::to_string(&prefs) {
+            let _ = std::fs::write(&prefs_path, json_str);
+            println!("WebView2: wrote cleaned Preferences file");
+        }
+    }
 }
 
 /// Auto-grant microphone and camera permissions in WebView2 on Windows.
@@ -542,6 +665,11 @@ fn setup_webview2_permissions(window: &tauri::WebviewWindow) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Clear any cached WebView2 permission denials BEFORE the webview initializes.
+    // This must run before tauri::Builder so the Preferences file isn't locked.
+    #[cfg(target_os = "windows")]
+    clear_cached_webview2_denials();
+
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -574,7 +702,8 @@ pub fn run() {
             get_sidecar_logs,
             get_environment_status,
             repair_environment,
-            detect_gpu
+            detect_gpu,
+            reset_mic_permissions
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {

@@ -86,9 +86,21 @@
     wavesurfer?.destroy();
   });
 
-  function retryMicPermission() {
+  async function retryMicPermission() {
     micPermissionDenied = false;
     error = null;
+
+    // On Windows, clear cached WebView2 permission denials before retrying
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const cleared = await invoke<boolean>('reset_mic_permissions');
+      if (cleared) {
+        console.log('[AudioRecorder] Cleared cached mic permission denial');
+      }
+    } catch {
+      // Not in Tauri or command unavailable — ignore
+    }
+
     startRecording();
   }
 
