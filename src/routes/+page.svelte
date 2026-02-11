@@ -314,11 +314,20 @@
             debugStore.fetchSystemInfo();
           }
 
-          if (statusPhase === "ready") {
+          // "checking-models" means the server is up and waiting for model load —
+          // this is a valid startup-complete state (server is usable).
+          if (statusPhase === "ready" || statusPhase === "checking-models") {
             if (healthInterval) {
               clearInterval(healthInterval);
               healthInterval = null;
             }
+
+            // Ensure UI reflects ready state
+            if (statusPhase === "checking-models") {
+              appStore.setStartupPhase("ready", "Server connected");
+              appStore.setStartupProgress(100);
+            }
+
             await ttsStore.refreshModelStatus();
 
             // Auto-load the recommended model if none is loaded
