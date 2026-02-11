@@ -487,7 +487,10 @@ async def generate_voice_clone(
             raise HTTPException(status_code=400, detail=f"Reference audio exceeds maximum size of {MAX_AUDIO_SIZE // (1024*1024)} MB")
         if not x_vector_only_mode and not reference_text:
             raise HTTPException(status_code=400, detail="Reference text is required unless low-quality mode is enabled.")
-        audio_bytes, media_type = model.generate_voice_clone(
+
+        # Run inference in a thread so the event loop stays free for /logs polling
+        audio_bytes, media_type = await asyncio.to_thread(
+            model.generate_voice_clone,
             text=text,
             reference_audio=audio_data,
             reference_text=reference_text,
@@ -502,18 +505,18 @@ async def generate_voice_clone(
     except HTTPException:
         raise
     except RuntimeError as e:
-        error_msg = str(e)
-        if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
-            raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
         import traceback
         tb = traceback.format_exc()
+        error_msg = str(e)
         logger.error(f"Voice clone RuntimeError:\n{tb}")
-        raise HTTPException(status_code=500, detail=error_msg)
+        if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
+        raise HTTPException(status_code=500, detail=f"{error_msg}\n\nTraceback:\n{tb}")
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         logger.error(f"Voice clone failed with full traceback:\n{tb}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"{e}\n\nTraceback:\n{tb}")
 
 
 @app.post("/generate/voice-design")

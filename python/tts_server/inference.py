@@ -239,21 +239,33 @@ class TTSModel:
         effective_ref_text = "" if x_vector_only_mode else reference_text
 
         # Load audio into memory (avoids Windows temp file locking issues)
-        logger.info(f"Loading reference audio ({len(reference_audio)} bytes)...")
+        logger.info(f"[vc step 1/5] Loading reference audio ({len(reference_audio)} bytes)...")
         ref_audio_np, ref_sr = self._load_audio_from_bytes(reference_audio)
-        logger.info(f"Reference audio loaded: shape={ref_audio_np.shape}, sr={ref_sr}, dtype={ref_audio_np.dtype}")
+        logger.info(f"[vc step 2/5] Reference audio loaded: shape={ref_audio_np.shape}, sr={ref_sr}, dtype={ref_audio_np.dtype}")
 
-        logger.info("Starting voice clone inference...")
-        with torch.no_grad():
-            wavs, sr = self.model.generate_voice_clone(
-                text=text,
-                language=language,
-                ref_audio=(ref_audio_np, ref_sr),
-                ref_text=effective_ref_text,
-            )
+        logger.info(f"[vc step 3/5] Starting voice clone inference on {self.config.device}...")
+        try:
+            with torch.no_grad():
+                wavs, sr = self.model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    ref_audio=(ref_audio_np, ref_sr),
+                    ref_text=effective_ref_text,
+                )
+        except OSError as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"[vc step 3/5] OSError during inference: {e}\n{tb}")
+            raise
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"[vc step 3/5] Error during inference: {type(e).__name__}: {e}\n{tb}")
+            raise
 
-        logger.info("Voice clone inference complete, converting output...")
+        logger.info(f"[vc step 4/5] Inference complete, got {len(wavs)} wav(s), sr={sr}")
         synchronize_device(self.config.device)
+        logger.info("[vc step 5/5] Converting output to audio format...")
         return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
     def generate_voice_design(

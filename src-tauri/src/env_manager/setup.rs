@@ -277,6 +277,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 fn install_python(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
     let python_dir = paths::standalone_python_dir(app)?;
 
+    // Ensure the install directory exists — uv doesn't create it on Windows
+    std::fs::create_dir_all(&python_dir)
+        .map_err(|e| format!("Failed to create python install directory: {}", e))?;
+
     let mut cmd = Command::new(uv);
     cmd.args(["python", "install", "3.11", "--install-dir"])
         .arg(&python_dir)

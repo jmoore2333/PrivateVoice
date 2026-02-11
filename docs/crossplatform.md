@@ -20,9 +20,9 @@ On **first launch**, the app detects GPU hardware, downloads Python 3.11 via `uv
 
 | Platform | Status | Installer | GPU | Tested |
 |----------|--------|-----------|-----|--------|
-| Windows 11 x64 | **Working** | NSIS (~14 MB) | CUDA (RTX 3090 validated) | 2026-02-11 |
+| Windows 11 x64 | **Working** | NSIS (~13 MB) | CUDA (RTX 3090) | 2026-02-11 |
 | macOS (Apple Silicon) | Untested on new arch | DMG | MPS | Pending |
-| Linux x64 | Not started | .deb / .AppImage | CUDA / ROCm / XPU | Pending |
+| Linux x64 (Ubuntu) | **Next** | .deb / .AppImage | CUDA / ROCm / XPU | Planned |
 
 ---
 
@@ -34,33 +34,73 @@ On **first launch**, the app detects GPU hardware, downloads Python 3.11 via `uv
 - CUDA 12.4 detected via `nvidia-smi`
 
 ### What Works
-- **NSIS installer**: ~14 MB, per-user install (`currentUser`), no admin required
+- **NSIS installer**: ~13 MB, per-user install (`currentUser`), no admin required
 - **First-run setup**: GPU detection → Python 3.11 install → venv → CUDA 12.4 dependencies (~5.3 GB env). Completes in ~2-5 minutes depending on network.
 - **Second-run fast path**: Marker validated in milliseconds, server starts in ~5 seconds
 - **Re-setup after uninstall**: 6 seconds with cached packages (uv cache persists across installs)
 - **Model loading**: 0.6b CustomVoice model loads on CUDA with SDPA attention
-- **Voice generation**: Voice Design mode produces valid audio output
+- **Custom Voice generation**: Produces valid audio output
+- **Voice Design generation**: Produces valid audio output
+- **Microphone recording**: Auto-granted via WebView2 COM API (no browser permission prompt)
+- **Auto-transcription**: Whisper model loads and transcribes reference audio
+- **Model switching**: Mode tabs detect compatibility, banner auto-clears after load
 - **Server health**: Python FastAPI server starts, responds to all endpoints
+- **Voice Clone generation**: Produces valid audio output (1.7B Base model)
+- **Debug panel**: Full server logs visible in-app
+- **Clean reinstall**: Full setup completes after "remove all application data" uninstall
 
 ### Issues Found and Fixed
 
-| # | Issue | Root Cause | Fix |
-|---|-------|------------|-----|
-| 1 | `uv binary not found` after install | `resource_dir()` returns install root; Tauri preserves `resources/` subdirectory from glob patterns | Added `bundled_resources_dir()` helper in `paths.rs` |
-| 2 | Wrong `python.exe` found during venv creation | Recursive `walkdir` found `Lib/venv/scripts/nt/python.exe` (stdlib template) before real interpreter | Replaced with targeted `cpython-*` directory lookup in `setup.rs` |
-| 3 | Frontend stuck on LoadingScreen | `isStartupComplete` only accepted `"ready"` phase, but Tauri event reliably fires `"checking-models"` before HTTP polling completes | `isStartupComplete` now accepts both `"ready"` and `"checking-models"` |
-| 4 | Uvicorn startup not detected | `process_stderr_line()` in `lib.rs` didn't do phase detection — only `process_stdout_line()` did, but uvicorn outputs to stderr | Added phase detection to `process_stderr_line()` |
-| 5 | `OPTIONS /load-model` returns 400 | CORS preflight rejected — WebView Origin didn't match explicit allow list | Changed to `allow_origins=["*"]` (safe: server is localhost-only) |
-| 6 | FlashAttention2 error on model load | `device.py` unconditionally set `flash_attention_2` for Ampere+ GPUs, but `flash_attn` package not installed | Added runtime `import flash_attn` check, falls back to SDPA |
-| 7 | Noisy error tracebacks in logs | Python logging `StreamHandler.emit()` fails with `OSError: [Errno 22]` when writing from background threads on Windows piped streams | `logging.raiseExceptions = False` in production |
+| # | Issue | Root Cause | Fix | Commit |
+|---|-------|------------|-----|--------|
+| 1 | `uv binary not found` after install | `resource_dir()` returns install root; Tauri preserves `resources/` subdirectory | Added `bundled_resources_dir()` helper in `paths.rs` | `ae99aed` |
+| 2 | Wrong `python.exe` found during venv creation | Recursive `walkdir` found stdlib template before real interpreter | Targeted `cpython-*` directory lookup in `setup.rs` | `ae99aed` |
+| 3 | Frontend stuck on LoadingScreen | `isStartupComplete` only accepted `"ready"` phase | Accepts both `"ready"` and `"checking-models"` | `ae99aed` |
+| 4 | Uvicorn startup not detected | `process_stderr_line()` didn't do phase detection | Added phase detection to `process_stderr_line()` | `a5f9a4c` |
+| 5 | `OPTIONS /load-model` returns 400 | CORS preflight rejected — WebView origin mismatch | Changed to `allow_origins=["*"]` (localhost-only server) | `a5f9a4c` |
+| 6 | FlashAttention2 error on model load | `device.py` unconditionally set `flash_attention_2` | Added runtime `import flash_attn` check, falls back to SDPA | `a5f9a4c` |
+| 7 | Noisy error tracebacks in logs | `StreamHandler.emit()` fails with `OSError` on piped streams | `logging.raiseExceptions = False` in production | `a5f9a4c` |
+| 8 | Model-switch banner persists | `modelSwitchPrompt` only cleared by banner's own buttons | Added `$effect` + template guard `!modelSupportsMode(...)` | `06e6062` |
+| 9 | Mic permission denied permanently | WebView2 caches denial, `PermissionRequested` stops firing | Auto-grant mic/camera via WebView2 COM API in `setup()` hook | `373752d` |
+| 10 | Cached mic denial survives reinstall | WebView2 Preferences file persists across installs | Startup cleanup clears cached denials + `reset_mic_permissions` command | `60db0e9` |
+| 11 | Voice clone WebM format mismatch | MediaRecorder records `audio/webm`, model expects WAV | Client-side WebM-to-WAV conversion via Web Audio API | `93093ec` |
+| 12 | Voice clone `[Errno 22]` from temp files | Windows `NamedTemporaryFile` file handle locking | In-memory audio loading via `soundfile.read(BytesIO(...))` | `35e5b2e` |
+| 13 | Voice clone `[Errno 22]` from print() | qwen_tts `mel_spectrogram()` uses bare `print()` to piped stdout | `SafeWriter` wrapper on `sys.stdout/stderr` catches `OSError` | `ad4c6f2` |
+| 14 | HuggingFace symlink warnings | Windows requires Developer Mode for symlinks | `HF_HUB_DISABLE_SYMLINKS_WARNING=1` env var | `35e5b2e` |
+| 15 | Voice clone blocked event loop | `async def` endpoint called sync inference directly | `asyncio.to_thread()` + traceback in error detail | (this commit) |
+| 16 | Clean install fails (`uv python install` exit 2) | `python_env/python/` dir not pre-created on clean install | `create_dir_all(&python_dir)` before `uv python install` | (this commit) |
 
 ### Remaining Non-Critical Items
 
 | Item | Status | Notes |
 |------|--------|-------|
 | SoX "not found" stderr messages | Cosmetic | `sox` Python package checks for SoX binary at import time. Not needed for core TTS. |
-| HuggingFace symlink warning | Cosmetic | Windows requires Developer Mode for symlinks. Downloads work, just use more disk space. |
-| `flash-attn not installed` warning | Cosmetic | Appears at import time from `qwen-tts` internals. Suppressed via `warnings.filterwarnings`. |
+
+---
+
+## Linux Build Plan (Ubuntu)
+
+### Prerequisites
+- Ubuntu 22.04+ (or equivalent)
+- Rust toolchain (`rustup`)
+- Node.js + pnpm
+- System libraries for Tauri: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, etc.
+- GPU drivers (NVIDIA CUDA, AMD ROCm, or CPU-only)
+
+### Expected Work
+1. **Build script**: `scripts/build-release.sh` — adapt from Windows `.ps1` (stage resources, build Tauri)
+2. **Bundle format**: `.deb` and/or `.AppImage`
+3. **GPU detection**: `env_manager/gpu.rs` already handles `nvidia-smi`, `rocm-smi`, `lspci` for Linux
+4. **Python venv**: `uv` supports Linux natively; venv path uses `python_env_dir()` which respects `app_data_dir()`
+5. **No `CREATE_NO_WINDOW`**: The `#[cfg(target_os = "windows")]` guard already skips it on Linux
+6. **No WebView2 issues**: Linux uses WebKitGTK, not WebView2 — no mic permission caching problems
+7. **No SafeWriter needed**: POSIX pipes handle `SIGPIPE` gracefully (already have `signal.signal(SIGPIPE, SIG_IGN)`)
+
+### Potential Linux-Specific Issues
+- WebKitGTK mic permissions may need `gstreamer` plugins
+- `.deb` package might need to declare system dependencies
+- ROCm PyTorch wheels are Linux-only (good — this is where they'll be tested)
+- AppImage sandboxing may affect `uv` binary execution
 
 ---
 
