@@ -3,7 +3,7 @@
 
 Build with: pyinstaller tts_server.spec
 
-Output: dist/tts-server (single executable for macOS arm64)
+Output: dist/tts-server (single executable for current platform)
 """
 
 import sys

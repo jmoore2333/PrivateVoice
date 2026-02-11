@@ -1,7 +1,7 @@
 [package]
 name = "privatevoice"
 version = "1.0.0"
-description = "PrivateVoice - Local text-to-speech for Apple Silicon"
+description = "PrivateVoice - Local text-to-speech desktop app"
 authors = ["jmoore"]
 edition = "2021"
 

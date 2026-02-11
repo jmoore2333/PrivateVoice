@@ -5,8 +5,12 @@ This script is used by PyInstaller to properly bootstrap the tts_server module.
 It avoids the relative import issues that occur when running main.py directly.
 """
 
+import multiprocessing
 import sys
 import os
+
+# Prevent infinite subprocess spawn loops on Windows with PyInstaller
+multiprocessing.freeze_support()
 
 # Ensure the parent directory is in the path for imports
 if getattr(sys, 'frozen', False):

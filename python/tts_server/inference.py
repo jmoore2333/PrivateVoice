@@ -14,7 +14,9 @@ from qwen_tts import Qwen3TTSModel
 from .device import DeviceConfig, get_device_config, synchronize_device, clear_cache
 
 # Ignore SIGPIPE to prevent broken pipe crashes during stdout writes
-signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+# (SIGPIPE does not exist on Windows)
+if hasattr(signal, 'SIGPIPE'):
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
 logger = logging.getLogger("tts_server")
 
