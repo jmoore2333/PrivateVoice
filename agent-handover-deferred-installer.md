@@ -158,9 +158,47 @@ In `setup.rs` `install_dependencies()`, the `--extra-index-url` from `torch_extr
 
 ---
 
-## 4. Next Steps: Testing on Windows
+## 4. Windows Testing — Completed (2026-02-11)
 
-### Prerequisites
+### Test Environment
+
+- Windows 11 Pro (10.0.26200), x64
+- NVIDIA GeForce RTX 3090 (compute capability 8.6, CUDA 12.4)
+- Build machine had: VS Build Tools 2022, Rust stable, Node.js 22, pnpm, Python 3.11.9
+
+### Results Summary
+
+| Test | Result |
+|------|--------|
+| NSIS installer builds | **Pass** — ~14 MB, per-user install, no admin |
+| First-run setup (clean install) | **Pass** — GPU detected, Python + CUDA deps installed (~5.3 GB env) |
+| Second launch (fast path) | **Pass** — marker validated in ~10ms, server starts in ~5s |
+| Re-setup after full uninstall | **Pass** — 6 seconds with uv cache (packages cached from first install) |
+| Model loading (0.6b CustomVoice) | **Pass** — loads on CUDA with SDPA attention |
+| Voice generation (Voice Design mode) | **Pass** — produces valid audio output |
+| App closes cleanly | **Pass** — Python process killed on window close |
+
+### Issues Found and Fixed During Testing
+
+Seven issues were discovered and fixed during Windows testing. All fixes are in the working tree (some committed, some pending commit). Full details in `docs/crossplatform.md`.
+
+| # | Issue | Fix |
+|---|-------|-----|
+| 1 | `uv binary not found` — wrong resource path | Added `bundled_resources_dir()` in `paths.rs` |
+| 2 | Wrong `python.exe` found by recursive walkdir | Targeted `cpython-*` directory lookup in `setup.rs` |
+| 3 | Frontend stuck on LoadingScreen | `isStartupComplete` now accepts `"checking-models"` phase |
+| 4 | Uvicorn startup not detected (stderr) | Phase detection added to `process_stderr_line()` in `lib.rs` |
+| 5 | CORS preflight 400 on POST endpoints | Changed to `allow_origins=["*"]` (localhost-only server) |
+| 6 | FlashAttention2 error on model load | Runtime `flash_attn` import check, falls back to SDPA |
+| 7 | Noisy logging error tracebacks | `logging.raiseExceptions = False` in production |
+
+### Remaining Cosmetic Issues (Non-Blocking)
+
+- **SoX stderr messages**: `sox` Python package checks for SoX binary at import time. Appears as ERRO entries but doesn't affect functionality.
+- **HuggingFace symlink warning**: Windows requires Developer Mode for symlinks. Downloads work with more disk usage.
+- **`flash-attn not installed` warning**: From `qwen-tts` internals at import time. Suppressed via `warnings.filterwarnings`.
+
+### Build Prerequisites (Windows)
 
 | Tool | Version | Install |
 |------|---------|---------|
@@ -170,67 +208,69 @@ In `setup.rs` `install_dependencies()`, the `--extra-index-url` from `torch_extr
 | pnpm | 8+ | `corepack enable` |
 | Git | Latest | `winget install Git.Git` |
 
-**Note**: Python is NOT required on the build machine for users. The deferred installer uses `uv` to install a standalone Python. For development (`pnpm tauri dev`), you still need Python 3.11+ with a local venv.
+**Note**: Python is NOT required on the build machine for end users. The deferred installer uses `uv` to install a standalone Python. For development (`pnpm tauri dev`), you still need Python 3.11+ with a local venv.
 
 ### Build Steps (PowerShell)
 
 ```powershell
-# 1. Clone and switch to branch
-git clone <repo-url> PrivateVoice
-cd PrivateVoice
-git checkout claude/fix-crossplatform-setup-AAIjb
+# 1. Stage resources
+.\scripts\download-uv.ps1
+Copy-Item -Recurse python\tts_server src-tauri\resources\tts_server -Force
+Copy-Item python\requirements.txt src-tauri\resources\requirements.txt -Force
 
-# 2. Run the release build
-.\scripts\build-release.ps1
-
-# This does 4 things:
-#   a. Downloads uv v0.6.6 for Windows x64 → src-tauri/resources/uv.exe
-#   b. Copies python/tts_server/ → src-tauri/resources/tts_server/
-#   c. Copies python/requirements.txt → src-tauri/resources/requirements.txt
-#   d. Runs pnpm install && pnpm tauri build --bundles nsis
-```
-
-### Build Steps (Git Bash)
-
-```bash
-# Alternative: use the bash script from Git Bash / MSYS2
-./scripts/build-release.sh
+# 2. Build
+pnpm install
+pnpm tauri build
 ```
 
 ### Expected Output
 
 ```
-src-tauri\target\release\bundle\nsis\PrivateVoice_1.0.0_x64-setup.exe
+src-tauri\target\release\bundle\nsis\PrivateVoice_1.0.0_x64-setup.exe  (~14 MB)
 ```
-
-Expected installer size: **~50–60 MB** (vs. 241 MB CPU-only or 4+ GB CUDA with old approach).
-
-### First Launch Test
-
-1. Run the NSIS installer — should install to `%LOCALAPPDATA%\PrivateVoice` (no admin prompt)
-2. Launch the app
-3. **First-run setup** should show:
-   - Amber-colored progress bar with wrench icon
-   - "One-time setup" info panel
-   - Progress through: Detecting hardware → Checking disk → Copying source → Installing Python → Creating venv → Installing deps → Verifying → Complete
-   - The "Installing dependencies" step will take 1–5 minutes (downloads ~1–3 GB depending on GPU)
-4. After setup completes, server starts normally
-5. **Second launch** — should skip setup entirely and start in ~5 seconds
-
-### What to Watch For
-
-- Does GPU detection correctly identify your hardware? (Check Settings → Environment)
-- Does the NSIS installer work without admin elevation?
-- Does the app launch without a visible console window?
-- Does `%LOCALAPPDATA%\com.privatevoice.app\python_env\` contain the venv?
-- Can you generate audio after setup completes?
 
 ### If Something Fails
 
 - Check the expanding log panel on the loading screen for error details
-- The Settings → Environment section shows the environment state and has Repair/Rebuild buttons
-- To force a full re-setup: delete `%LOCALAPPDATA%\com.privatevoice.app\python_env\`
-- For build issues: check that `src-tauri/resources/uv.exe` exists after step 2a
+- Settings → Environment section shows environment state and has Repair/Rebuild buttons
+- To force a full re-setup: delete `%APPDATA%\com.privatevoice.desktop\python_env\`
+- For build issues: check that `src-tauri/resources/uv.exe` exists after staging
+
+---
+
+## 4.1 Future: GPU-Specific Acceleration Packages
+
+A key advantage of the deferred installer is that `uv pip install` runs at first launch with knowledge of the user's actual GPU hardware. This enables installing GPU-specific optimization packages that cannot be universally bundled.
+
+### Planned Packages by GPU
+
+| GPU | Package | Benefit | Install Method |
+|-----|---------|---------|---------------|
+| NVIDIA Ampere+ (compute ≥8.0) | `flash-attn` | FlashAttention2 — significantly faster for long sequences | `uv pip install flash-attn --no-build-isolation` or pre-built wheel |
+| NVIDIA (any CUDA) | `xformers` | Memory-efficient attention, broader GPU support than flash-attn | `uv pip install xformers` (pre-built wheels available) |
+| AMD (Linux, ROCm) | ROCm torch | Already handled via `--extra-index-url` | Existing setup flow |
+| Intel Arc/Xe | Intel Extension for PyTorch | XPU acceleration | `uv pip install intel-extension-for-pytorch` |
+| CPU (Intel x86_64) | `intel-extension-for-pytorch` | MKL optimizations for CPU inference | Best-effort install |
+
+### Implementation Plan
+
+After the base `requirements.txt` install succeeds in `setup.rs`:
+
+```
+Step 1: Base install — uv pip install -r requirements.txt [+ torch index URL]
+Step 2: GPU extras (NEW) — attempt flash_attn / xformers based on GPU
+Step 3: Verify — import torch; check GPU availability
+Step 4: Write marker — record what was installed
+```
+
+**Step 2 must be best-effort**: if flash_attn fails to build/install (no wheel for this CUDA/Python combo), the app still works with SDPA attention. The `.setup-complete` marker should record which extras were installed, and the Settings panel should show optimization status (e.g., "FlashAttention2: installed" or "FlashAttention2: not available — using SDPA").
+
+### Priority Order
+
+1. **NVIDIA flash_attn** — highest impact, most users. Try `flash-attn` wheel first, fall back to `xformers` if unavailable.
+2. **AMD ROCm** — already working, just needs Linux testing validation.
+3. **Intel XPU** — niche but supported in detection code. Needs testing with actual Intel GPU hardware.
+4. **CPU optimizations** — lowest priority, default PyTorch CPU is adequate.
 
 ---
 

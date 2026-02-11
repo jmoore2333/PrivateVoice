@@ -30,6 +30,13 @@
   let showModelMenu = $state(false);
   let modelSwitchPrompt = $state<{ mode: TTSMode; recommendedModel: string; label: string } | null>(null);
 
+  // Clear the model-switch banner when the loaded model becomes compatible
+  $effect(() => {
+    if (modelSwitchPrompt && modelSupportsMode(modelId, currentMode)) {
+      modelSwitchPrompt = null;
+    }
+  });
+
   const modes: { id: TTSMode; label: string }[] = [
     { id: 'custom-voice', label: 'Custom Voice' },
     { id: 'voice-clone', label: 'Voice Clone' },

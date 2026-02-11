@@ -105,7 +105,11 @@
   });
 
   // Derived state
-  const isStartupComplete = $derived(appState.startup.phase === "ready");
+  // "checking-models" means the server is up and API-ready — treat as startup complete.
+  // The Tauri sidecar event reliably fires this phase; HTTP polling may lag behind.
+  const isStartupComplete = $derived(
+    appState.startup.phase === "ready" || appState.startup.phase === "checking-models"
+  );
   const showOnboarding = $derived(!settingsStore.state.hasCompletedOnboarding);
 
   function computeStatus(): 'ready' | 'generating' | 'downloading' | 'loading' | 'error' {
@@ -270,8 +274,9 @@
 
           await ttsClient.health();
 
+          // Ensure serverConnected is set before proceeding
           if (!ttsState.serverConnected) {
-            ttsStore.checkServerHealth();
+            await ttsStore.checkServerHealth();
           }
 
           if (startupStatusAvailable) {
@@ -336,8 +341,9 @@
               ttsStore.loadModel(recommended);
             }
           }
-        } catch {
-          // Server not ready yet
+        } catch (pollErr) {
+          // Server not ready yet — log for diagnostics
+          console.debug("[health-poll] waiting for server:", pollErr);
         }
       }, 500);
     } catch (e) {

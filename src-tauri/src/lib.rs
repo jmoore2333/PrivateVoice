@@ -181,7 +181,9 @@ fn process_stdout_line(app: &tauri::AppHandle, line: &str) {
     }
 }
 
-/// Process a stderr line: emit log event and buffer it.
+/// Process a stderr line: emit log event, buffer it, and detect startup phases.
+/// Uvicorn and FastAPI print startup messages to stderr, so phase detection
+/// must run here too (not just on stdout).
 fn process_stderr_line(app: &tauri::AppHandle, line: &str) {
     let entry = LogEntry {
         level: "ERROR".to_string(),
@@ -195,6 +197,18 @@ fn process_stderr_line(app: &tauri::AppHandle, line: &str) {
         if let Ok(mut buf) = buffer.lock() {
             buf.add(entry);
         }
+    }
+
+    // Detect startup phases from stderr (uvicorn outputs here)
+    if line.contains("Uvicorn running") || line.contains("Application startup complete") {
+        let _ = app.emit(
+            "sidecar-startup",
+            StartupEvent {
+                phase: "checking-models".to_string(),
+                message: "Server ready, checking models...".to_string(),
+                progress: 20,
+            },
+        );
     }
 }
 

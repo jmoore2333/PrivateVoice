@@ -13,6 +13,13 @@ import sys
 if hasattr(signal, 'SIGPIPE'):
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
+import warnings
+# Suppress expected warnings from optional dependencies on Windows:
+# - sox: not needed for core TTS (only used by some audio preprocessing)
+# - flash_attn: optional CUDA optimization, falls back to SDPA
+warnings.filterwarnings("ignore", message=".*sox.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*flash.attn.*", category=UserWarning)
+
 import torch
 from contextlib import asynccontextmanager
 from typing import Optional, List
@@ -208,18 +215,12 @@ app = FastAPI(
     redoc_url="/redoc" if _is_dev else None,
 )
 
-# Enable CORS for Tauri frontend
-ALLOWED_ORIGINS = [
-    "http://localhost:1420",
-    "http://127.0.0.1:1420",
-    "tauri://localhost",
-    "https://tauri.localhost",
-]
-
+# Enable CORS — server is localhost-only so all origins are safe.
+# Tauri WebView origins vary by platform (tauri://localhost on macOS,
+# https://tauri.localhost on Windows/Linux) and may change across versions.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -688,6 +689,12 @@ def main():
 
     port = int(os.environ.get("TTS_SERVER_PORT", "8765"))
     host = os.environ.get("TTS_SERVER_HOST", "127.0.0.1")
+
+    # On Windows, when spawned with CREATE_NO_WINDOW and piped streams,
+    # logging writes from background threads can fail with OSError.
+    # Suppress the verbose "--- Logging error ---" tracebacks in production.
+    if not _is_dev:
+        logging.raiseExceptions = False
 
     state = get_startup_state()
     state.set_phase("starting-server", f"Starting TTS server on {host}:{port}", 5)
