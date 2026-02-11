@@ -505,9 +505,14 @@ async def generate_voice_clone(
         error_msg = str(e)
         if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Voice clone RuntimeError:\n{tb}")
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
-        logger.error(f"Voice clone failed: {e}")
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Voice clone failed with full traceback:\n{tb}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -698,6 +703,34 @@ def main():
     # Suppress the verbose "--- Logging error ---" tracebacks in production.
     if not _is_dev:
         logging.raiseExceptions = False
+
+    # On Windows, replace sys.stdout/stderr with safe wrappers that catch
+    # write errors ([Errno 22] Invalid argument). Third-party libraries
+    # (e.g., qwen_tts, transformers) use bare print() calls that crash when
+    # stdout is a pipe with CREATE_NO_WINDOW flag.
+    if platform.system() == "Windows" and not _is_dev:
+        class SafeWriter:
+            """Wraps a stream to silently handle broken pipe / invalid argument errors."""
+            def __init__(self, stream):
+                self._stream = stream
+            def write(self, data):
+                try:
+                    if self._stream and not self._stream.closed:
+                        return self._stream.write(data)
+                except OSError:
+                    pass  # [Errno 22] or broken pipe — silently ignore
+                return len(data) if data else 0
+            def flush(self):
+                try:
+                    if self._stream and not self._stream.closed:
+                        self._stream.flush()
+                except OSError:
+                    pass
+            def __getattr__(self, name):
+                return getattr(self._stream, name)
+
+        sys.stdout = SafeWriter(sys.stdout)
+        sys.stderr = SafeWriter(sys.stderr)
 
     state = get_startup_state()
     state.set_phase("starting-server", f"Starting TTS server on {host}:{port}", 5)

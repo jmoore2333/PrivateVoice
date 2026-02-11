@@ -239,8 +239,11 @@ class TTSModel:
         effective_ref_text = "" if x_vector_only_mode else reference_text
 
         # Load audio into memory (avoids Windows temp file locking issues)
+        logger.info(f"Loading reference audio ({len(reference_audio)} bytes)...")
         ref_audio_np, ref_sr = self._load_audio_from_bytes(reference_audio)
+        logger.info(f"Reference audio loaded: shape={ref_audio_np.shape}, sr={ref_sr}, dtype={ref_audio_np.dtype}")
 
+        logger.info("Starting voice clone inference...")
         with torch.no_grad():
             wavs, sr = self.model.generate_voice_clone(
                 text=text,
@@ -249,6 +252,7 @@ class TTSModel:
                 ref_text=effective_ref_text,
             )
 
+        logger.info("Voice clone inference complete, converting output...")
         synchronize_device(self.config.device)
         return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
