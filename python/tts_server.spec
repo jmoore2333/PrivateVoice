@@ -76,6 +76,20 @@ hiddenimports = [
     'ctranslate2',
 ]
 
+# Platform-specific hidden imports
+if platform.system() == 'Windows':
+    hiddenimports += [
+        'multiprocessing.popen_spawn_win32',
+    ]
+
+# CUDA-specific hidden imports (only when building with CUDA torch)
+import torch as _torch
+if _torch.cuda.is_available() or '+cu' in _torch.__version__:
+    hiddenimports += [
+        'torch.backends.cuda',
+        'torch.backends.cudnn',
+    ]
+
 # Collect all submodules for complex packages
 hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('transformers')
@@ -106,6 +120,16 @@ excludes = [
     'tensorflow',
     'tensorboard',
     'keras',
+    # Unused torch subsystems (significant size savings)
+    'torch._dynamo',
+    'torch._inductor',
+    'torch.compiler',
+    'triton',
+    'torch.distributed',
+    'torch.testing',
+    'torch.utils.tensorboard',
+    'torch.profiler',
+    'torch.onnx',
 ]
 
 a = Analysis(
