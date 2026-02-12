@@ -1,6 +1,6 @@
 {
   "name": "privatevoice",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "PrivateVoice - Local text-to-speech powered by Qwen3-TTS",
   "type": "module",
   "scripts": {
