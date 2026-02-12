@@ -235,7 +235,7 @@
 
 ---
 
-## 10. Features from PRODUCTION_TEST_PROCEDURE.md Cross-Reference
+## 10. Features from `docs/PRODUCTION_TEST_PROCEDURE.md` Cross-Reference
 
 Features mentioned in the test procedure that could NOT be verified via API alone:
 

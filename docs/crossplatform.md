@@ -197,4 +197,4 @@ pnpm tauri build
 | `scripts/download-uv.ps1` / `.sh` | Download platform-specific uv binary |
 | `scripts/build-release.ps1` / `.sh` | Full release build scripts |
 | `src-tauri/resources/` | Staged build resources (gitignored except .gitkeep) |
-| `agent-handover-deferred-installer.md` | Full architecture handover document |
+| `docs/handovers/deferred-installer.md` | Full architecture handover document |

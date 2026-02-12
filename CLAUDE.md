@@ -129,4 +129,4 @@ Multi-column layout with fixed-width input panel (380px) and flexible output pan
 - **HTML report**: `docs/e2e-visual-validation-report.html` — visual review of all captured screenshots
 - All E2E tests mock Tauri internals + API routes for full CI compatibility
 
-See `PRODUCTION_TEST_PROCEDURE.md` for manual pre-release checklist (93+ test cases).
+See `docs/PRODUCTION_TEST_PROCEDURE.md` for manual pre-release checklist (93+ test cases).

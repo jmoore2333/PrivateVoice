@@ -85,7 +85,7 @@
   - `POST /unload-whisper` -- cleans up
   - `POST /transcribe` -- transcribes audio files with text, language, confidence, duration
 - **Validation:** Whisper properly rejects invalid model sizes with a descriptive error listing valid options.
-- **UI concern:** Based on the PRODUCTION_TEST_PROCEDURE.md, there is no test coverage for Whisper UI interactions, suggesting the UI may show a "Coming Soon" placeholder or may not expose the transcription feature at all.
+- **UI concern:** Based on `docs/PRODUCTION_TEST_PROCEDURE.md`, there is no test coverage for Whisper UI interactions, suggesting the UI may show a "Coming Soon" placeholder or may not expose the transcription feature at all.
 - **Recommendation:** Either build a Whisper UI panel or clearly document it as an API-only feature for v1.0.
 - **Status:** **FIXED** — Full Whisper UI built in Settings panel (model selector, load/unload button, status indicator) plus auto-transcribe button in Voice Clone panel that automatically transcribes reference audio.
 
@@ -122,7 +122,7 @@
 
 ## Feature Completeness Cross-Reference
 
-Comparing features discovered via API against PRODUCTION_TEST_PROCEDURE.md:
+Comparing features discovered via API against `docs/PRODUCTION_TEST_PROCEDURE.md`:
 
 ### Features Verified Working via API
 - [x] Health monitoring and startup status

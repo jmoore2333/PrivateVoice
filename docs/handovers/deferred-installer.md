@@ -104,16 +104,16 @@ See [Section 3](#3-known-issues-and-required-fixes) for full details and recomme
 
 ### 3.1 DOCUMENTATION — Stale references to old architecture (HIGH PRIORITY)
 
-Four documentation files still describe the PyInstaller/shell-plugin architecture:
+At the time of this handover, several documentation files still described the PyInstaller/shell-plugin architecture:
 
 | File | Issue |
 |------|-------|
 | `CLAUDE.md` | References `tauri-plugin-shell`, PyInstaller, `externalBin`. Missing mention of `env_manager` and `uv`. |
-| `start-here.md` | Describes `--onefile`/`--onedir` sidecar modes, references deleted `tauri.macos.conf.json` |
-| `docs/crossplatform.md` | Entire document describes old dual-mode architecture |
-| `agent-handover-windows.md` | Describes PyInstaller approach, SIGPIPE fixes, `--onedir` — all obsolete |
+| `docs/legacy/handovers/start-here-windows-build.md` | Describes `--onefile`/`--onedir` sidecar modes, references deleted `tauri.macos.conf.json` |
+| `docs/crossplatform.md` | Contained dual-mode architecture notes that required refresh for deferred installer flow |
+| `docs/legacy/handovers/agent-handover-windows.md` | Describes PyInstaller approach, SIGPIPE fixes, `--onedir` — all obsolete |
 
-**Recommended action**: Update `CLAUDE.md` to reflect the new architecture. Mark `start-here.md`, `crossplatform.md`, and `agent-handover-windows.md` as superseded by this document, or delete them.
+**Recommended action**: Update `CLAUDE.md` to reflect the new architecture. Mark legacy handover docs as superseded by this document, and keep `docs/crossplatform.md` as the active cross-platform status tracker.
 
 ### 3.2 CODE — Stale test mock (LOW PRIORITY)
 
@@ -448,14 +448,14 @@ Run these tests on each platform after a successful build:
 
 ## 9. Superseded Documents
 
-The following documents describe the **old PyInstaller-based architecture** and are now largely obsolete:
+The following table tracks which related docs are superseded versus still active:
 
 | Document | Status |
 |----------|--------|
-| `agent-handover-windows.md` | **Superseded** — describes PyInstaller sidecar, SIGPIPE fixes, --onedir mode |
-| `agent-handover-linux.md` | **Superseded** — describes PyInstaller sidecar for Linux |
-| `start-here.md` | **Superseded** — describes --onefile/--onedir sidecar modes |
-| `docs/crossplatform.md` | **Superseded** — describes old dual-mode architecture |
+| `docs/legacy/handovers/agent-handover-windows.md` | **Superseded** — describes PyInstaller sidecar, SIGPIPE fixes, --onedir mode |
+| `docs/legacy/handovers/agent-handover-linux.md` | **Superseded** — describes PyInstaller sidecar for Linux |
+| `docs/legacy/handovers/start-here-windows-build.md` | **Superseded** — describes --onefile/--onedir sidecar modes |
+| `docs/crossplatform.md` | **Current** — active cross-platform status and validation tracker |
 | `docs/plans/deferred-dependency-install.md` | **Implemented** — this plan is now the reality. Keep as historical reference. |
 
-These should be updated or removed once the deferred installer is validated on all platforms.
+Superseded files should remain in `docs/legacy/` for historical reference.
