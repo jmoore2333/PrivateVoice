@@ -97,15 +97,189 @@ fn generate_access_token() -> String {
         .collect()
 }
 
-fn ensure_port_available(port: u16) -> Result<(), String> {
-    TcpListener::bind(("127.0.0.1", port))
-        .map(drop)
-        .map_err(|_| {
-            format!(
-                "Port {} is already in use by another process. Close that process and retry.",
-                port
-            )
+/// Ensure the TTS server port is available, reclaiming it from an orphaned
+/// sidecar if necessary.
+///
+/// 1. Try to bind the port — if it succeeds the port is free.
+/// 2. If occupied, identify the process via platform tools.
+/// 3. If the process is an orphaned `tts_server.main` under our app data
+///    directory, kill it (SIGTERM → wait → SIGKILL fallback).
+/// 4. If it belongs to something else, return an error.
+fn ensure_port_available(port: u16, app: &tauri::AppHandle) -> Result<(), String> {
+    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        return Ok(());
+    }
+
+    println!(
+        "[sidecar] Port {} in use — checking for orphaned sidecar...",
+        port
+    );
+
+    let pids = get_pids_on_port(port);
+    if pids.is_empty() {
+        return Err(format!(
+            "Port {} is already in use but the owning process could not be identified. \
+             Close it manually and retry.",
+            port
+        ));
+    }
+
+    // Resolve our app-data directory to match against the process command.
+    let app_data_prefix = app
+        .path()
+        .app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    for pid in &pids {
+        let cmd_line = get_process_command(*pid);
+        let is_our_sidecar = cmd_line.contains("tts_server")
+            && (!app_data_prefix.is_empty() && cmd_line.contains(&app_data_prefix));
+
+        if !is_our_sidecar {
+            return Err(format!(
+                "Port {} is in use by another process (PID {}: {}). \
+                 Close that process and retry.",
+                port,
+                pid,
+                truncate_str(&cmd_line, 120)
+            ));
+        }
+
+        println!(
+            "[sidecar] Reclaiming port {} from orphaned sidecar PID {}",
+            port, pid
+        );
+        kill_process_gracefully(*pid);
+    }
+
+    // Wait briefly and verify the port is now free.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    TcpListener::bind(("127.0.0.1", port)).map(drop).map_err(|_| {
+        format!(
+            "Port {} is still in use after reclaiming orphaned sidecar. \
+             Close the process manually and retry.",
+            port
+        )
+    })
+}
+
+/// Return PIDs listening on the given TCP port.
+#[cfg(not(target_os = "windows"))]
+fn get_pids_on_port(port: u16) -> Vec<u32> {
+    let output = Command::new("lsof")
+        .args(["-ti", &format!(":{}", port)])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse::<u32>().ok())
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_pids_on_port(port: u16) -> Vec<u32> {
+    let output = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let port_str = format!(":{}", port);
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|l| l.contains(&port_str) && l.contains("LISTENING"))
+            .filter_map(|l| l.split_whitespace().last()?.parse::<u32>().ok())
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Get the full command line of a process by PID.
+#[cfg(not(target_os = "windows"))]
+fn get_process_command(pid: u32) -> String {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+fn get_process_command(pid: u32) -> String {
+    Command::new("wmic")
+        .args(["process", "where", &format!("ProcessId={}", pid), "get", "CommandLine", "/value"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .find(|l| l.starts_with("CommandLine="))
+                .map(|l| l.trim_start_matches("CommandLine=").trim().to_string())
+                .unwrap_or_default()
         })
+        .unwrap_or_default()
+}
+
+/// Send SIGTERM, wait up to 2 seconds, then SIGKILL if still alive.
+#[cfg(not(target_os = "windows"))]
+fn kill_process_gracefully(pid: u32) {
+    use std::time::{Duration, Instant};
+
+    // SIGTERM
+    let _ = Command::new("kill")
+        .args(["-15", &pid.to_string()])
+        .output();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+        // Check if process still exists (kill -0)
+        if Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| !s.success())
+            .unwrap_or(true)
+        {
+            println!("[sidecar] Orphaned PID {} exited after SIGTERM", pid);
+            return;
+        }
+    }
+
+    // Still alive — SIGKILL
+    println!(
+        "[sidecar] PID {} did not exit after SIGTERM, sending SIGKILL",
+        pid
+    );
+    let _ = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output();
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_gracefully(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .output();
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
 
 /// Process a stdout line: emit log event, buffer it, and detect startup phases.
@@ -245,7 +419,7 @@ async fn start_tts_server(
     // Small delay to let port be released
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    ensure_port_available(TTS_SERVER_PORT)?;
+    ensure_port_available(TTS_SERVER_PORT, &app)?;
 
     // Keep all Hugging Face artifacts inside app-managed storage.
     let hf_home = env_manager::paths::huggingface_home_dir(&app)?;
