@@ -203,7 +203,7 @@
       class="inline-block"
     >
       <img
-        src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
+        src="/bmc-button.png"
         alt="Buy Me A Coffee"
         class="h-12 w-auto"
         loading="lazy"
