@@ -14,8 +14,11 @@
     isGenerating: boolean;
     elapsedTime?: number;
     hasWhisper: boolean;
+    hasTranslation?: boolean;
     isTranscribing?: boolean;
     transcriptionError?: string | null;
+    translationText?: string | null;
+    translationError?: string | null;
     modelSupported?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
@@ -26,6 +29,7 @@
     onReferenceTextChange?: (text: string) => void;
     onReferenceAudioChange?: (blob: Blob, url: string) => void;
     onAutoTranscribe?: () => void;
+    onUseTranslation?: () => void;
     onLowQualityModeChange?: (enabled: boolean) => void;
     onLoadModel?: () => void;
   }
@@ -39,8 +43,11 @@
     isGenerating,
     elapsedTime = 0,
     hasWhisper = false,
+    hasTranslation = false,
     isTranscribing = false,
     transcriptionError = null,
+    translationText = null,
+    translationError = null,
     modelSupported = true,
     modelLoading = false,
     recommendedModelLabel = "0.6B Base",
@@ -51,6 +58,7 @@
     onReferenceTextChange,
     onReferenceAudioChange,
     onAutoTranscribe,
+    onUseTranslation,
     onLowQualityModeChange,
     onLoadModel,
   }: Props = $props();
@@ -165,6 +173,41 @@
 
     {#if transcriptionError}
       <p class="text-xs text-[var(--color-error)]">{transcriptionError}</p>
+    {/if}
+
+    {#if hasTranslation}
+      <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)]">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+              Translation (English)
+            </p>
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">
+              Optional helper generated locally by Whisper.
+            </p>
+          </div>
+          {#if translationText && onUseTranslation}
+            <button
+              class="text-xs text-[var(--color-accent)] hover:underline"
+              onclick={onUseTranslation}
+            >
+              Use as text
+            </button>
+          {/if}
+        </div>
+
+        {#if translationText}
+          <p class="text-sm text-[var(--color-text-primary)] mt-2 whitespace-pre-wrap">{translationText}</p>
+        {:else if isTranscribing}
+          <p class="text-sm text-[var(--color-text-muted)] mt-2">Generating translation...</p>
+        {:else}
+          <p class="text-sm text-[var(--color-text-muted)] mt-2">Run Auto-transcribe to generate translation.</p>
+        {/if}
+
+        {#if translationError}
+          <p class="text-xs text-[var(--color-error)] mt-2">{translationError}</p>
+        {/if}
+      </div>
     {/if}
 
     <label class="flex items-start gap-2 text-sm text-[var(--color-text-muted)]">

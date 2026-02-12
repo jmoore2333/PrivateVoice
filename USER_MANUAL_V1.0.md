@@ -123,6 +123,11 @@ Use:
 2. Click `Auto-transcribe`
 3. Review transcript and generate
 
+Optional translation:
+1. In `Settings -> Optional Features`, enable `Translation support`
+2. Run `Auto-transcribe` in Voice Clone
+3. A local Whisper translation (English) is shown as a helper and can be applied to the generation text
+
 ## 9. Library and Export
 
 ### Save to Library
@@ -145,6 +150,7 @@ Key settings include:
 - Auto-load model
 - Export folder + default format
 - Whisper auto-transcription controls
+- Optional local translation helper
 - Debug console on startup
 
 ### Environment Section (New)

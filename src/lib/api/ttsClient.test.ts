@@ -765,6 +765,52 @@ describe('unloadModel', () => {
 });
 
 // ===========================================================================
+// transcribe
+// ===========================================================================
+
+describe('transcribe', () => {
+  const transcript = {
+    text: 'hello world',
+    language: 'en',
+    confidence: 0.98,
+    duration_seconds: 2.5,
+  };
+
+  it('sends audio multipart payload and returns transcript', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(transcript));
+
+    const file = new File(['audio-bytes'], 'ref.wav', { type: 'audio/wav' });
+    const result = await ttsClient.transcribe(file);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://127.0.0.1:8765/transcribe');
+    expect(options?.method).toBe('POST');
+
+    const formData = options?.body as FormData;
+    expect(formData.get('audio')).toBeInstanceOf(File);
+    expect(formData.get('task')).toBeNull();
+    expect(result).toEqual(transcript);
+  });
+
+  it('passes task when translation is requested', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(transcript));
+
+    const blob = new Blob(['audio-bytes'], { type: 'audio/wav' });
+    await ttsClient.transcribe(blob, { task: 'translate' });
+
+    const formData = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(formData.get('task')).toBe('translate');
+  });
+
+  it('throws with parsed error details on failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Whisper model not loaded' }, 400));
+
+    const file = new File(['audio-bytes'], 'ref.wav', { type: 'audio/wav' });
+    await expect(ttsClient.transcribe(file)).rejects.toThrow('Whisper model not loaded');
+  });
+});
+
+// ===========================================================================
 // shutdown
 // ===========================================================================
 

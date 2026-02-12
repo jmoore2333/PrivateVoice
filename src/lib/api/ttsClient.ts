@@ -93,6 +93,8 @@ export interface TranscriptionResult {
   duration_seconds: number;
 }
 
+export type TranscriptionTask = "transcribe" | "translate";
+
 export const PRESET_SPEAKERS = [
   "aiden",
   "dylan",
@@ -369,12 +371,18 @@ class TTSClient {
     if (!res.ok) throw new Error("Failed to unload Whisper model");
   }
 
-  async transcribe(audioFile: File | Blob): Promise<TranscriptionResult> {
+  async transcribe(
+    audioFile: File | Blob,
+    options?: { task?: TranscriptionTask },
+  ): Promise<TranscriptionResult> {
     const formData = new FormData();
     const file = audioFile instanceof File
       ? audioFile
       : new File([audioFile], "audio.wav", { type: audioFile.type || "audio/wav" });
     formData.append("audio", file);
+    if (options?.task) {
+      formData.append("task", options.task);
+    }
 
     const res = await fetch(`${this.baseUrl}/transcribe`, {
       method: "POST",

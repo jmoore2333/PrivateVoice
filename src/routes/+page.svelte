@@ -61,6 +61,8 @@
   // Whisper transcription state
   let isTranscribing = $state(false);
   let transcriptionError = $state<string | null>(null);
+  let translationText = $state<string | null>(null);
+  let translationError = $state<string | null>(null);
 
   // Save notification state
   let saveNotification = $state<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -439,6 +441,8 @@
   async function handleReferenceAudioChange(blob: Blob, url: string) {
     referenceAudioBlob = blob;
     referenceAudioUrl = url;
+    translationText = null;
+    translationError = null;
 
     // Convert to WAV for the TTS server (WebView2 records WebM/Opus, model expects WAV)
     let audioFile: File;
@@ -536,6 +540,8 @@
     if (!referenceAudioBlob) return;
     isTranscribing = true;
     transcriptionError = null;
+    translationError = null;
+    translationText = null;
     try {
       // Auto-load Whisper if not loaded
       const status = await ttsClient.whisperStatus();
@@ -543,14 +549,31 @@
         await ttsClient.loadWhisper("base");
       }
       const file = new File([referenceAudioBlob], "reference.wav", { type: referenceAudioBlob.type || "audio/wav" });
-      const result = await ttsClient.transcribe(file);
-      localReferenceText = result.text;
-      ttsStore.setReferenceText(result.text);
+      const transcriptResult = await ttsClient.transcribe(file, { task: "transcribe" });
+      localReferenceText = transcriptResult.text;
+      ttsStore.setReferenceText(transcriptResult.text);
+
+      if (settingsStore.state.enableTranslation) {
+        try {
+          const translated = await ttsClient.transcribe(file, { task: "translate" });
+          translationText = translated.text;
+        } catch (translateErr) {
+          translationError = translateErr instanceof Error
+            ? translateErr.message
+            : "Translation failed";
+        }
+      }
     } catch (e) {
       transcriptionError = e instanceof Error ? e.message : "Transcription failed";
     } finally {
       isTranscribing = false;
     }
+  }
+
+  function handleUseTranslationAsText() {
+    if (!translationText) return;
+    localText = translationText;
+    ttsStore.setText(translationText);
   }
 
   function handleDescriptionChange(description: string) {
@@ -649,14 +672,18 @@
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
           hasWhisper={settingsStore.state.enableWhisper}
+          hasTranslation={settingsStore.state.enableWhisper && settingsStore.state.enableTranslation}
           {isTranscribing}
           {transcriptionError}
+          {translationText}
+          {translationError}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
           onReferenceTextChange={handleReferenceTextChange}
           onReferenceAudioChange={handleReferenceAudioChange}
           onAutoTranscribe={handleAutoTranscribe}
+          onUseTranslation={handleUseTranslationAsText}
           onLowQualityModeChange={handleCloneQualityChange}
           onLoadModel={handleLoadVoiceCloneModel}
         />

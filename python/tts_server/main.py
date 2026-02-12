@@ -156,6 +156,9 @@ class TranscriptionResponse(BaseModel):
     duration_seconds: float
 
 
+VALID_TRANSCRIPTION_TASKS = ("transcribe", "translate")
+
+
 # ============================================================================
 # Startup State
 # ============================================================================
@@ -637,12 +640,23 @@ async def unload_whisper():
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe(
     audio: UploadFile = File(...),
+    task: str = Form("transcribe"),
 ):
     """Transcribe an audio file using the loaded Whisper model."""
     whisper = get_whisper_model()
 
     if not whisper.is_loaded:
         raise HTTPException(status_code=400, detail="Whisper model not loaded")
+
+    normalized_task = (task or "transcribe").strip().lower()
+    if normalized_task not in VALID_TRANSCRIPTION_TASKS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid transcribe task: {task}. "
+                f"Available: {list(VALID_TRANSCRIPTION_TASKS)}"
+            ),
+        )
 
     audio_data = await audio.read()
     if len(audio_data) > MAX_AUDIO_SIZE:
@@ -652,10 +666,16 @@ async def transcribe(
         )
 
     try:
-        logger.info("Transcribing audio...")
-        result = await asyncio.to_thread(whisper.transcribe, audio_data)
+        if normalized_task == "translate":
+            logger.info("Translating audio with Whisper...")
+        else:
+            logger.info("Transcribing audio...")
+
+        result = await asyncio.to_thread(whisper.transcribe, audio_data, normalized_task)
+
+        operation = "Translation" if normalized_task == "translate" else "Transcription"
         logger.info(
-            f"Transcription complete: lang={result.language}, "
+            f"{operation} complete: lang={result.language}, "
             f"duration={result.duration_seconds}s, "
             f"text={result.text[:80]}..."
         )

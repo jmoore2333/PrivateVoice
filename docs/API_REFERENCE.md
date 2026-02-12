@@ -67,7 +67,7 @@ All generation endpoints support `mp3_bitrate` parameter (default 192, validated
 | `/whisper-models` | GET | — | `[{size, parameters, download_size_mb}]` | 6 available sizes: tiny, base, small, medium, large-v3, large-v3-turbo |
 | `/load-whisper` | POST | `{model_size}` | `{status, model_size}` | Loads via faster-whisper (CTranslate2), runs on CPU |
 | `/unload-whisper` | POST | — | `{status}` | Frees whisper model memory |
-| `/transcribe` | POST | multipart `{audio}` | `{text, language, confidence, duration_seconds}` | Requires Whisper model loaded |
+| `/transcribe` | POST | multipart `{audio, task?}` | `{text, language, confidence, duration_seconds}` | `task` can be `transcribe` (default) or `translate` (English translation); requires Whisper model loaded |
 
 Whisper is used in the UI for auto-transcription in Voice Clone mode. Enable it in Settings > Optional Features.
 

@@ -431,19 +431,28 @@
             {/if}
           </div>
 
-          <!-- Translation support (coming soon) -->
-          <div class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] opacity-60">
+          <!-- Translation toggle -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
             <div>
               <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation support</span>
-              <p class="text-xs text-[var(--color-text-muted)]">Cross-language translation — coming in a future update</p>
+              <p class="text-xs text-[var(--color-text-muted)]">
+                Enable local Whisper translation (to English) during auto-transcribe in Voice Clone
+              </p>
             </div>
-            <div
-              class="relative w-11 h-6 rounded-full bg-[var(--color-bg-hover)] cursor-not-allowed"
-              title="Coming soon"
+            <button
+              onclick={handleToggle("enableTranslation")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.enableTranslation ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.enableTranslation}
+              aria-label="Toggle translation support"
             >
-              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white/50 shadow"></span>
-            </div>
-          </div>
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.enableTranslation ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
         </div>
       </section>
 
