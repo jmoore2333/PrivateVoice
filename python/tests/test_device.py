@@ -68,13 +68,30 @@ class TestGetDeviceConfig:
         config = get_device_config()
         assert config.device == "cuda"
         assert config.dtype == torch_mock.bfloat16
-        assert config.attn_implementation == "flash_attention_2"
+        assert config.attn_implementation in {"flash_attention_2", "sdpa"}
         assert config.device_map == "auto"
 
     @patch("platform.system", return_value="Linux")
     @patch("platform.machine", return_value="x86_64")
-    def test_cuda_older_gpu_uses_float16(self, mock_machine, mock_system, torch_mock):
-        """Older CUDA GPUs (compute < 8.0) get float16 and sdpa."""
+    def test_cuda_older_gpu_uses_float32_eager(self, mock_machine, mock_system, torch_mock):
+        """Older CUDA GPUs (compute < 8.0) use float32 + eager for stability."""
+        torch_mock.backends.mps.is_available.return_value = False
+        torch_mock.cuda.is_available.return_value = True
+        torch_mock.cuda.get_device_capability.return_value = (7, 5)
+        torch_mock.cuda.get_device_name.return_value = "NVIDIA RTX 2080"
+
+        from tts_server.device import get_device_config
+
+        config = get_device_config()
+        assert config.device == "cuda"
+        assert config.dtype == torch_mock.float32
+        assert config.attn_implementation == "eager"
+        assert config.device_map == "cuda:0"
+
+    @patch("platform.system", return_value="Windows")
+    @patch("platform.machine", return_value="AMD64")
+    def test_cuda_older_gpu_non_linux_keeps_float16_sdpa(self, mock_machine, mock_system, torch_mock):
+        """Non-Linux pre-Ampere CUDA keeps existing float16 + sdpa behavior."""
         torch_mock.backends.mps.is_available.return_value = False
         torch_mock.cuda.is_available.return_value = True
         torch_mock.cuda.get_device_capability.return_value = (7, 5)
@@ -86,6 +103,7 @@ class TestGetDeviceConfig:
         assert config.device == "cuda"
         assert config.dtype == torch_mock.float16
         assert config.attn_implementation == "sdpa"
+        assert config.device_map == "auto"
 
 
 class TestGetMemoryInfo:

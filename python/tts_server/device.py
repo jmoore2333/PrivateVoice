@@ -41,33 +41,64 @@ def get_device_config() -> DeviceConfig:
             device_map="mps"
         )
     elif torch.cuda.is_available():
+        is_linux = platform.system() == "Linux"
         # Select dtype based on GPU compute capability
         capability = torch.cuda.get_device_capability()
-        # bfloat16 requires compute capability >= 8.0 (Ampere+)
+        device_name = torch.cuda.get_device_name(0)
+
+        # bfloat16 requires compute capability >= 8.0 (Ampere+).
+        # Linux-only fallback: on older GPUs, float16 can be numerically
+        # unstable for some Qwen3-TTS generation paths (NaN/Inf in logits),
+        # so use float32 for stability.
         if capability[0] >= 8:
             dtype = torch.bfloat16
+        elif is_linux:
+            dtype = torch.float32
+            logger.warning(
+                "Using float32 on Linux pre-Ampere CUDA device %s (compute %s.%s) for generation stability",
+                device_name,
+                capability[0],
+                capability[1],
+            )
         else:
             dtype = torch.float16
 
-        # Use flash_attention_2 if the package is installed, otherwise sdpa.
-        # flash_attn requires special compilation per CUDA version/GPU arch,
-        # so it won't always be available. SDPA (built into PyTorch) is a
-        # solid fallback that still uses GPU-accelerated attention.
-        try:
-            import flash_attn  # noqa: F401
-            attn = "flash_attention_2"
-            logger.info("FlashAttention2 available — using flash_attention_2")
-        except ImportError:
+        # Attention backend selection:
+        # - Ampere+: use flash_attention_2 when available, else sdpa.
+        # - Linux pre-Ampere: force eager for conservative numerical behavior.
+        # - Other pre-Ampere platforms: keep sdpa behavior.
+        if capability[0] >= 8:
+            try:
+                import flash_attn  # noqa: F401
+                attn = "flash_attention_2"
+                logger.info("FlashAttention2 available — using flash_attention_2")
+            except ImportError:
+                attn = "sdpa"
+                logger.info("flash_attn not installed — using PyTorch SDPA attention")
+        elif is_linux:
+            attn = "eager"
+            logger.info("Using eager attention on Linux pre-Ampere CUDA for stability")
+        else:
             attn = "sdpa"
-            logger.info("flash_attn not installed — using PyTorch SDPA attention")
 
-        device_name = torch.cuda.get_device_name(0)
+        # Linux pre-Ampere safety mode: avoid multi-GPU sharding behavior.
+        if is_linux and capability[0] < 8:
+            device_map = "cuda:0"
+            try:
+                cuda_count = int(torch.cuda.device_count())
+            except Exception:
+                cuda_count = 1
+            if cuda_count > 1:
+                logger.info("Detected %s CUDA devices; forcing device_map=cuda:0", cuda_count)
+        else:
+            device_map = "auto"
+
         logger.info(f"Using CUDA device: {device_name} (compute {capability[0]}.{capability[1]})")
         return DeviceConfig(
             device="cuda",
             dtype=dtype,
             attn_implementation=attn,
-            device_map="auto"
+            device_map=device_map
         )
     else:
         logger.info("Using CPU device (no GPU acceleration available)")
