@@ -861,12 +861,16 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            // Auto-grant microphone/camera permissions on Windows
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    setup_webview2_permissions(&window);
-                }
+            if let Some(window) = app.get_webview_window("main") {
+                // Set window icon explicitly so the taskbar always shows the correct icon
+                // (Windows caches the old icon from previous installs)
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .expect("failed to load app icon");
+                let _ = window.set_icon(icon);
+
+                // Auto-grant microphone/camera permissions on Windows
+                #[cfg(target_os = "windows")]
+                setup_webview2_permissions(&window);
             }
             Ok(())
         })
