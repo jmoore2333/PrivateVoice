@@ -67,8 +67,10 @@ fn verify_requirements_integrity() {
 fn file_sha256(path: &Path) -> String {
     let bytes = std::fs::read(path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
+    // Strip \r so CRLF (Windows) and LF (macOS/Linux) produce the same hash
+    let normalized: Vec<u8> = bytes.into_iter().filter(|&b| b != b'\r').collect();
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(&normalized);
     format!("{:x}", hasher.finalize())
 }
 
