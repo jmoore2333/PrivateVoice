@@ -777,7 +777,7 @@ test.describe('6. Settings Panel', () => {
     const translationToggle = page.locator('button[aria-label="Toggle text translation helpers"]');
     await translationToggle.click();
 
-    await expect(page.getByText('Translation Model')).toBeVisible();
+    await expect(page.getByText('Translation Model', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Load Model' }).last().click();
 
     await expect(page.getByRole('button', { name: 'Unload' }).last()).toBeVisible({ timeout: 5000 });
@@ -787,14 +787,7 @@ test.describe('6. Settings Panel', () => {
 
   test('shows backend refresh guidance when translation endpoints are missing', async ({ page }) => {
     // Override translation routes to simulate stale backend environment.
-    await page.route(/127\.0\.0\.1:8765\/translation-(status|models)/, async (route) => {
-      await route.fulfill({
-        status: 404,
-        contentType: 'application/json',
-        body: JSON.stringify({ detail: 'Not Found' }),
-      });
-    });
-    await page.route('**/127.0.0.1:8765/load-translation', async (route) => {
+    await page.route(/127\.0\.0\.1:8765\/(translation-status|translation-models|load-translation)$/, async (route) => {
       await route.fulfill({
         status: 404,
         contentType: 'application/json',
@@ -807,6 +800,7 @@ test.describe('6. Settings Panel', () => {
 
     const translationToggle = page.locator('button[aria-label="Toggle text translation helpers"]');
     await translationToggle.click();
+    await page.getByRole('button', { name: 'Load Model' }).last().click();
 
     await expect(page.getByText(/Translation API not found in current backend environment/i))
       .toBeVisible({ timeout: 5000 });

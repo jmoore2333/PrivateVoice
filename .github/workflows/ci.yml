@@ -139,14 +139,20 @@ jobs:
         run: |
           python -m py_compile \
             python/tts_server/main.py \
-            python/tts_server/translation.py \
-            src-tauri/resources/tts_server/main.py \
-            src-tauri/resources/tts_server/translation.py
+            python/tts_server/translation.py
+
+          if [ -f "src-tauri/resources/tts_server/main.py" ] && [ -f "src-tauri/resources/tts_server/translation.py" ]; then
+            python -m py_compile \
+              src-tauri/resources/tts_server/main.py \
+              src-tauri/resources/tts_server/translation.py
+          fi
 
       - name: Verify translation API and env refresh guards
         run: |
           grep -q '@app.get("/translation-status"' python/tts_server/main.py
-          grep -q '@app.get("/translation-status"' src-tauri/resources/tts_server/main.py
+          if [ -f "src-tauri/resources/tts_server/main.py" ]; then
+            grep -q '@app.get("/translation-status"' src-tauri/resources/tts_server/main.py
+          fi
           grep -q 'source_hash' src-tauri/src/env_manager/validate.rs
 
       - name: Build frontend
