@@ -732,12 +732,12 @@
           </label>
 
           <!-- Model cache location (read-only) -->
-          <div class="flex flex-col gap-1.5">
+          <div class="flex flex-col gap-1.5 min-w-0">
             <div class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
               Model Cache Location
             </div>
             <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
-              <span class="text-sm text-[var(--color-text-muted)] font-mono">
+              <span class="block break-all text-xs text-[var(--color-text-muted)] font-mono">
                 {cacheDir}
               </span>
             </div>
