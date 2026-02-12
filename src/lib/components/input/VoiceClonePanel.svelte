@@ -14,8 +14,14 @@
     isGenerating: boolean;
     elapsedTime?: number;
     hasWhisper: boolean;
+    hasTranslation?: boolean;
+    canTranslateText?: boolean;
     isTranscribing?: boolean;
     transcriptionError?: string | null;
+    translationText?: string | null;
+    translationError?: string | null;
+    isTranslatingText?: boolean;
+    textTranslationError?: string | null;
     modelSupported?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
@@ -26,6 +32,8 @@
     onReferenceTextChange?: (text: string) => void;
     onReferenceAudioChange?: (blob: Blob, url: string) => void;
     onAutoTranscribe?: () => void;
+    onUseTranslation?: () => void;
+    onTranslateText?: () => void;
     onLowQualityModeChange?: (enabled: boolean) => void;
     onLoadModel?: () => void;
   }
@@ -39,8 +47,14 @@
     isGenerating,
     elapsedTime = 0,
     hasWhisper = false,
+    hasTranslation = false,
+    canTranslateText = false,
     isTranscribing = false,
     transcriptionError = null,
+    translationText = null,
+    translationError = null,
+    isTranslatingText = false,
+    textTranslationError = null,
     modelSupported = true,
     modelLoading = false,
     recommendedModelLabel = "0.6B Base",
@@ -51,6 +65,8 @@
     onReferenceTextChange,
     onReferenceAudioChange,
     onAutoTranscribe,
+    onUseTranslation,
+    onTranslateText,
     onLowQualityModeChange,
     onLoadModel,
   }: Props = $props();
@@ -167,6 +183,41 @@
       <p class="text-xs text-[var(--color-error)]">{transcriptionError}</p>
     {/if}
 
+    {#if hasTranslation}
+      <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-subtle)]">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+              Translation (English)
+            </p>
+            <p class="text-xs text-[var(--color-text-muted)] mt-1">
+              Optional helper generated locally by Whisper.
+            </p>
+          </div>
+          {#if translationText && onUseTranslation}
+            <button
+              class="text-xs text-[var(--color-accent)] hover:underline"
+              onclick={onUseTranslation}
+            >
+              Use as text
+            </button>
+          {/if}
+        </div>
+
+        {#if translationText}
+          <p class="text-sm text-[var(--color-text-primary)] mt-2 whitespace-pre-wrap">{translationText}</p>
+        {:else if isTranscribing}
+          <p class="text-sm text-[var(--color-text-muted)] mt-2">Generating translation...</p>
+        {:else}
+          <p class="text-sm text-[var(--color-text-muted)] mt-2">Run Auto-transcribe to generate translation.</p>
+        {/if}
+
+        {#if translationError}
+          <p class="text-xs text-[var(--color-error)] mt-2">{translationError}</p>
+        {/if}
+      </div>
+    {/if}
+
     <label class="flex items-start gap-2 text-sm text-[var(--color-text-muted)]">
       <input
         type="checkbox"
@@ -196,6 +247,24 @@
     placeholder="Enter the text you want the cloned voice to speak..."
     maxLength={2000}
   />
+
+  {#if canTranslateText}
+    <div class="space-y-1">
+      <button
+        class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+        disabled={isTranslatingText || !text.trim() || language === 'Auto'}
+        onclick={onTranslateText}
+      >
+        {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
+      </button>
+      {#if textTranslationError}
+        <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
+      {/if}
+      {#if language === 'Auto'}
+        <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
+      {/if}
+    </div>
+  {/if}
 
   <LanguageSelector
     bind:value={language}

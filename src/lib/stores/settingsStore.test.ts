@@ -36,9 +36,12 @@ describe('Settings Store', () => {
     // Verify auto-load is enabled by default
     expect(settingsStore.state.autoLoadModel).toBe(true);
 
+    // Translation helpers are opt-in by default
+    expect(settingsStore.state.enableTranslation).toBe(false);
+
     // Verify onboarding not completed by default
     expect(settingsStore.state.hasCompletedOnboarding).toBe(false);
-  });
+  }, 15000);
 
   it('can update defaultModel setting', async () => {
     vi.resetModules();

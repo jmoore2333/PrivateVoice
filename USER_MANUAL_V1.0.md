@@ -1,7 +1,7 @@
 # PrivateVoice User Manual (v1.0)
 
 Version: 1.0.0  
-Updated: February 11, 2026 (deferred-installer branch)
+Updated: February 12, 2026
 
 ## 1. What PrivateVoice Does
 
@@ -16,7 +16,7 @@ You can:
 | Platform | Status |
 |---|---|
 | Windows 11 x64 | Working and validated on this branch |
-| macOS (Apple Silicon) | Implemented, validation pending on new installer path |
+| macOS (Apple Silicon) | Working and validated on new installer path |
 | Linux x64 | Implemented paths, validation pending |
 
 ## 3. New Installer Model (Important)
@@ -123,7 +123,32 @@ Use:
 2. Click `Auto-transcribe`
 3. Review transcript and generate
 
-## 9. Library and Export
+## 9. Translation Helpers (Optional, Separate from Whisper)
+
+Translation helpers are independent from Whisper.
+You can enable translation without enabling auto-transcription.
+
+Enable and load:
+1. Open `Settings`
+2. In `Optional Features`, enable `Translation helpers`
+3. Select a translation model
+4. Click `Load Model` (first load downloads model files)
+
+Current model option:
+- `NLLB Distilled 600M` (estimated download: ~1.3 GB)
+
+Use:
+1. In any mode, set your target speech language
+2. Enter your input text
+3. Click `Translate text to <Language>`
+4. The text is translated locally, then used for generation
+
+Notes:
+- If source and target are the same, text is returned unchanged
+- If translation model is not loaded, translation requests are rejected until loaded
+- First-time model download can be slow depending on network
+
+## 10. Library and Export
 
 ### Save to Library
 
@@ -137,7 +162,7 @@ Use:
 - Formats: WAV or MP3
 - Format is controlled by Settings
 
-## 10. Settings Overview
+## 11. Settings Overview
 
 Key settings include:
 - Theme
@@ -145,6 +170,7 @@ Key settings include:
 - Auto-load model
 - Export folder + default format
 - Whisper auto-transcription controls
+- Translation helper controls (separate toggle, model, load/unload, status)
 - Debug console on startup
 
 ### Environment Section (New)
@@ -155,6 +181,7 @@ The `Environment` section shows:
 - environment disk usage
 - uv version
 - venv path
+- backend refresh reason when source/dependencies changed
 
 Actions:
 - `Repair (re-verify)`
@@ -162,7 +189,7 @@ Actions:
 
 Use these if first-run setup or environment validation fails.
 
-## 11. Keyboard Shortcuts
+## 12. Keyboard Shortcuts
 
 - `Cmd/Ctrl + Enter`: Generate
 - `Cmd/Ctrl + S`: Save
@@ -172,7 +199,7 @@ Use these if first-run setup or environment validation fails.
 - `Space`: Play/pause (outside text input)
 - `Escape`: Close open panel
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Setup takes too long
 
@@ -183,6 +210,12 @@ Keep the app open until setup completes.
 
 Open **Settings -> Environment** and run `Repair` or `Full rebuild`.
 Also verify network and free disk space.
+
+### Translation shows `Not Found` or endpoint errors
+
+This usually means the app is running an older backend environment.
+Use **Settings -> Environment -> Repair (re-verify)**, then restart.
+If needed, run **Full rebuild** once.
 
 ### GPU not used
 
@@ -204,13 +237,13 @@ Check connectivity and available disk.
 
 Use smaller models (`0.6b` / `0.6b-base`) and close other heavy apps.
 
-## 13. Privacy and Network
+## 14. Privacy and Network
 
 - Inference runs locally on your machine
-- Internet is used for setup-time dependency/model downloads
+- Internet is used for setup-time dependency/model downloads and first-time optional model downloads (Whisper/Translation)
 - Server listens on localhost (`127.0.0.1:8765`)
 
-## 14. Advanced API Access
+## 15. Advanced API Access
 
 Local API base URL:
 

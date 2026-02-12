@@ -25,6 +25,35 @@ def _make_mock_model(*, loaded: bool = False):
     return m
 
 
+def _make_mock_whisper(*, loaded: bool = False):
+    """Return a MagicMock that quacks like WhisperModel."""
+    w = MagicMock()
+    type(w).is_loaded = PropertyMock(return_value=loaded)
+    w.model_size = "base"
+
+    result = MagicMock()
+    result.text = "hello world"
+    result.language = "en"
+    result.language_probability = 0.99
+    result.duration_seconds = 1.23
+    w.transcribe.return_value = result
+    return w
+
+
+def _make_mock_translator(*, loaded: bool = False):
+    t = MagicMock()
+    type(t).is_loaded = PropertyMock(return_value=loaded)
+    t.model_key = "nllb-600m"
+    t.model_id = "facebook/nllb-200-distilled-600M"
+
+    result = MagicMock()
+    result.text = "hola mundo"
+    result.source_language = "english"
+    result.target_language = "spanish"
+    t.translate_text.return_value = result
+    return t
+
+
 def _get_client():
     """Import the app and return a TestClient.
 
@@ -754,6 +783,212 @@ class TestCancelGeneration:
         resp = client.post("/cancel-generation")
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
+
+
+# ---------------------------------------------------------------------------
+# Whisper transcription
+# ---------------------------------------------------------------------------
+
+class TestWhisperTranscription:
+    """POST /transcribe with task support."""
+
+    @patch("tts_server.main.get_whisper_model")
+    def test_transcribe_requires_loaded_model(self, mock_get_whisper):
+        mock_get_whisper.return_value = _make_mock_whisper(loaded=False)
+
+        client = _get_client()
+        resp = client.post(
+            "/transcribe",
+            files={"audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 400
+        assert "not loaded" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_whisper_model")
+    def test_transcribe_defaults_to_transcribe_task(self, mock_get_whisper):
+        mock_whisper = _make_mock_whisper(loaded=True)
+        mock_get_whisper.return_value = mock_whisper
+
+        client = _get_client()
+        resp = client.post(
+            "/transcribe",
+            files={"audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "hello world"
+        mock_whisper.transcribe.assert_called_once_with(b"fake-audio", "transcribe")
+
+    @patch("tts_server.main.get_whisper_model")
+    def test_transcribe_translate_task(self, mock_get_whisper):
+        mock_whisper = _make_mock_whisper(loaded=True)
+        mock_get_whisper.return_value = mock_whisper
+
+        client = _get_client()
+        resp = client.post(
+            "/transcribe",
+            data={"task": "translate"},
+            files={"audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 200
+        mock_whisper.transcribe.assert_called_once_with(b"fake-audio", "translate")
+
+    @patch("tts_server.main.get_whisper_model")
+    def test_transcribe_rejects_invalid_task(self, mock_get_whisper):
+        mock_whisper = _make_mock_whisper(loaded=True)
+        mock_get_whisper.return_value = mock_whisper
+
+        client = _get_client()
+        resp = client.post(
+            "/transcribe",
+            data={"task": "bad-task"},
+            files={"audio": ("ref.wav", b"fake-audio", "audio/wav")},
+        )
+        assert resp.status_code == 400
+        assert "invalid transcribe task" in resp.json()["detail"].lower()
+        mock_whisper.transcribe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Local text translation
+# ---------------------------------------------------------------------------
+
+class TestTranslationModelEndpoints:
+    """Translation model status/load endpoints."""
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translation_status_unloaded(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=False)
+
+        client = _get_client()
+        resp = client.get("/translation-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["loaded"] is False
+        assert data["model_key"] is None
+        assert data["model_id"] is None
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translation_status_loaded(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=True)
+
+        client = _get_client()
+        resp = client.get("/translation-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["loaded"] is True
+        assert data["model_key"] == "nllb-600m"
+        assert data["model_id"] == "facebook/nllb-200-distilled-600M"
+
+    def test_translation_models_lists_catalog(self):
+        client = _get_client()
+        resp = client.get("/translation-models")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(m["key"] == "nllb-600m" for m in data)
+
+    @patch("tts_server.main.get_local_translator")
+    def test_load_translation_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=False)
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post("/load-translation", json={"model_key": "nllb-600m"})
+        assert resp.status_code == 200
+        mock_translator.load.assert_called_once_with("nllb-600m")
+
+    def test_load_translation_rejects_invalid_model_key(self):
+        client = _get_client()
+        resp = client.post("/load-translation", json={"model_key": "bad-model"})
+        assert resp.status_code == 400
+        assert "unknown translation model key" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
+    def test_unload_translation_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=True)
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post("/unload-translation")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "unloaded"
+        mock_translator.unload.assert_called_once()
+
+
+class TestTranslateText:
+    """POST /translate-text."""
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=True)
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Spanish",
+                "source_language": "auto",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["text"] == "hola mundo"
+        assert data["source_language"] == "english"
+        assert data["target_language"] == "spanish"
+        mock_translator.translate_text.assert_called_once_with(
+            "hello world",
+            "Spanish",
+            "auto",
+        )
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_empty_rejected(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator()
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "   ",
+                "target_language": "Spanish",
+            },
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_requires_loaded_model(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=False)
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Spanish",
+            },
+        )
+        assert resp.status_code == 400
+        assert "not loaded" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_validation_error_returns_400(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=True)
+        mock_translator.translate_text.side_effect = ValueError("Target language cannot be Auto")
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Auto",
+            },
+        )
+        assert resp.status_code == 400
+        assert "target language cannot be auto" in resp.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

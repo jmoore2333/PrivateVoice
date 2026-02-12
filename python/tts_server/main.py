@@ -41,6 +41,11 @@ from .download_tracker import get_download_tracker, DownloadProgress
 from .transcription import (
     get_whisper_model, WHISPER_MODEL_REPOS, WHISPER_MODEL_SIZES,
 )
+from .translation import (
+    get_local_translator,
+    TRANSLATION_MODELS,
+    DEFAULT_TRANSLATION_MODEL_KEY,
+)
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
 
@@ -156,6 +161,40 @@ class TranscriptionResponse(BaseModel):
     duration_seconds: float
 
 
+VALID_TRANSCRIPTION_TASKS = ("transcribe", "translate")
+
+
+class TranslateTextRequest(BaseModel):
+    text: str
+    target_language: str
+    source_language: str = "auto"
+
+
+class TranslateTextResponse(BaseModel):
+    text: str
+    source_language: str
+    target_language: str
+
+
+class TranslationStatusResponse(BaseModel):
+    loaded: bool
+    model_key: Optional[str]
+    model_id: Optional[str]
+    device: str
+
+
+class TranslationModelInfoResponse(BaseModel):
+    key: str
+    label: str
+    model_id: str
+    parameters: str
+    download_size_mb: int
+
+
+class LoadTranslationRequest(BaseModel):
+    model_key: str = DEFAULT_TRANSLATION_MODEL_KEY
+
+
 # ============================================================================
 # Startup State
 # ============================================================================
@@ -205,6 +244,9 @@ async def lifespan(app: FastAPI):
     whisper = get_whisper_model()
     if whisper.is_loaded:
         whisper.unload()
+    translator = get_local_translator()
+    if translator.is_loaded:
+        translator.unload()
 
 
 _is_dev = os.environ.get("TTS_SERVER_DEV", "false").lower() == "true"
@@ -637,12 +679,23 @@ async def unload_whisper():
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe(
     audio: UploadFile = File(...),
+    task: str = Form("transcribe"),
 ):
     """Transcribe an audio file using the loaded Whisper model."""
     whisper = get_whisper_model()
 
     if not whisper.is_loaded:
         raise HTTPException(status_code=400, detail="Whisper model not loaded")
+
+    normalized_task = (task or "transcribe").strip().lower()
+    if normalized_task not in VALID_TRANSCRIPTION_TASKS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid transcribe task: {task}. "
+                f"Available: {list(VALID_TRANSCRIPTION_TASKS)}"
+            ),
+        )
 
     audio_data = await audio.read()
     if len(audio_data) > MAX_AUDIO_SIZE:
@@ -652,10 +705,16 @@ async def transcribe(
         )
 
     try:
-        logger.info("Transcribing audio...")
-        result = await asyncio.to_thread(whisper.transcribe, audio_data)
+        if normalized_task == "translate":
+            logger.info("Translating audio with Whisper...")
+        else:
+            logger.info("Transcribing audio...")
+
+        result = await asyncio.to_thread(whisper.transcribe, audio_data, normalized_task)
+
+        operation = "Translation" if normalized_task == "translate" else "Transcription"
         logger.info(
-            f"Transcription complete: lang={result.language}, "
+            f"{operation} complete: lang={result.language}, "
             f"duration={result.duration_seconds}s, "
             f"text={result.text[:80]}..."
         )
@@ -667,6 +726,107 @@ async def transcribe(
         )
     except Exception as e:
         logger.error(f"Transcription failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/translation-status", response_model=TranslationStatusResponse)
+async def translation_status():
+    """Get current local text translation model status."""
+    translator = get_local_translator()
+    return TranslationStatusResponse(
+        loaded=translator.is_loaded,
+        model_key=translator.model_key if translator.is_loaded else None,
+        model_id=translator.model_id if translator.is_loaded else None,
+        device="cpu",
+    )
+
+
+@app.get("/translation-models", response_model=List[TranslationModelInfoResponse])
+async def translation_models():
+    """List available translation model options with estimated download sizes."""
+    return [
+        TranslationModelInfoResponse(
+            key=key,
+            label=info["label"],
+            model_id=info["model_id"],
+            parameters=info["parameters"],
+            download_size_mb=info["download_size_mb"],
+        )
+        for key, info in TRANSLATION_MODELS.items()
+    ]
+
+
+@app.post("/load-translation")
+async def load_translation(request: LoadTranslationRequest):
+    """Load a local translation model."""
+    if request.model_key not in TRANSLATION_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown translation model key: {request.model_key}. "
+                f"Available: {list(TRANSLATION_MODELS.keys())}"
+            ),
+        )
+
+    translator = get_local_translator()
+
+    try:
+        logger.info("Loading translation model: %s", request.model_key)
+        await asyncio.to_thread(translator.load, request.model_key)
+        return {"status": "loaded", "model_key": translator.model_key}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to load translation model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/unload-translation")
+async def unload_translation():
+    """Unload the local translation model to free memory."""
+    translator = get_local_translator()
+    translator.unload()
+    return {"status": "unloaded"}
+
+
+@app.post("/translate-text", response_model=TranslateTextResponse)
+async def translate_text(request: TranslateTextRequest):
+    """Translate input text to a target language locally."""
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    if len(request.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters",
+        )
+
+    translator = get_local_translator()
+    if not translator.is_loaded:
+        raise HTTPException(status_code=400, detail="Translation model not loaded")
+
+    try:
+        result = await asyncio.to_thread(
+            translator.translate_text,
+            request.text,
+            request.target_language,
+            request.source_language,
+        )
+        logger.info(
+            "Text translation complete: %s -> %s, text=%s...",
+            result.source_language,
+            result.target_language,
+            result.text[:80],
+        )
+        return TranslateTextResponse(
+            text=result.text,
+            source_language=result.source_language,
+            target_language=result.target_language,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Text translation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -683,6 +843,9 @@ async def shutdown():
     whisper = get_whisper_model()
     if whisper.is_loaded:
         whisper.unload()
+    translator = get_local_translator()
+    if translator.is_loaded:
+        translator.unload()
 
     logger.info("Shutdown requested")
     # Signal the process to exit
@@ -740,7 +903,14 @@ def main():
 
     # Suppress noisy polling endpoints from uvicorn access logs
     class SuppressPollingFilter(logging.Filter):
-        _suppressed = {"/health", "/startup-status", "/model-status", "/download-progress", "/whisper-status"}
+        _suppressed = {
+            "/health",
+            "/startup-status",
+            "/model-status",
+            "/download-progress",
+            "/whisper-status",
+            "/translation-status",
+        }
 
         def filter(self, record: logging.LogRecord) -> bool:
             msg = record.getMessage()

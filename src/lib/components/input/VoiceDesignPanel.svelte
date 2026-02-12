@@ -20,11 +20,15 @@
     modelLoaded: boolean;
     modelLoading: boolean;
     recommendedModelLabel?: string;
+    hasTranslation?: boolean;
+    isTranslatingText?: boolean;
+    textTranslationError?: string | null;
     onGenerate: () => void;
     onLoadModel: () => void;
     onTextChange?: (text: string) => void;
     onLanguageChange?: (lang: string) => void;
     onDescriptionChange?: (description: string) => void;
+    onTranslateText?: () => void;
   }
 
   let {
@@ -36,11 +40,15 @@
     modelLoaded,
     modelLoading,
     recommendedModelLabel = "1.7B Design",
+    hasTranslation = false,
+    isTranslatingText = false,
+    textTranslationError = null,
     onGenerate,
     onLoadModel,
     onTextChange,
     onLanguageChange,
     onDescriptionChange,
+    onTranslateText,
   }: Props = $props();
 
   const canGenerate = $derived(
@@ -149,6 +157,24 @@
     bind:value={language}
     onSelect={onLanguageChange}
   />
+
+  {#if hasTranslation}
+    <div class="space-y-1">
+      <button
+        class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+        disabled={isTranslatingText || !text.trim() || language === 'Auto'}
+        onclick={onTranslateText}
+      >
+        {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
+      </button>
+      {#if textTranslationError}
+        <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
+      {/if}
+      {#if language === 'Auto'}
+        <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
+      {/if}
+    </div>
+  {/if}
 
   <!-- Generate Button -->
   <button

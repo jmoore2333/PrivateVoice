@@ -27,12 +27,18 @@ interface MockServerState {
   modelLoaded: boolean;
   modelId: string | null;
   device: string;
+  whisperLoaded: boolean;
+  translationLoaded: boolean;
+  translationModelKey: string | null;
 }
 
 const defaultMockState: MockServerState = {
   modelLoaded: true,
   modelId: '0.6b',
   device: 'mps',
+  whisperLoaded: false,
+  translationLoaded: false,
+  translationModelKey: null,
 };
 
 /** Generate a minimal valid WAV file (44-byte header + short silence) */
@@ -241,6 +247,125 @@ async function setupMocks(page: Page, mockState: MockServerState = defaultMockSt
           bytes_total: 0,
           speed_mbps: 0,
           eta: 0,
+        }),
+      });
+    }
+
+    // --- Whisper ---
+    if (url.includes('/whisper-status')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          loaded: mockState.whisperLoaded,
+          model_size: mockState.whisperLoaded ? 'base' : null,
+          device: 'cpu',
+        }),
+      });
+    }
+
+    if (url.includes('/whisper-models')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          { size: 'base', parameters: '74M', download_size_mb: 145 },
+          { size: 'small', parameters: '244M', download_size_mb: 461 },
+        ]),
+      });
+    }
+
+    if (url.includes('/load-whisper') && method === 'POST') {
+      mockState.whisperLoaded = true;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'loaded', model_size: 'base' }),
+      });
+    }
+
+    if (url.includes('/unload-whisper') && method === 'POST') {
+      mockState.whisperLoaded = false;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'unloaded' }),
+      });
+    }
+
+    // --- Local Translation ---
+    if (url.includes('/translation-status')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          loaded: mockState.translationLoaded,
+          model_key: mockState.translationLoaded ? (mockState.translationModelKey ?? 'nllb-600m') : null,
+          model_id: mockState.translationLoaded ? 'facebook/nllb-200-distilled-600M' : null,
+          device: 'cpu',
+        }),
+      });
+    }
+
+    if (url.includes('/translation-models')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            key: 'nllb-600m',
+            label: 'NLLB Distilled 600M',
+            model_id: 'facebook/nllb-200-distilled-600M',
+            parameters: '600M',
+            download_size_mb: 1300,
+          },
+        ]),
+      });
+    }
+
+    if (url.includes('/load-translation') && method === 'POST') {
+      const body = JSON.parse(route.request().postData() || '{}');
+      mockState.translationLoaded = true;
+      mockState.translationModelKey = body.model_key || 'nllb-600m';
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'loaded', model_key: mockState.translationModelKey }),
+      });
+    }
+
+    if (url.includes('/unload-translation') && method === 'POST') {
+      mockState.translationLoaded = false;
+      mockState.translationModelKey = null;
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'unloaded' }),
+      });
+    }
+
+    if (url.includes('/translate-text') && method === 'POST') {
+      if (!mockState.translationLoaded) {
+        return route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: 'Translation model not loaded' }),
+        });
+      }
+
+      const body = JSON.parse(route.request().postData() || '{}');
+      const target = (body.target_language || 'english').toString().toLowerCase();
+      const translated = target === 'spanish'
+        ? 'hola mundo'
+        : `${body.text ?? ''}`.toString();
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          text: translated,
+          source_language: 'english',
+          target_language: target,
         }),
       });
     }
@@ -638,6 +763,47 @@ test.describe('6. Settings Panel', () => {
 
     // Scroll down in settings to find auto-load toggle
     await expect(page.getByText('Auto-load model')).toBeVisible();
+  });
+
+  test('translation helpers can be enabled and loaded independently of Whisper', async ({ page }) => {
+    await navigateAndWait(page);
+
+    await page.locator('button[aria-label="Settings"]').click();
+    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+
+    const whisperToggle = page.locator('button[aria-label="Toggle Whisper auto-transcription"]');
+    await expect(whisperToggle).toHaveAttribute('aria-checked', 'false');
+
+    const translationToggle = page.locator('button[aria-label="Toggle text translation helpers"]');
+    await translationToggle.click();
+
+    await expect(page.getByText('Translation Model', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Load Model' }).last().click();
+
+    await expect(page.getByRole('button', { name: 'Unload' }).last()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Model: nllb-600m/i)).toBeVisible();
+    await expect(whisperToggle).toHaveAttribute('aria-checked', 'false');
+  });
+
+  test('shows backend refresh guidance when translation endpoints are missing', async ({ page }) => {
+    // Override translation routes to simulate stale backend environment.
+    await page.route(/127\.0\.0\.1:8765\/(translation-status|translation-models|load-translation)$/, async (route) => {
+      await route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Not Found' }),
+      });
+    });
+
+    await navigateAndWait(page);
+    await page.locator('button[aria-label="Settings"]').click();
+
+    const translationToggle = page.locator('button[aria-label="Toggle text translation helpers"]');
+    await translationToggle.click();
+    await page.getByRole('button', { name: 'Load Model' }).last().click();
+
+    await expect(page.getByText(/Translation API not found in current backend environment/i))
+      .toBeVisible({ timeout: 5000 });
   });
 });
 

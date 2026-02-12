@@ -61,6 +61,10 @@
   // Whisper transcription state
   let isTranscribing = $state(false);
   let transcriptionError = $state<string | null>(null);
+  let translationText = $state<string | null>(null);
+  let translationError = $state<string | null>(null);
+  let isTranslatingText = $state(false);
+  let textTranslationError = $state<string | null>(null);
 
   // Save notification state
   let saveNotification = $state<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -439,6 +443,8 @@
   async function handleReferenceAudioChange(blob: Blob, url: string) {
     referenceAudioBlob = blob;
     referenceAudioUrl = url;
+    translationText = null;
+    translationError = null;
 
     // Convert to WAV for the TTS server (WebView2 records WebM/Opus, model expects WAV)
     let audioFile: File;
@@ -506,11 +512,13 @@
   function handleLanguageChange(language: string) {
     localLanguage = language;
     ttsStore.setLanguage(language);
+    textTranslationError = null;
   }
 
   function handleTextChange(text: string) {
     localText = text;
     ttsStore.setText(text);
+    textTranslationError = null;
   }
 
   function handleSpeakerChange(speaker: string, _isPreset: boolean) {
@@ -536,6 +544,8 @@
     if (!referenceAudioBlob) return;
     isTranscribing = true;
     transcriptionError = null;
+    translationError = null;
+    translationText = null;
     try {
       // Auto-load Whisper if not loaded
       const status = await ttsClient.whisperStatus();
@@ -543,14 +553,63 @@
         await ttsClient.loadWhisper("base");
       }
       const file = new File([referenceAudioBlob], "reference.wav", { type: referenceAudioBlob.type || "audio/wav" });
-      const result = await ttsClient.transcribe(file);
-      localReferenceText = result.text;
-      ttsStore.setReferenceText(result.text);
+      const transcriptResult = await ttsClient.transcribe(file, { task: "transcribe" });
+      localReferenceText = transcriptResult.text;
+      ttsStore.setReferenceText(transcriptResult.text);
+
+      if (settingsStore.state.enableWhisper) {
+        try {
+          const translated = await ttsClient.transcribe(file, { task: "translate" });
+          translationText = translated.text;
+        } catch (translateErr) {
+          translationError = translateErr instanceof Error
+            ? translateErr.message
+            : "Translation failed";
+        }
+      }
     } catch (e) {
       transcriptionError = e instanceof Error ? e.message : "Transcription failed";
     } finally {
       isTranscribing = false;
     }
+  }
+
+  async function handleTranslateInputText() {
+    if (!settingsStore.state.enableTranslation) return;
+
+    if (!localText.trim()) {
+      textTranslationError = "Enter text to translate";
+      return;
+    }
+
+    if (localLanguage === "Auto") {
+      textTranslationError = "Select a target language first";
+      return;
+    }
+
+    isTranslatingText = true;
+    textTranslationError = null;
+    try {
+      const translationStatus = await ttsClient.translationStatus();
+      if (!translationStatus.loaded) {
+        textTranslationError = "Translation model is not loaded. Open Settings > Optional Features > Translation helpers and click Load Model.";
+        return;
+      }
+
+      const result = await ttsClient.translateText(localText, localLanguage, "auto");
+      localText = result.text;
+      ttsStore.setText(result.text);
+    } catch (e) {
+      textTranslationError = e instanceof Error ? e.message : "Text translation failed";
+    } finally {
+      isTranslatingText = false;
+    }
+  }
+
+  function handleUseTranslationAsText() {
+    if (!translationText) return;
+    localText = translationText;
+    ttsStore.setText(translationText);
   }
 
   function handleDescriptionChange(description: string) {
@@ -622,6 +681,9 @@
           bind:language={localLanguage}
           bind:speaker={localSpeaker}
           bind:instruction={localInstruction}
+          hasTranslation={settingsStore.state.enableTranslation}
+          {isTranslatingText}
+          {textTranslationError}
           modelSupported={customVoiceModelSupported}
           modelLoading={ttsState.isLoadingModel}
           recommendedModelLabel={recommendedCustomModelLabel}
@@ -633,6 +695,7 @@
           onLanguageChange={handleLanguageChange}
           onSpeakerChange={handleSpeakerChange}
           onInstructionChange={handleInstructionChange}
+          onTranslateText={handleTranslateInputText}
           onLoadModel={handleLoadCustomVoiceModel}
         />
       {:else if ttsState.mode === 'voice-clone'}
@@ -649,14 +712,22 @@
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
           hasWhisper={settingsStore.state.enableWhisper}
+          hasTranslation={settingsStore.state.enableWhisper}
+          canTranslateText={settingsStore.state.enableTranslation}
           {isTranscribing}
           {transcriptionError}
+          {translationText}
+          {translationError}
+          {isTranslatingText}
+          {textTranslationError}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
           onReferenceTextChange={handleReferenceTextChange}
           onReferenceAudioChange={handleReferenceAudioChange}
           onAutoTranscribe={handleAutoTranscribe}
+          onUseTranslation={handleUseTranslationAsText}
+          onTranslateText={handleTranslateInputText}
           onLowQualityModeChange={handleCloneQualityChange}
           onLoadModel={handleLoadVoiceCloneModel}
         />
@@ -665,6 +736,9 @@
           bind:text={localText}
           bind:language={localLanguage}
           bind:voiceDescription={localVoiceDescription}
+          hasTranslation={settingsStore.state.enableTranslation}
+          {isTranslatingText}
+          {textTranslationError}
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
           modelLoaded={voiceDesignModelLoaded}
@@ -675,6 +749,7 @@
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
           onDescriptionChange={handleDescriptionChange}
+          onTranslateText={handleTranslateInputText}
         />
       {/if}
     {/snippet}

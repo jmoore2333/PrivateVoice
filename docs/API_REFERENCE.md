@@ -67,9 +67,26 @@ All generation endpoints support `mp3_bitrate` parameter (default 192, validated
 | `/whisper-models` | GET | — | `[{size, parameters, download_size_mb}]` | 6 available sizes: tiny, base, small, medium, large-v3, large-v3-turbo |
 | `/load-whisper` | POST | `{model_size}` | `{status, model_size}` | Loads via faster-whisper (CTranslate2), runs on CPU |
 | `/unload-whisper` | POST | — | `{status}` | Frees whisper model memory |
-| `/transcribe` | POST | multipart `{audio}` | `{text, language, confidence, duration_seconds}` | Requires Whisper model loaded |
+| `/transcribe` | POST | multipart `{audio, task?}` | `{text, language, confidence, duration_seconds}` | `task` can be `transcribe` (default) or `translate` (English translation); requires Whisper model loaded |
 
 Whisper is used in the UI for auto-transcription in Voice Clone mode. Enable it in Settings > Optional Features.
+
+## Local Text Translation
+
+| Endpoint | Method | Request | Response | Notes |
+|---|---|---|---|---|
+| `/translation-status` | GET | — | `{loaded, model_key, model_id, device}` | Translation model load state. |
+| `/translation-models` | GET | — | `[{key, label, model_id, parameters, download_size_mb}]` | Available local translation model options and estimated sizes. |
+| `/load-translation` | POST | `{model_key}` | `{status, model_key}` | Downloads/loads selected translation model. |
+| `/unload-translation` | POST | — | `{status}` | Unloads translation model from memory. |
+| `/translate-text` | POST | `{text, target_language, source_language?}` | `{text, source_language, target_language}` | Local translation for text inputs. Requires translation model loaded. `source_language` defaults to `auto` detection. |
+
+`/translate-text` validation and behavior:
+- Returns HTTP 400 if text is empty
+- Returns HTTP 400 if text exceeds 2000 chars
+- Returns HTTP 400 if translation model is not loaded
+- Returns HTTP 400 for unsupported languages
+- Returns original text unchanged when source and target resolve to the same language
 
 ## Lifecycle
 
@@ -79,6 +96,6 @@ Whisper is used in the UI for auto-transcription in Voice Clone mode. Enable it 
 
 ## Notes
 
-**CORS:** The server only accepts requests from known origins: `http://localhost:1420`, `http://127.0.0.1:1420`, `tauri://localhost`, and `https://tauri.localhost`.
+**CORS:** The server is localhost-only and currently allows all origins (`allow_origins=["*"]`) to support Tauri WebView origin differences across platforms.
 
 **API documentation:** Interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) are disabled in production. Set the environment variable `TTS_SERVER_DEV=true` to enable them during development.

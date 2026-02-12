@@ -765,6 +765,163 @@ describe('unloadModel', () => {
 });
 
 // ===========================================================================
+// transcribe
+// ===========================================================================
+
+describe('transcribe', () => {
+  const transcript = {
+    text: 'hello world',
+    language: 'en',
+    confidence: 0.98,
+    duration_seconds: 2.5,
+  };
+
+  it('sends audio multipart payload and returns transcript', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(transcript));
+
+    const file = new File(['audio-bytes'], 'ref.wav', { type: 'audio/wav' });
+    const result = await ttsClient.transcribe(file);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://127.0.0.1:8765/transcribe');
+    expect(options?.method).toBe('POST');
+
+    const formData = options?.body as FormData;
+    expect(formData.get('audio')).toBeInstanceOf(File);
+    expect(formData.get('task')).toBeNull();
+    expect(result).toEqual(transcript);
+  });
+
+  it('passes task when translation is requested', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(transcript));
+
+    const blob = new Blob(['audio-bytes'], { type: 'audio/wav' });
+    await ttsClient.transcribe(blob, { task: 'translate' });
+
+    const formData = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(formData.get('task')).toBe('translate');
+  });
+
+  it('throws with parsed error details on failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Whisper model not loaded' }, 400));
+
+    const file = new File(['audio-bytes'], 'ref.wav', { type: 'audio/wav' });
+    await expect(ttsClient.transcribe(file)).rejects.toThrow('Whisper model not loaded');
+  });
+});
+
+// ===========================================================================
+// translation model management
+// ===========================================================================
+
+describe('translation model management', () => {
+  it('fetches translation status', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        loaded: true,
+        model_key: 'nllb-600m',
+        model_id: 'facebook/nllb-200-distilled-600M',
+        device: 'cpu',
+      }),
+    );
+
+    const status = await ttsClient.translationStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translation-status');
+    expect(status.loaded).toBe(true);
+    expect(status.model_key).toBe('nllb-600m');
+  });
+
+  it('fetches translation model list', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          key: 'nllb-600m',
+          label: 'NLLB Distilled 600M',
+          model_id: 'facebook/nllb-200-distilled-600M',
+          parameters: '600M',
+          download_size_mb: 1300,
+        },
+      ]),
+    );
+
+    const models = await ttsClient.translationModels();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translation-models');
+    expect(models).toHaveLength(1);
+    expect(models[0].key).toBe('nllb-600m');
+  });
+
+  it('loads translation model with selected key', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'loaded' }));
+
+    await ttsClient.loadTranslation('nllb-600m');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/load-translation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_key: 'nllb-600m' }),
+    });
+  });
+
+  it('unloads translation model', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'unloaded' }));
+
+    await ttsClient.unloadTranslation();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/unload-translation', {
+      method: 'POST',
+    });
+  });
+});
+
+// ===========================================================================
+// translateText
+// ===========================================================================
+
+describe('translateText', () => {
+  const translated = {
+    text: 'hola mundo',
+    source_language: 'english',
+    target_language: 'spanish',
+  };
+
+  it('sends translation request payload and returns translated text', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(translated));
+
+    const result = await ttsClient.translateText('hello world', 'Spanish');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translate-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hello world',
+        target_language: 'Spanish',
+        source_language: 'auto',
+      }),
+    });
+    expect(result).toEqual(translated);
+  });
+
+  it('passes explicit source language when provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(translated));
+
+    await ttsClient.translateText('hello world', 'Spanish', 'English');
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.source_language).toBe('English');
+  });
+
+  it('throws with parsed error on failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Target language cannot be Auto' }, 400));
+
+    await expect(ttsClient.translateText('hello', 'Auto')).rejects.toThrow(
+      'Target language cannot be Auto',
+    );
+  });
+});
+
+// ===========================================================================
 // shutdown
 // ===========================================================================
 

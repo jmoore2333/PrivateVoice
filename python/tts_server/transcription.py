@@ -43,6 +43,9 @@ class TranscriptionResult:
     duration_seconds: float
 
 
+VALID_TRANSCRIPTION_TASKS = {"transcribe", "translate"}
+
+
 def _get_compute_type() -> str:
     """Select the optimal compute type for the current platform."""
     is_apple_silicon = (
@@ -156,17 +159,29 @@ class WhisperModel:
         gc.collect()
         logger.info("Whisper model unloaded")
 
-    def transcribe(self, audio_bytes: bytes) -> TranscriptionResult:
+    def transcribe(
+        self,
+        audio_bytes: bytes,
+        task: str = "transcribe",
+    ) -> TranscriptionResult:
         """Transcribe audio bytes to text.
 
         Args:
             audio_bytes: Raw audio file bytes (WAV, MP3, etc. — ffmpeg-supported).
+            task: Whisper task ("transcribe" or "translate").
 
         Returns:
             TranscriptionResult with text, language, confidence, and duration.
         """
         if not self._loaded:
             raise RuntimeError("Whisper model not loaded. Call load() first.")
+
+        normalized_task = (task or "transcribe").strip().lower()
+        if normalized_task not in VALID_TRANSCRIPTION_TASKS:
+            raise ValueError(
+                f"Invalid task: {task}. "
+                f"Available: {sorted(VALID_TRANSCRIPTION_TASKS)}"
+            )
 
         # Write to temp file — faster-whisper expects a file path
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -178,6 +193,7 @@ class WhisperModel:
                 audio_path,
                 beam_size=5,
                 vad_filter=True,
+                task=normalized_task,
             )
 
             # Collect all segment texts

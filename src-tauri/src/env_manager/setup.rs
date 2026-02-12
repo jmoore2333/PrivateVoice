@@ -532,15 +532,19 @@ print('VERIFICATION_OK')
 fn write_setup_marker(app: &tauri::AppHandle, gpu: &GpuTarget) -> Result<(), String> {
     let marker_path = paths::setup_marker_path(app)?;
     let requirements = paths::requirements_txt(app)?;
+    let bundled_source = paths::bundled_source_dir(app)?;
 
     // Compute SHA-256 of requirements.txt
     let req_hash = compute_file_sha256(&requirements)?;
+    // Compute SHA-256 of bundled backend source directory
+    let source_hash = compute_dir_sha256(&bundled_source)?;
 
     let marker = serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "gpu_target": gpu.id(),
         "gpu_display": gpu.display_name(),
         "requirements_hash": req_hash,
+        "source_hash": source_hash,
         "uv_version": EXPECTED_UV_VERSION,
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
@@ -566,6 +570,61 @@ pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let result = hasher.finalize();
 
     Ok(format!("{:x}", result))
+}
+
+/// Compute SHA-256 hash of a directory tree (deterministic order).
+///
+/// Hash includes relative file paths and file contents.
+pub fn compute_dir_sha256(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::path::{Path, PathBuf};
+
+    fn collect_files(root: &Path, current: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = std::fs::read_dir(current)
+            .map_err(|e| format!("Failed to read {:?}: {}", current, e))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("Failed to read dir entry: {}", e))?;
+            let entry_path = entry.path();
+            if entry_path.is_dir() {
+                collect_files(root, &entry_path, out)?;
+            } else if entry_path.is_file() {
+                let rel = entry_path
+                    .strip_prefix(root)
+                    .map_err(|e| format!("Failed to strip prefix for {:?}: {}", entry_path, e))?;
+                out.push(rel.to_path_buf());
+            }
+        }
+        Ok(())
+    }
+
+    if !path.exists() {
+        return Err(format!("Directory not found: {:?}", path));
+    }
+
+    let mut files = Vec::<PathBuf>::new();
+    collect_files(path, path, &mut files)?;
+
+    files.sort_by(|a, b| {
+        a.to_string_lossy()
+            .replace('\\', "/")
+            .cmp(&b.to_string_lossy().replace('\\', "/"))
+    });
+
+    let mut hasher = Sha256::new();
+    for rel in files {
+        let rel_norm = rel.to_string_lossy().replace('\\', "/");
+        hasher.update(rel_norm.as_bytes());
+        hasher.update([0]);
+
+        let file_path = path.join(&rel);
+        let data = std::fs::read(&file_path)
+            .map_err(|e| format!("Failed to read {:?}: {}", file_path, e))?;
+        hasher.update(&data);
+        hasher.update([0xff]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Emit a setup phase event via the sidecar-startup channel.

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use super::paths;
 use super::setup;
 
@@ -32,6 +30,8 @@ struct SetupMarker {
     gpu_display: Option<String>,
     requirements_hash: String,
     #[serde(default)]
+    source_hash: Option<String>,
+    #[serde(default)]
     uv_version: Option<String>,
     #[serde(default)]
     timestamp: Option<String>,
@@ -50,6 +50,8 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
     let venv_python = paths::venv_python(app)?;
     let requirements = paths::requirements_txt(app)?;
     let bundled_requirements = paths::bundled_requirements_txt(app)?;
+    let tts_source = paths::tts_source_dir(app)?;
+    let bundled_source = paths::bundled_source_dir(app)?;
 
     // Check 1: Does the marker file exist?
     if !marker_path.exists() {
@@ -111,7 +113,42 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
         });
     }
 
-    // Check 5: Version check (app version changed means potential update needed)
+    // Check 5: Has backend source changed? (indicates API/code update)
+    // Compare bundled source hash against the marker's source hash.
+    let current_source_path = if bundled_source.exists() {
+        &bundled_source
+    } else if tts_source.exists() {
+        &tts_source
+    } else {
+        return Ok(SetupState::NeedsUpdate {
+            reason: "Python backend source is missing — reinitializing environment.".to_string(),
+        });
+    };
+
+    let current_source_hash = setup::compute_dir_sha256(current_source_path)?;
+    match marker.source_hash.as_deref() {
+        Some(marker_source_hash) if marker_source_hash == current_source_hash => {}
+        Some(marker_source_hash) => {
+            println!(
+                "[env_manager::validate] Source hash mismatch: marker={}, current={}",
+                &marker_source_hash[..8],
+                &current_source_hash[..8]
+            );
+            return Ok(SetupState::NeedsUpdate {
+                reason: "Application backend source changed — syncing Python server code.".to_string(),
+            });
+        }
+        None => {
+            println!(
+                "[env_manager::validate] Source hash missing in marker — forcing one-time source sync"
+            );
+            return Ok(SetupState::NeedsUpdate {
+                reason: "App update requires a one-time backend source refresh.".to_string(),
+            });
+        }
+    }
+
+    // Check 6: Version check (app version changed means potential update needed)
     let current_version = env!("CARGO_PKG_VERSION");
     if marker.version != current_version {
         println!(
