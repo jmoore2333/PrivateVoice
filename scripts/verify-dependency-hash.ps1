@@ -20,8 +20,20 @@ if (-not (Test-Path $StagedReq)) {
     exit 1
 }
 
-$SourceHash = (Get-FileHash -Path $SourceReq -Algorithm SHA256).Hash.ToLowerInvariant()
-$StagedHash = (Get-FileHash -Path $StagedReq -Algorithm SHA256).Hash.ToLowerInvariant()
+# Normalize CRLF → LF before hashing so the hash matches macOS/Linux (git stores LF)
+function Get-NormalizedFileHash {
+    param([string]$Path)
+    $text = [System.IO.File]::ReadAllText($Path)
+    $normalized = $text.Replace("`r`n", "`n")
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $hashBytes = $sha.ComputeHash($bytes)
+    $sha.Dispose()
+    return [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
+}
+
+$SourceHash = Get-NormalizedFileHash $SourceReq
+$StagedHash = Get-NormalizedFileHash $StagedReq
 
 $ExpectedRaw = Get-Content $ExpectedHashFile -Raw
 $Match = [regex]::Match($ExpectedRaw, "\b[0-9a-fA-F]{64}\b")
