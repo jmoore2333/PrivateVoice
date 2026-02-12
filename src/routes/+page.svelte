@@ -63,6 +63,8 @@
   let transcriptionError = $state<string | null>(null);
   let translationText = $state<string | null>(null);
   let translationError = $state<string | null>(null);
+  let isTranslatingText = $state(false);
+  let textTranslationError = $state<string | null>(null);
 
   // Save notification state
   let saveNotification = $state<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -510,11 +512,13 @@
   function handleLanguageChange(language: string) {
     localLanguage = language;
     ttsStore.setLanguage(language);
+    textTranslationError = null;
   }
 
   function handleTextChange(text: string) {
     localText = text;
     ttsStore.setText(text);
+    textTranslationError = null;
   }
 
   function handleSpeakerChange(speaker: string, _isPreset: boolean) {
@@ -567,6 +571,32 @@
       transcriptionError = e instanceof Error ? e.message : "Transcription failed";
     } finally {
       isTranscribing = false;
+    }
+  }
+
+  async function handleTranslateInputText() {
+    if (!settingsStore.state.enableTranslation) return;
+
+    if (!localText.trim()) {
+      textTranslationError = "Enter text to translate";
+      return;
+    }
+
+    if (localLanguage === "Auto") {
+      textTranslationError = "Select a target language first";
+      return;
+    }
+
+    isTranslatingText = true;
+    textTranslationError = null;
+    try {
+      const result = await ttsClient.translateText(localText, localLanguage, "auto");
+      localText = result.text;
+      ttsStore.setText(result.text);
+    } catch (e) {
+      textTranslationError = e instanceof Error ? e.message : "Text translation failed";
+    } finally {
+      isTranslatingText = false;
     }
   }
 
@@ -645,6 +675,9 @@
           bind:language={localLanguage}
           bind:speaker={localSpeaker}
           bind:instruction={localInstruction}
+          hasTranslation={settingsStore.state.enableTranslation}
+          {isTranslatingText}
+          {textTranslationError}
           modelSupported={customVoiceModelSupported}
           modelLoading={ttsState.isLoadingModel}
           recommendedModelLabel={recommendedCustomModelLabel}
@@ -656,6 +689,7 @@
           onLanguageChange={handleLanguageChange}
           onSpeakerChange={handleSpeakerChange}
           onInstructionChange={handleInstructionChange}
+          onTranslateText={handleTranslateInputText}
           onLoadModel={handleLoadCustomVoiceModel}
         />
       {:else if ttsState.mode === 'voice-clone'}
@@ -673,10 +707,13 @@
           {elapsedTime}
           hasWhisper={settingsStore.state.enableWhisper}
           hasTranslation={settingsStore.state.enableWhisper && settingsStore.state.enableTranslation}
+          canTranslateText={settingsStore.state.enableTranslation}
           {isTranscribing}
           {transcriptionError}
           {translationText}
           {translationError}
+          {isTranslatingText}
+          {textTranslationError}
           onGenerate={handleGenerate}
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
@@ -684,6 +721,7 @@
           onReferenceAudioChange={handleReferenceAudioChange}
           onAutoTranscribe={handleAutoTranscribe}
           onUseTranslation={handleUseTranslationAsText}
+          onTranslateText={handleTranslateInputText}
           onLowQualityModeChange={handleCloneQualityChange}
           onLoadModel={handleLoadVoiceCloneModel}
         />
@@ -692,6 +730,9 @@
           bind:text={localText}
           bind:language={localLanguage}
           bind:voiceDescription={localVoiceDescription}
+          hasTranslation={settingsStore.state.enableTranslation}
+          {isTranslatingText}
+          {textTranslationError}
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
           modelLoaded={voiceDesignModelLoaded}
@@ -702,6 +743,7 @@
           onTextChange={handleTextChange}
           onLanguageChange={handleLanguageChange}
           onDescriptionChange={handleDescriptionChange}
+          onTranslateText={handleTranslateInputText}
         />
       {/if}
     {/snippet}

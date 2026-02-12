@@ -165,6 +165,7 @@ Core endpoints include:
 - `/load-whisper`
 - `/unload-whisper`
 - `/transcribe`
+- `/translate-text`
 
 Full API details: `docs/API_REFERENCE.md`
 

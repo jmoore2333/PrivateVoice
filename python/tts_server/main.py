@@ -41,6 +41,7 @@ from .download_tracker import get_download_tracker, DownloadProgress
 from .transcription import (
     get_whisper_model, WHISPER_MODEL_REPOS, WHISPER_MODEL_SIZES,
 )
+from .translation import get_local_translator
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
 
@@ -159,6 +160,18 @@ class TranscriptionResponse(BaseModel):
 VALID_TRANSCRIPTION_TASKS = ("transcribe", "translate")
 
 
+class TranslateTextRequest(BaseModel):
+    text: str
+    target_language: str
+    source_language: str = "auto"
+
+
+class TranslateTextResponse(BaseModel):
+    text: str
+    source_language: str
+    target_language: str
+
+
 # ============================================================================
 # Startup State
 # ============================================================================
@@ -208,6 +221,9 @@ async def lifespan(app: FastAPI):
     whisper = get_whisper_model()
     if whisper.is_loaded:
         whisper.unload()
+    translator = get_local_translator()
+    if translator.is_loaded:
+        translator.unload()
 
 
 _is_dev = os.environ.get("TTS_SERVER_DEV", "false").lower() == "true"
@@ -690,6 +706,45 @@ async def transcribe(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/translate-text", response_model=TranslateTextResponse)
+async def translate_text(request: TranslateTextRequest):
+    """Translate input text to a target language locally."""
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    if len(request.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters",
+        )
+
+    translator = get_local_translator()
+
+    try:
+        result = await asyncio.to_thread(
+            translator.translate_text,
+            request.text,
+            request.target_language,
+            request.source_language,
+        )
+        logger.info(
+            "Text translation complete: %s -> %s, text=%s...",
+            result.source_language,
+            result.target_language,
+            result.text[:80],
+        )
+        return TranslateTextResponse(
+            text=result.text,
+            source_language=result.source_language,
+            target_language=result.target_language,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Text translation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Lifecycle Endpoints
 # ============================================================================
@@ -703,6 +758,9 @@ async def shutdown():
     whisper = get_whisper_model()
     if whisper.is_loaded:
         whisper.unload()
+    translator = get_local_translator()
+    if translator.is_loaded:
+        translator.unload()
 
     logger.info("Shutdown requested")
     # Signal the process to exit

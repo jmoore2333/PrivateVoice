@@ -71,6 +71,12 @@ All generation endpoints support `mp3_bitrate` parameter (default 192, validated
 
 Whisper is used in the UI for auto-transcription in Voice Clone mode. Enable it in Settings > Optional Features.
 
+## Local Text Translation
+
+| Endpoint | Method | Request | Response | Notes |
+|---|---|---|---|---|
+| `/translate-text` | POST | `{text, target_language, source_language?}` | `{text, source_language, target_language}` | Local translation for text inputs. `source_language` defaults to `auto` detection. |
+
 ## Lifecycle
 
 | Endpoint | Method | Notes |

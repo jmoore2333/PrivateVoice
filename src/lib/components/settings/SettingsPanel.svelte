@@ -436,7 +436,7 @@
             <div>
               <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation support</span>
               <p class="text-xs text-[var(--color-text-muted)]">
-                Enable local Whisper translation (to English) during auto-transcribe in Voice Clone
+                Enable local translation helpers for text inputs in all modes and Whisper translation in Voice Clone auto-transcribe
               </p>
             </div>
             <button

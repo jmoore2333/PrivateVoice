@@ -40,6 +40,18 @@ def _make_mock_whisper(*, loaded: bool = False):
     return w
 
 
+def _make_mock_translator():
+    t = MagicMock()
+    type(t).is_loaded = PropertyMock(return_value=False)
+
+    result = MagicMock()
+    result.text = "hola mundo"
+    result.source_language = "english"
+    result.target_language = "spanish"
+    t.translate_text.return_value = result
+    return t
+
+
 def _get_client():
     """Import the app and return a TestClient.
 
@@ -832,6 +844,71 @@ class TestWhisperTranscription:
         assert resp.status_code == 400
         assert "invalid transcribe task" in resp.json()["detail"].lower()
         mock_whisper.transcribe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Local text translation
+# ---------------------------------------------------------------------------
+
+class TestTranslateText:
+    """POST /translate-text."""
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator()
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Spanish",
+                "source_language": "auto",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["text"] == "hola mundo"
+        assert data["source_language"] == "english"
+        assert data["target_language"] == "spanish"
+        mock_translator.translate_text.assert_called_once_with(
+            "hello world",
+            "Spanish",
+            "auto",
+        )
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_empty_rejected(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator()
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "   ",
+                "target_language": "Spanish",
+            },
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translate_text_validation_error_returns_400(self, mock_get_translator):
+        mock_translator = _make_mock_translator()
+        mock_translator.translate_text.side_effect = ValueError("Target language cannot be Auto")
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Auto",
+            },
+        )
+        assert resp.status_code == 400
+        assert "target language cannot be auto" in resp.json()["detail"].lower()
 
 
 # ---------------------------------------------------------------------------

@@ -811,6 +811,52 @@ describe('transcribe', () => {
 });
 
 // ===========================================================================
+// translateText
+// ===========================================================================
+
+describe('translateText', () => {
+  const translated = {
+    text: 'hola mundo',
+    source_language: 'english',
+    target_language: 'spanish',
+  };
+
+  it('sends translation request payload and returns translated text', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(translated));
+
+    const result = await ttsClient.translateText('hello world', 'Spanish');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translate-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: 'hello world',
+        target_language: 'Spanish',
+        source_language: 'auto',
+      }),
+    });
+    expect(result).toEqual(translated);
+  });
+
+  it('passes explicit source language when provided', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(translated));
+
+    await ttsClient.translateText('hello world', 'Spanish', 'English');
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(body.source_language).toBe('English');
+  });
+
+  it('throws with parsed error on failure', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Target language cannot be Auto' }, 400));
+
+    await expect(ttsClient.translateText('hello', 'Auto')).rejects.toThrow(
+      'Target language cannot be Auto',
+    );
+  });
+});
+
+// ===========================================================================
 // shutdown
 // ===========================================================================
 

@@ -29,11 +29,15 @@
     modelLoading?: boolean;
     recommendedModelLabel?: string;
     currentModelId?: string | null;
+    hasTranslation?: boolean;
+    isTranslatingText?: boolean;
+    textTranslationError?: string | null;
     onGenerate: () => void;
     onTextChange?: (text: string) => void;
     onLanguageChange?: (lang: string) => void;
     onSpeakerChange?: (speaker: string, isPreset: boolean) => void;
     onInstructionChange?: (instruction: string) => void;
+    onTranslateText?: () => void;
     onLoadModel?: () => void;
   }
 
@@ -48,11 +52,15 @@
     modelLoading = false,
     recommendedModelLabel = "0.6B Custom",
     currentModelId = null,
+    hasTranslation = false,
+    isTranslatingText = false,
+    textTranslationError = null,
     onGenerate,
     onTextChange,
     onLanguageChange,
     onSpeakerChange,
     onInstructionChange,
+    onTranslateText,
     onLoadModel,
   }: Props = $props();
 
@@ -113,6 +121,24 @@
 
     <div></div>
   </div>
+
+  {#if hasTranslation}
+    <div class="space-y-1">
+      <button
+        class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+        disabled={isTranslatingText || !text.trim() || language === 'Auto'}
+        onclick={onTranslateText}
+      >
+        {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
+      </button>
+      {#if textTranslationError}
+        <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
+      {/if}
+      {#if language === 'Auto'}
+        <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
+      {/if}
+    </div>
+  {/if}
 
   <VoiceSelector
     bind:value={speaker}

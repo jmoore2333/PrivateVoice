@@ -95,6 +95,12 @@ export interface TranscriptionResult {
 
 export type TranscriptionTask = "transcribe" | "translate";
 
+export interface TranslateTextResult {
+  text: string;
+  source_language: string;
+  target_language: string;
+}
+
 export const PRESET_SPEAKERS = [
   "aiden",
   "dylan",
@@ -390,6 +396,26 @@ class TTSClient {
     });
     if (!res.ok) {
       throw new Error(await this.readErrorMessage(res, "Failed to transcribe audio"));
+    }
+    return res.json();
+  }
+
+  async translateText(
+    text: string,
+    targetLanguage: string,
+    sourceLanguage: string = "auto",
+  ): Promise<TranslateTextResult> {
+    const res = await fetch(`${this.baseUrl}/translate-text`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        target_language: targetLanguage,
+        source_language: sourceLanguage,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(await this.readErrorMessage(res, "Failed to translate text"));
     }
     return res.json();
   }

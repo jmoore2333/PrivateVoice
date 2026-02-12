@@ -15,10 +15,13 @@
     elapsedTime?: number;
     hasWhisper: boolean;
     hasTranslation?: boolean;
+    canTranslateText?: boolean;
     isTranscribing?: boolean;
     transcriptionError?: string | null;
     translationText?: string | null;
     translationError?: string | null;
+    isTranslatingText?: boolean;
+    textTranslationError?: string | null;
     modelSupported?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
@@ -30,6 +33,7 @@
     onReferenceAudioChange?: (blob: Blob, url: string) => void;
     onAutoTranscribe?: () => void;
     onUseTranslation?: () => void;
+    onTranslateText?: () => void;
     onLowQualityModeChange?: (enabled: boolean) => void;
     onLoadModel?: () => void;
   }
@@ -44,10 +48,13 @@
     elapsedTime = 0,
     hasWhisper = false,
     hasTranslation = false,
+    canTranslateText = false,
     isTranscribing = false,
     transcriptionError = null,
     translationText = null,
     translationError = null,
+    isTranslatingText = false,
+    textTranslationError = null,
     modelSupported = true,
     modelLoading = false,
     recommendedModelLabel = "0.6B Base",
@@ -59,6 +66,7 @@
     onReferenceAudioChange,
     onAutoTranscribe,
     onUseTranslation,
+    onTranslateText,
     onLowQualityModeChange,
     onLoadModel,
   }: Props = $props();
@@ -239,6 +247,24 @@
     placeholder="Enter the text you want the cloned voice to speak..."
     maxLength={2000}
   />
+
+  {#if canTranslateText}
+    <div class="space-y-1">
+      <button
+        class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+        disabled={isTranslatingText || !text.trim() || language === 'Auto'}
+        onclick={onTranslateText}
+      >
+        {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
+      </button>
+      {#if textTranslationError}
+        <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
+      {/if}
+      {#if language === 'Auto'}
+        <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
+      {/if}
+    </div>
+  {/if}
 
   <LanguageSelector
     bind:value={language}

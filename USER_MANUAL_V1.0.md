@@ -125,8 +125,9 @@ Use:
 
 Optional translation:
 1. In `Settings -> Optional Features`, enable `Translation support`
-2. Run `Auto-transcribe` in Voice Clone
-3. A local Whisper translation (English) is shown as a helper and can be applied to the generation text
+2. In any mode, use `Translate text to <Language>` next to the text input
+3. The input text is translated locally to your selected generation language
+4. In Voice Clone, `Auto-transcribe` also shows an optional local Whisper translation helper
 
 ## 9. Library and Export
 
