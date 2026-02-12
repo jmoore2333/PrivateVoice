@@ -105,6 +105,30 @@ The environment marker now tracks both:
 
 If either changes, the app automatically triggers environment refresh so new API endpoints are available.
 
+### Storage Footprint and Uninstall
+
+PrivateVoice now keeps runtime artifacts in app-managed storage, including:
+- standalone Python
+- virtualenv packages (including PyTorch)
+- Hugging Face model cache (`python_env/huggingface/`)
+- library metadata/audio (`library/`)
+
+Primary app data roots:
+- macOS: `~/Library/Application Support/com.privatevoice.desktop/`
+- Windows: `%APPDATA%\\com.privatevoice.desktop\\`
+- Linux: `~/.local/share/com.privatevoice.desktop/`
+
+Windows NSIS uninstall now removes:
+- `%APPDATA%\\com.privatevoice.desktop\\`
+- `%LOCALAPPDATA%\\com.privatevoice.desktop\\` (WebView profile/cache)
+
+macOS `.app` deletion and Linux AppImage deletion do not run a platform uninstaller; remove the app data directory manually if you want a full wipe.
+
+Legacy cache note for existing users:
+- Older versions may have model files in `~/.cache/huggingface/`.
+- New installs/updates use app-managed cache under `python_env/huggingface/`.
+- You can manually remove the legacy `~/.cache/huggingface/` directory if no other apps depend on it.
+
 ## Build and Release
 
 ### Windows (PowerShell)

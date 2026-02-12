@@ -86,6 +86,7 @@ Voice library uses two-tier storage:
 - **Pre-commit hook** (Husky) runs `svelte-check` on staged `.ts`/`.svelte` files.
 - **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
 - **Dependency integrity gate**: if `python/requirements.txt` changes, run `./scripts/update-requirements-hash.sh` (or `.\scripts\update-requirements-hash.ps1` on Windows) and commit `python/requirements.sha256`. Release builds validate this hash and fail on mismatch.
+- **Cache locality**: the sidecar sets `HF_HOME`/`HF_HUB_CACHE`/`TRANSFORMERS_CACHE` to `{appData}/python_env/huggingface` and setup sets `UV_CACHE_DIR`/`PIP_CACHE_DIR` under `{appData}/python_env`, keeping runtime/model/download artifacts app-scoped.
 - The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
 
 ## Tauri Plugins

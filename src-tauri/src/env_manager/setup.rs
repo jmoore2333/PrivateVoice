@@ -270,6 +270,7 @@ fn install_python(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .arg(&python_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_uv_cache_env(app, &mut cmd)?;
 
     suppress_console_window(&mut cmd);
 
@@ -312,6 +313,7 @@ fn create_venv(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .arg(&python_bin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    apply_uv_cache_env(app, &mut cmd)?;
 
     suppress_console_window(&mut cmd);
 
@@ -411,6 +413,7 @@ fn install_dependencies(app: &tauri::AppHandle, uv: &Path, gpu: &GpuTarget) -> R
         ]);
     }
 
+    apply_uv_cache_env(app, &mut cmd)?;
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     suppress_console_window(&mut cmd);
 
@@ -704,6 +707,20 @@ fn suppress_console_window(cmd: &mut Command) {
     }
     // No-op on other platforms
     let _ = cmd;
+}
+
+/// Keep uv/pip caches inside app-managed storage so uninstall cleanup can
+/// remove all setup artifacts.
+fn apply_uv_cache_env(app: &tauri::AppHandle, cmd: &mut Command) -> Result<(), String> {
+    let uv_cache_dir = paths::uv_cache_dir(app)?;
+    let pip_cache_dir = uv_cache_dir.join("pip");
+
+    std::fs::create_dir_all(&pip_cache_dir)
+        .map_err(|e| format!("Failed to create uv cache directory: {}", e))?;
+
+    cmd.env("UV_CACHE_DIR", &uv_cache_dir)
+        .env("PIP_CACHE_DIR", &pip_cache_dir);
+    Ok(())
 }
 
 /// Check if uv needs an update and report the status.

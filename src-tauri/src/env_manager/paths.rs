@@ -91,3 +91,21 @@ pub fn bundled_requirements_txt(app: &tauri::AppHandle) -> Result<PathBuf, Strin
 pub fn standalone_python_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(python_env_dir(app)?.join("python"))
 }
+
+/// Root Hugging Face cache home for this app.
+///
+/// The Python sidecar sets HF_HOME to this path so all Hub/model artifacts stay
+/// inside the app-managed data directory.
+pub fn huggingface_home_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("huggingface"))
+}
+
+/// Hugging Face Hub cache directory (`{HF_HOME}/hub`).
+pub fn huggingface_hub_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(huggingface_home_dir(app)?.join("hub"))
+}
+
+/// uv cache directory for Python/bootstrap artifacts.
+pub fn uv_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("uv-cache"))
+}

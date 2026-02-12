@@ -7,6 +7,12 @@
 
 PrivateVoice v1.0.0 is a fully local, private text-to-speech desktop application for macOS. All processing happens on-device using Qwen3-TTS models — no cloud services, no API keys, no data leaves your Mac.
 
+## Storage Update (v1.x)
+
+- Runtime/model caches are now app-scoped under the app data directory (`python_env/huggingface` for Hugging Face artifacts).
+- Existing users may still have legacy cache files in `~/.cache/huggingface/` from older builds.
+- Legacy cache can be manually removed if no other local ML applications depend on it.
+
 ## Features
 
 ### Three TTS Modes

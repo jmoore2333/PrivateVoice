@@ -247,6 +247,12 @@ async fn start_tts_server(
 
     ensure_port_available(TTS_SERVER_PORT)?;
 
+    // Keep all Hugging Face artifacts inside app-managed storage.
+    let hf_home = env_manager::paths::huggingface_home_dir(&app)?;
+    let hf_hub_cache = env_manager::paths::huggingface_hub_cache_dir(&app)?;
+    std::fs::create_dir_all(&hf_hub_cache)
+        .map_err(|e| format!("Failed to create Hugging Face cache directory: {}", e))?;
+
     // Emit startup event
     let _ = app.emit(
         "sidecar-startup",
@@ -300,6 +306,9 @@ async fn start_tts_server(
             .env("TTS_SERVER_DEV", "true")
             .env("TTS_SERVER_PORT", TTS_SERVER_PORT.to_string())
             .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
+            .env("HF_HOME", &hf_home)
+            .env("HF_HUB_CACHE", &hf_hub_cache)
+            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -393,6 +402,9 @@ async fn start_tts_server(
             .env("PYTHONUNBUFFERED", "1")
             .env("TTS_SERVER_PORT", TTS_SERVER_PORT.to_string())
             .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
+            .env("HF_HOME", &hf_home)
+            .env("HF_HUB_CACHE", &hf_hub_cache)
+            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .env("PYTHONPATH", env_dir.to_string_lossy().to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
