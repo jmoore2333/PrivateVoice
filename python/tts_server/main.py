@@ -76,6 +76,7 @@ class LoadModelRequest(BaseModel):
 
 MAX_TEXT_LENGTH = 2000
 MAX_AUDIO_SIZE = 50 * 1024 * 1024  # 50 MB
+INTERNAL_ERROR_DETAIL = "Internal server error"
 
 
 SUPPORTED_FORMATS = ("wav", "mp3")
@@ -464,10 +465,10 @@ async def load_model(request: LoadModelRequest):
         await asyncio.to_thread(model.load, request.model_id)
         state.set_phase("ready", "Model loaded and ready", 100)
         return {"status": "loaded", "model_id": request.model_id}
-    except Exception as e:
-        state.set_phase("error", str(e), 0)
-        logger.error(f"Failed to load model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        state.set_phase("error", "Model load failed", 0)
+        logger.exception("Failed to load model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-model")
@@ -518,9 +519,9 @@ async def generate_custom_voice(request: CustomVoiceRequest):
         return Response(content=audio_bytes, media_type=media_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Generation failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/generate/voice-clone")
@@ -574,18 +575,14 @@ async def generate_voice_clone(
     except HTTPException:
         raise
     except RuntimeError as e:
-        import traceback
-        tb = traceback.format_exc()
         error_msg = str(e)
-        logger.error(f"Voice clone RuntimeError:\n{tb}")
+        logger.exception("Voice clone runtime error")
         if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
-        raise HTTPException(status_code=500, detail=error_msg)
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Voice clone failed with full traceback:\n{tb}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+    except Exception:
+        logger.exception("Voice clone failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/generate/voice-design")
@@ -620,9 +617,9 @@ async def generate_voice_design(request: VoiceDesignRequest):
         return Response(content=audio_bytes, media_type=media_type)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Voice design failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Voice design failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 # ============================================================================
@@ -690,9 +687,9 @@ async def load_whisper(request: LoadWhisperRequest):
         logger.info(f"Loading Whisper model: {request.model_size}")
         await asyncio.to_thread(whisper.load, request.model_size)
         return {"status": "loaded", "model_size": request.model_size}
-    except Exception as e:
-        logger.error(f"Failed to load Whisper model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Failed to load Whisper model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-whisper")
@@ -751,9 +748,9 @@ async def transcribe(
             confidence=result.language_probability,
             duration_seconds=result.duration_seconds,
         )
-    except Exception as e:
-        logger.error(f"Transcription failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.get("/translation-status", response_model=TranslationStatusResponse)
@@ -803,9 +800,9 @@ async def load_translation(request: LoadTranslationRequest):
         return {"status": "loaded", "model_key": translator.model_key}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to load translation model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Failed to load translation model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-translation")
@@ -852,9 +849,9 @@ async def translate_text(request: TranslateTextRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Text translation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Text translation failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 # ============================================================================
