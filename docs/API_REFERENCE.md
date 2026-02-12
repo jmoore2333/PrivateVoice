@@ -40,11 +40,12 @@ Base URL: `http://127.0.0.1:8765`
 
 | Endpoint | Method | Request | Response | Notes |
 |---|---|---|---|---|
-| `/generate/custom-voice` | POST | JSON `{text, speaker, instruction, language, format, mp3_bitrate}` | audio bytes | CustomVoice mode |
+| `/generate/custom-voice` | POST | JSON `{text, speaker, instruction, language, format, mp3_bitrate, stable_lead_in}` | audio bytes | CustomVoice mode |
 | `/generate/voice-clone` | POST | multipart `{text, reference_text, reference_audio, x_vector_only_mode, language, format, mp3_bitrate}` | audio bytes | Base model required |
-| `/generate/voice-design` | POST | JSON `{text, voice_description, language, format, mp3_bitrate}` | audio bytes | VoiceDesign model required |
+| `/generate/voice-design` | POST | JSON `{text, voice_description, language, format, mp3_bitrate, stable_lead_in}` | audio bytes | VoiceDesign model required |
 
 All generation endpoints support `mp3_bitrate` parameter (default 192, validated against [128, 192, 256, 320]).
+`stable_lead_in` is optional for Custom Voice and Voice Design (default `true`), and reduces front-loaded filler/disfluency by using a more stable generation path.
 
 **Text validation:** All generation endpoints reject empty or whitespace-only text with HTTP 400. Maximum text length is 2000 characters.
 

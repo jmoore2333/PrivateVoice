@@ -9,6 +9,8 @@ export interface Settings {
   autoLoadModel: boolean;
   showWaveform: boolean;
   showDebugOnStartup: boolean;
+  stableCustomVoiceLeadIn: boolean;
+  stableVoiceDesignLeadIn: boolean;
   // Audio settings
   exportFolder: string;
   exportFormat: "wav" | "mp3";
@@ -28,6 +30,8 @@ const DEFAULT_SETTINGS: Settings = {
   autoLoadModel: true,
   showWaveform: true,
   showDebugOnStartup: false,
+  stableCustomVoiceLeadIn: true,
+  stableVoiceDesignLeadIn: true,
   // Audio settings
   exportFolder: "~/Documents/PrivateVoice",
   exportFormat: "wav",

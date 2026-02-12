@@ -647,6 +647,48 @@
           Advanced
         </h3>
         <div class="space-y-3">
+          <!-- Toggle: Stable Custom Voice lead-in -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Stable Custom Voice lead-in</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Reduces short filler speech before the target text</p>
+            </div>
+            <button
+              onclick={handleToggle("stableCustomVoiceLeadIn")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.stableCustomVoiceLeadIn ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.stableCustomVoiceLeadIn}
+              aria-label="Toggle stable Custom Voice lead-in"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.stableCustomVoiceLeadIn ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
+          <!-- Toggle: Stable Voice Design lead-in -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Stable Voice Design lead-in</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Reduces minor front filler for generated designed voices</p>
+            </div>
+            <button
+              onclick={handleToggle("stableVoiceDesignLeadIn")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.stableVoiceDesignLeadIn ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.stableVoiceDesignLeadIn}
+              aria-label="Toggle stable Voice Design lead-in"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.stableVoiceDesignLeadIn ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
           <!-- Toggle: Auto-load model -->
           <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
             <div>

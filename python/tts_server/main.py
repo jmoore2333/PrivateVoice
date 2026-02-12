@@ -89,6 +89,7 @@ class CustomVoiceRequest(BaseModel):
     language: str = "english"
     format: str = "wav"
     mp3_bitrate: int = 192
+    stable_lead_in: bool = True
 
 
 class VoiceDesignRequest(BaseModel):
@@ -97,6 +98,7 @@ class VoiceDesignRequest(BaseModel):
     language: str = "english"
     format: str = "wav"
     mp3_bitrate: int = 192
+    stable_lead_in: bool = True
 
 
 class StartupStatusResponse(BaseModel):
@@ -519,6 +521,7 @@ async def generate_custom_voice(request: CustomVoiceRequest):
             language=request.language,
             output_format=fmt,
             mp3_bitrate=bitrate,
+            stable_lead_in=request.stable_lead_in,
         )
         if is_cancelled():
             return Response(status_code=499)
@@ -617,6 +620,7 @@ async def generate_voice_design(request: VoiceDesignRequest):
             language=request.language,
             output_format=fmt,
             mp3_bitrate=bitrate,
+            stable_lead_in=request.stable_lead_in,
         )
         if is_cancelled():
             return Response(status_code=499)
