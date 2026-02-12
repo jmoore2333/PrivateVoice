@@ -130,5 +130,24 @@ jobs:
       - name: Sync SvelteKit
         run: pnpm exec svelte-kit sync
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Backend syntax smoke test
+        run: |
+          python -m py_compile \
+            python/tts_server/main.py \
+            python/tts_server/translation.py \
+            src-tauri/resources/tts_server/main.py \
+            src-tauri/resources/tts_server/translation.py
+
+      - name: Verify translation API and env refresh guards
+        run: |
+          grep -q '@app.get("/translation-status"' python/tts_server/main.py
+          grep -q '@app.get("/translation-status"' src-tauri/resources/tts_server/main.py
+          grep -q 'source_hash' src-tauri/src/env_manager/validate.rs
+
       - name: Build frontend
         run: pnpm build

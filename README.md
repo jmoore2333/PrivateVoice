@@ -18,12 +18,12 @@ This branch uses a **deferred dependency installer** architecture:
 
 This replaces the older large PyInstaller-sidecar installer model.
 
-## Platform Status (Branch `claude/fix-crossplatform-setup-AAIjb`)
+## Platform Status (February 12, 2026)
 
 | Platform | Status | Notes |
 |---|---|---|
 | Windows 11 x64 | Working and tested | NSIS installer (lightweight), first-run CUDA setup validated |
-| macOS (Apple Silicon) | Pending validation on new installer path | MPS path implemented in code |
+| macOS (Apple Silicon) | Working and validated | New deferred installer path and MPS runtime verified |
 | Linux x64 | Planned next for validation | CUDA/ROCm/XPU detection paths implemented |
 
 ## Core Features
@@ -34,6 +34,7 @@ This replaces the older large PyInstaller-sidecar installer model.
   - Voice Design
 - Model/mode compatibility guidance with one-click model switching
 - Optional Whisper auto-transcription for Voice Clone
+- Optional local text translation helpers (independent from Whisper)
 - Save to Library + Export (WAV/MP3)
 - Debug console with live logs and system info
 - Settings panel includes **Environment status** and repair/rebuild actions
@@ -96,6 +97,14 @@ Startup phases include:
 
 If setup is interrupted or corrupted, use **Settings -> Environment -> Repair/Rebuild**.
 
+### Backend sync behavior on app updates
+
+The environment marker now tracks both:
+- dependency hash (`requirements.txt`)
+- backend source hash (`tts_server/`)
+
+If either changes, the app automatically triggers environment refresh so new API endpoints are available.
+
 ## Build and Release
 
 ### Windows (PowerShell)
@@ -144,6 +153,16 @@ pnpm test:e2e
 cd python && pytest
 ```
 
+Backend syntax smoke test used in CI:
+
+```bash
+python3 -m py_compile \
+  python/tts_server/main.py \
+  python/tts_server/translation.py \
+  src-tauri/resources/tts_server/main.py \
+  src-tauri/resources/tts_server/translation.py
+```
+
 ## API
 
 Local backend base URL:
@@ -165,6 +184,10 @@ Core endpoints include:
 - `/load-whisper`
 - `/unload-whisper`
 - `/transcribe`
+- `/translation-status`
+- `/translation-models`
+- `/load-translation`
+- `/unload-translation`
 - `/translate-text`
 
 Full API details: `docs/API_REFERENCE.md`
