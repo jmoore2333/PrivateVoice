@@ -837,7 +837,7 @@
           <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
             <div class="flex justify-between items-center mb-2">
               <span class="text-sm font-medium text-[var(--color-text-primary)]">PrivateVoice</span>
-              <span class="text-sm text-[var(--color-text-muted)]">v1.0.0</span>
+              <span class="text-sm text-[var(--color-text-muted)]">v{__APP_VERSION__}</span>
             </div>
             <div class="flex flex-wrap gap-2">
               <a href="https://github.com/jmoore2333/PrivateVoice" target="_blank"
@@ -886,7 +886,7 @@
     <!-- Footer -->
     <div class="sticky bottom-0 p-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
       <p class="text-xs text-[var(--color-text-muted)] text-center">
-        PrivateVoice v1.0.0
+        PrivateVoice v{__APP_VERSION__}
       </p>
     </div>
   </div>

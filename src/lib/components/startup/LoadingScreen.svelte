@@ -230,7 +230,7 @@
   <!-- Footer -->
   <div class="absolute bottom-6 text-center">
     <p class="text-xs text-[var(--color-text-muted)] font-mono">
-      PrivateVoice v1.0.0
+      PrivateVoice v{__APP_VERSION__}
     </p>
   </div>
 </div>
