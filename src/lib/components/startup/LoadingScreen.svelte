@@ -91,17 +91,16 @@
   <!-- Logo / App name -->
   <div class="mb-10 text-center animate-fade-in">
     <div class="relative mb-6">
-      <!-- Glowing ring -->
+      <!-- Pulsing glow (matches icon's rounded-square shape) -->
       <div
-        class="absolute inset-0 w-24 h-24 mx-auto rounded-full animate-glow"
-        style="background: radial-gradient(circle, var(--color-accent-cyan-glow) 0%, transparent 70%);"
+        class="absolute inset-0 w-24 h-24 mx-auto rounded-2xl animate-glow"
       ></div>
 
       <!-- App icon -->
       <img
         src="/app-icon.png"
         alt="PrivateVoice"
-        class="relative w-24 h-24 mx-auto rounded-2xl shadow-lg"
+        class="relative w-24 h-24 mx-auto rounded-2xl"
       />
     </div>
 
