@@ -86,6 +86,21 @@ export interface WhisperModelInfo {
   download_size_mb: number;
 }
 
+export interface TranslationStatus {
+  loaded: boolean;
+  model_key: string | null;
+  model_id: string | null;
+  device: string;
+}
+
+export interface TranslationModelInfo {
+  key: string;
+  label: string;
+  model_id: string;
+  parameters: string;
+  download_size_mb: number;
+}
+
 export interface TranscriptionResult {
   text: string;
   language: string;
@@ -375,6 +390,36 @@ class TTSClient {
       method: "POST",
     });
     if (!res.ok) throw new Error("Failed to unload Whisper model");
+  }
+
+  async translationStatus(): Promise<TranslationStatus> {
+    const res = await fetch(`${this.baseUrl}/translation-status`);
+    if (!res.ok) throw new Error("Failed to get translation status");
+    return res.json();
+  }
+
+  async translationModels(): Promise<TranslationModelInfo[]> {
+    const res = await fetch(`${this.baseUrl}/translation-models`);
+    if (!res.ok) throw new Error("Failed to get translation models");
+    return res.json();
+  }
+
+  async loadTranslation(modelKey: string = "nllb-600m"): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/load-translation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_key: modelKey }),
+    });
+    if (!res.ok) {
+      throw new Error(await this.readErrorMessage(res, "Failed to load translation model"));
+    }
+  }
+
+  async unloadTranslation(): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/unload-translation`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error("Failed to unload translation model");
   }
 
   async transcribe(

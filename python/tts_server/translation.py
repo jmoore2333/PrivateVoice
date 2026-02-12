@@ -7,14 +7,23 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 
 logger = logging.getLogger("tts_server")
 
 
-NLLB_MODEL_ID = "facebook/nllb-200-distilled-600M"
+TRANSLATION_MODELS = {
+    "nllb-600m": {
+        "model_id": "facebook/nllb-200-distilled-600M",
+        "label": "NLLB Distilled 600M",
+        "parameters": "600M",
+        "download_size_mb": 1300,
+    },
+}
+
+DEFAULT_TRANSLATION_MODEL_KEY = "nllb-600m"
 
 # UI language names -> NLLB language codes
 LANGUAGE_TO_NLLB = {
@@ -50,6 +59,18 @@ def _normalize_language(language: Optional[str]) -> str:
     return normalized
 
 
+def _normalize_model_key(model_key: Optional[str]) -> str:
+    normalized = (model_key or "").strip().lower()
+    if not normalized:
+        return DEFAULT_TRANSLATION_MODEL_KEY
+    if normalized not in TRANSLATION_MODELS:
+        raise ValueError(
+            f"Unsupported translation model: {model_key}. "
+            f"Available: {sorted(TRANSLATION_MODELS.keys())}"
+        )
+    return normalized
+
+
 def _detect_source_language(text: str) -> str:
     """Simple script-based source detection for local translation."""
     if re.search(r"[\uac00-\ud7af]", text):
@@ -64,11 +85,41 @@ def _detect_source_language(text: str) -> str:
     return "english"
 
 
+def _resolve_bos_token_id(tokenizer: Any, language_code: str) -> int:
+    """Resolve BOS token ID across tokenizer variants."""
+    mapping = getattr(tokenizer, "lang_code_to_id", None)
+    if isinstance(mapping, dict):
+        token_id = mapping.get(language_code)
+        if token_id is not None and int(token_id) >= 0:
+            return int(token_id)
+
+    get_lang_id = getattr(tokenizer, "get_lang_id", None)
+    if callable(get_lang_id):
+        token_id = get_lang_id(language_code)
+        if token_id is not None and int(token_id) >= 0:
+            return int(token_id)
+
+    convert_tokens_to_ids = getattr(tokenizer, "convert_tokens_to_ids", None)
+    if callable(convert_tokens_to_ids):
+        token_id = convert_tokens_to_ids(language_code)
+        unk_token_id = getattr(tokenizer, "unk_token_id", None)
+        if (
+            token_id is not None
+            and int(token_id) >= 0
+            and (unk_token_id is None or int(token_id) != int(unk_token_id))
+        ):
+            return int(token_id)
+
+    raise RuntimeError(f"Tokenizer cannot resolve target language token: {language_code}")
+
+
 class LocalTranslator:
     """Lazy-loaded local translator using a single multilingual NLLB model."""
 
-    def __init__(self, model_id: str = NLLB_MODEL_ID):
-        self.model_id = model_id
+    def __init__(self, model_key: str = DEFAULT_TRANSLATION_MODEL_KEY):
+        resolved_model_key = _normalize_model_key(model_key)
+        self.model_key = resolved_model_key
+        self.model_id = TRANSLATION_MODELS[resolved_model_key]["model_id"]
         self._model = None
         self._tokenizer = None
         self._loaded = False
@@ -78,32 +129,44 @@ class LocalTranslator:
     def is_loaded(self) -> bool:
         return self._loaded
 
-    def load(self) -> None:
-        if self._loaded:
+    def _release_model(self) -> None:
+        if self._model is not None:
+            del self._model
+        if self._tokenizer is not None:
+            del self._tokenizer
+        self._model = None
+        self._tokenizer = None
+        self._loaded = False
+
+    def load(self, model_key: Optional[str] = None) -> None:
+        resolved_model_key = _normalize_model_key(model_key or self.model_key)
+        resolved_model_id = TRANSLATION_MODELS[resolved_model_key]["model_id"]
+
+        if self._loaded and self.model_id == resolved_model_id:
             return
 
         with self._lock:
-            if self._loaded:
+            if self._loaded and self.model_id == resolved_model_id:
                 return
+
+            if self._loaded:
+                self._release_model()
+                gc.collect()
 
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-            logger.info("Loading translation model: %s", self.model_id)
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(self.model_id)
+            logger.info("Loading translation model: %s", resolved_model_id)
+            self._tokenizer = AutoTokenizer.from_pretrained(resolved_model_id)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(resolved_model_id)
             self._model.eval()
+            self.model_key = resolved_model_key
+            self.model_id = resolved_model_id
             self._loaded = True
             logger.info("Translation model loaded")
 
     def unload(self) -> None:
         with self._lock:
-            if self._model is not None:
-                del self._model
-            if self._tokenizer is not None:
-                del self._tokenizer
-            self._model = None
-            self._tokenizer = None
-            self._loaded = False
+            self._release_model()
 
         gc.collect()
         logger.info("Translation model unloaded")
@@ -132,9 +195,7 @@ class LocalTranslator:
                 target_language=target,
             )
 
-        self.load()
-
-        if self._model is None or self._tokenizer is None:
+        if not self._loaded or self._model is None or self._tokenizer is None:
             raise RuntimeError("Translation model not loaded")
 
         tokenizer = self._tokenizer
@@ -151,7 +212,10 @@ class LocalTranslator:
         with torch.no_grad():
             generated = model.generate(
                 **encoded,
-                forced_bos_token_id=tokenizer.lang_code_to_id[LANGUAGE_TO_NLLB[target]],
+                forced_bos_token_id=_resolve_bos_token_id(
+                    tokenizer,
+                    LANGUAGE_TO_NLLB[target],
+                ),
                 max_new_tokens=512,
             )
 

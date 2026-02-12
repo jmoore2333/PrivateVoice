@@ -811,6 +811,71 @@ describe('transcribe', () => {
 });
 
 // ===========================================================================
+// translation model management
+// ===========================================================================
+
+describe('translation model management', () => {
+  it('fetches translation status', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        loaded: true,
+        model_key: 'nllb-600m',
+        model_id: 'facebook/nllb-200-distilled-600M',
+        device: 'cpu',
+      }),
+    );
+
+    const status = await ttsClient.translationStatus();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translation-status');
+    expect(status.loaded).toBe(true);
+    expect(status.model_key).toBe('nllb-600m');
+  });
+
+  it('fetches translation model list', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([
+        {
+          key: 'nllb-600m',
+          label: 'NLLB Distilled 600M',
+          model_id: 'facebook/nllb-200-distilled-600M',
+          parameters: '600M',
+          download_size_mb: 1300,
+        },
+      ]),
+    );
+
+    const models = await ttsClient.translationModels();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/translation-models');
+    expect(models).toHaveLength(1);
+    expect(models[0].key).toBe('nllb-600m');
+  });
+
+  it('loads translation model with selected key', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'loaded' }));
+
+    await ttsClient.loadTranslation('nllb-600m');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/load-translation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_key: 'nllb-600m' }),
+    });
+  });
+
+  it('unloads translation model', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'unloaded' }));
+
+    await ttsClient.unloadTranslation();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/unload-translation', {
+      method: 'POST',
+    });
+  });
+});
+
+// ===========================================================================
 // translateText
 // ===========================================================================
 

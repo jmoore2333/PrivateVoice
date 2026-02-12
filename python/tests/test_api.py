@@ -40,9 +40,11 @@ def _make_mock_whisper(*, loaded: bool = False):
     return w
 
 
-def _make_mock_translator():
+def _make_mock_translator(*, loaded: bool = False):
     t = MagicMock()
-    type(t).is_loaded = PropertyMock(return_value=False)
+    type(t).is_loaded = PropertyMock(return_value=loaded)
+    t.model_key = "nllb-600m"
+    t.model_id = "facebook/nllb-200-distilled-600M"
 
     result = MagicMock()
     result.text = "hola mundo"
@@ -850,12 +852,75 @@ class TestWhisperTranscription:
 # Local text translation
 # ---------------------------------------------------------------------------
 
+class TestTranslationModelEndpoints:
+    """Translation model status/load endpoints."""
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translation_status_unloaded(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=False)
+
+        client = _get_client()
+        resp = client.get("/translation-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["loaded"] is False
+        assert data["model_key"] is None
+        assert data["model_id"] is None
+
+    @patch("tts_server.main.get_local_translator")
+    def test_translation_status_loaded(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=True)
+
+        client = _get_client()
+        resp = client.get("/translation-status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["loaded"] is True
+        assert data["model_key"] == "nllb-600m"
+        assert data["model_id"] == "facebook/nllb-200-distilled-600M"
+
+    def test_translation_models_lists_catalog(self):
+        client = _get_client()
+        resp = client.get("/translation-models")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(m["key"] == "nllb-600m" for m in data)
+
+    @patch("tts_server.main.get_local_translator")
+    def test_load_translation_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=False)
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post("/load-translation", json={"model_key": "nllb-600m"})
+        assert resp.status_code == 200
+        mock_translator.load.assert_called_once_with("nllb-600m")
+
+    def test_load_translation_rejects_invalid_model_key(self):
+        client = _get_client()
+        resp = client.post("/load-translation", json={"model_key": "bad-model"})
+        assert resp.status_code == 400
+        assert "unknown translation model key" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
+    def test_unload_translation_success(self, mock_get_translator):
+        mock_translator = _make_mock_translator(loaded=True)
+        mock_get_translator.return_value = mock_translator
+
+        client = _get_client()
+        resp = client.post("/unload-translation")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "unloaded"
+        mock_translator.unload.assert_called_once()
+
+
 class TestTranslateText:
     """POST /translate-text."""
 
     @patch("tts_server.main.get_local_translator")
     def test_translate_text_success(self, mock_get_translator):
-        mock_translator = _make_mock_translator()
+        mock_translator = _make_mock_translator(loaded=True)
         mock_get_translator.return_value = mock_translator
 
         client = _get_client()
@@ -894,8 +959,23 @@ class TestTranslateText:
         assert "empty" in resp.json()["detail"].lower()
 
     @patch("tts_server.main.get_local_translator")
+    def test_translate_text_requires_loaded_model(self, mock_get_translator):
+        mock_get_translator.return_value = _make_mock_translator(loaded=False)
+
+        client = _get_client()
+        resp = client.post(
+            "/translate-text",
+            json={
+                "text": "hello world",
+                "target_language": "Spanish",
+            },
+        )
+        assert resp.status_code == 400
+        assert "not loaded" in resp.json()["detail"].lower()
+
+    @patch("tts_server.main.get_local_translator")
     def test_translate_text_validation_error_returns_400(self, mock_get_translator):
-        mock_translator = _make_mock_translator()
+        mock_translator = _make_mock_translator(loaded=True)
         mock_translator.translate_text.side_effect = ValueError("Target language cannot be Auto")
         mock_get_translator.return_value = mock_translator
 

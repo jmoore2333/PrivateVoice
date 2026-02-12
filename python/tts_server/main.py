@@ -41,7 +41,11 @@ from .download_tracker import get_download_tracker, DownloadProgress
 from .transcription import (
     get_whisper_model, WHISPER_MODEL_REPOS, WHISPER_MODEL_SIZES,
 )
-from .translation import get_local_translator
+from .translation import (
+    get_local_translator,
+    TRANSLATION_MODELS,
+    DEFAULT_TRANSLATION_MODEL_KEY,
+)
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
 
@@ -170,6 +174,25 @@ class TranslateTextResponse(BaseModel):
     text: str
     source_language: str
     target_language: str
+
+
+class TranslationStatusResponse(BaseModel):
+    loaded: bool
+    model_key: Optional[str]
+    model_id: Optional[str]
+    device: str
+
+
+class TranslationModelInfoResponse(BaseModel):
+    key: str
+    label: str
+    model_id: str
+    parameters: str
+    download_size_mb: int
+
+
+class LoadTranslationRequest(BaseModel):
+    model_key: str = DEFAULT_TRANSLATION_MODEL_KEY
 
 
 # ============================================================================
@@ -706,6 +729,66 @@ async def transcribe(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/translation-status", response_model=TranslationStatusResponse)
+async def translation_status():
+    """Get current local text translation model status."""
+    translator = get_local_translator()
+    return TranslationStatusResponse(
+        loaded=translator.is_loaded,
+        model_key=translator.model_key if translator.is_loaded else None,
+        model_id=translator.model_id if translator.is_loaded else None,
+        device="cpu",
+    )
+
+
+@app.get("/translation-models", response_model=List[TranslationModelInfoResponse])
+async def translation_models():
+    """List available translation model options with estimated download sizes."""
+    return [
+        TranslationModelInfoResponse(
+            key=key,
+            label=info["label"],
+            model_id=info["model_id"],
+            parameters=info["parameters"],
+            download_size_mb=info["download_size_mb"],
+        )
+        for key, info in TRANSLATION_MODELS.items()
+    ]
+
+
+@app.post("/load-translation")
+async def load_translation(request: LoadTranslationRequest):
+    """Load a local translation model."""
+    if request.model_key not in TRANSLATION_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown translation model key: {request.model_key}. "
+                f"Available: {list(TRANSLATION_MODELS.keys())}"
+            ),
+        )
+
+    translator = get_local_translator()
+
+    try:
+        logger.info("Loading translation model: %s", request.model_key)
+        await asyncio.to_thread(translator.load, request.model_key)
+        return {"status": "loaded", "model_key": translator.model_key}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to load translation model: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/unload-translation")
+async def unload_translation():
+    """Unload the local translation model to free memory."""
+    translator = get_local_translator()
+    translator.unload()
+    return {"status": "unloaded"}
+
+
 @app.post("/translate-text", response_model=TranslateTextResponse)
 async def translate_text(request: TranslateTextRequest):
     """Translate input text to a target language locally."""
@@ -719,6 +802,8 @@ async def translate_text(request: TranslateTextRequest):
         )
 
     translator = get_local_translator()
+    if not translator.is_loaded:
+        raise HTTPException(status_code=400, detail="Translation model not loaded")
 
     try:
         result = await asyncio.to_thread(
@@ -818,7 +903,14 @@ def main():
 
     # Suppress noisy polling endpoints from uvicorn access logs
     class SuppressPollingFilter(logging.Filter):
-        _suppressed = {"/health", "/startup-status", "/model-status", "/download-progress", "/whisper-status"}
+        _suppressed = {
+            "/health",
+            "/startup-status",
+            "/model-status",
+            "/download-progress",
+            "/whisper-status",
+            "/translation-status",
+        }
 
         def filter(self, record: logging.LogRecord) -> bool:
             msg = record.getMessage()

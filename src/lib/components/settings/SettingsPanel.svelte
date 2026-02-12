@@ -3,7 +3,14 @@
   import StudioButton from "$lib/components/ui/StudioButton.svelte";
   import StudioSelect from "$lib/components/ui/StudioSelect.svelte";
   import Spinner from "$lib/components/ui/Spinner.svelte";
-  import { PRESET_SPEAKERS, ttsClient, type WhisperStatus, type WhisperModelInfo } from "$lib/api/ttsClient";
+  import {
+    PRESET_SPEAKERS,
+    ttsClient,
+    type WhisperStatus,
+    type WhisperModelInfo,
+    type TranslationStatus,
+    type TranslationModelInfo,
+  } from "$lib/api/ttsClient";
   import { MODEL_OPTIONS } from "$lib/stores/ttsStore.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
 
@@ -18,6 +25,26 @@
     whisperModels.map((m) => ({
       value: m.size,
       label: `${m.size} (${m.download_size_mb >= 1000 ? `${(m.download_size_mb / 1000).toFixed(1)} GB` : `${m.download_size_mb} MB`})`,
+      description: m.parameters,
+    }))
+  );
+
+  // Translation state
+  let translationStatus = $state<TranslationStatus | null>(null);
+  let translationModels = $state<TranslationModelInfo[]>([]);
+  let selectedTranslationModel = $state("nllb-600m");
+  let isLoadingTranslation = $state(false);
+  let translationModelError = $state<string | null>(null);
+
+  function formatModelSize(mb: number): string {
+    if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
+    return `${mb} MB`;
+  }
+
+  const translationModelOptions = $derived(
+    translationModels.map((m) => ({
+      value: m.key,
+      label: `${m.label} (est. ${formatModelSize(m.download_size_mb)})`,
       description: m.parameters,
     }))
   );
@@ -65,6 +92,68 @@
     }
   }
 
+  async function fetchTranslationState() {
+    try {
+      translationModelError = null;
+      const [status, models] = await Promise.all([
+        ttsClient.translationStatus(),
+        ttsClient.translationModels(),
+      ]);
+      translationStatus = status;
+      translationModels = models;
+      if (status.loaded && status.model_key) {
+        selectedTranslationModel = status.model_key;
+      } else if (models.length > 0 && !models.some((model) => model.key === selectedTranslationModel)) {
+        selectedTranslationModel = models[0].key;
+      }
+    } catch (e) {
+      translationModelError = formatTranslationApiError(
+        e,
+        "Failed to fetch translation model status",
+      );
+    }
+  }
+
+  async function handleLoadTranslation() {
+    isLoadingTranslation = true;
+    translationModelError = null;
+    try {
+      await ttsClient.loadTranslation(selectedTranslationModel);
+      translationStatus = await ttsClient.translationStatus();
+    } catch (e) {
+      translationModelError = formatTranslationApiError(
+        e,
+        "Failed to load translation model",
+      );
+    } finally {
+      isLoadingTranslation = false;
+    }
+  }
+
+  async function handleUnloadTranslation() {
+    isLoadingTranslation = true;
+    translationModelError = null;
+    try {
+      await ttsClient.unloadTranslation();
+      translationStatus = await ttsClient.translationStatus();
+    } catch (e) {
+      translationModelError = formatTranslationApiError(
+        e,
+        "Failed to unload translation model",
+      );
+    } finally {
+      isLoadingTranslation = false;
+    }
+  }
+
+  function formatTranslationApiError(error: unknown, fallback: string): string {
+    const message = error instanceof Error ? error.message : fallback;
+    if (message === "Not Found") {
+      return "Translation API not found in current backend environment. Run Environment > Repair (re-verify), then restart the app.";
+    }
+    return message;
+  }
+
   function handleWhisperToggle() {
     const enabling = !settingsStore.state.enableWhisper;
     settingsStore.updateSetting("enableWhisper", enabling);
@@ -73,10 +162,25 @@
     }
   }
 
+  function handleTranslationToggle() {
+    const enabling = !settingsStore.state.enableTranslation;
+    settingsStore.updateSetting("enableTranslation", enabling);
+    if (enabling) {
+      fetchTranslationState();
+    }
+  }
+
   // Fetch whisper state when panel opens if enabled
   $effect(() => {
     if (settingsStore.isOpen && settingsStore.state.enableWhisper) {
       fetchWhisperState();
+    }
+  });
+
+  // Fetch translation state when panel opens if enabled
+  $effect(() => {
+    if (settingsStore.isOpen && settingsStore.state.enableTranslation) {
+      fetchTranslationState();
     }
   });
 
@@ -431,17 +535,85 @@
             {/if}
           </div>
 
-          <!-- Translation note -->
-          <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
-            <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation helpers</span>
-            {#if settingsStore.state.enableWhisper}
-              <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                Enabled with Auto-transcription. You can translate text-to-generate to the selected speech language in all modes.
-              </p>
-            {:else}
-              <p class="text-xs text-[var(--color-text-muted)] mt-1">
-                Enable Auto-transcription to unlock local translation helpers.
-              </p>
+          <!-- Translation helpers -->
+          <div class="rounded-lg bg-[var(--color-bg-elevated)] overflow-hidden">
+            <label class="flex items-center justify-between p-3 cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+              <div>
+                <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation helpers</span>
+                <p class="text-xs text-[var(--color-text-muted)]">
+                  Local text translation to the selected speech language
+                </p>
+              </div>
+              <button
+                onclick={handleTranslationToggle}
+                class="relative w-11 h-6 rounded-full transition-colors
+                  {settingsStore.state.enableTranslation ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+                role="switch"
+                aria-checked={settingsStore.state.enableTranslation}
+                aria-label="Toggle text translation helpers"
+              >
+                <span
+                  class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                    {settingsStore.state.enableTranslation ? 'translate-x-5' : ''}"
+                ></span>
+              </button>
+            </label>
+
+            {#if settingsStore.state.enableTranslation}
+              <div class="px-3 pb-3 space-y-3 border-t border-[var(--color-border-subtle)]">
+                <div class="pt-3">
+                  <StudioSelect
+                    value={selectedTranslationModel}
+                    options={translationModelOptions.length > 0 ? translationModelOptions : [{ value: "nllb-600m", label: "NLLB Distilled 600M (est. 1.3 GB)", description: "600M" }]}
+                    label="Translation Model"
+                    disabled={isLoadingTranslation || translationStatus?.loaded === true}
+                    onchange={(v) => { selectedTranslationModel = v; }}
+                  />
+                </div>
+
+                <div class="flex items-center gap-3">
+                  {#if translationStatus?.loaded}
+                    <StudioButton
+                      variant="secondary"
+                      size="sm"
+                      loading={isLoadingTranslation}
+                      onclick={handleUnloadTranslation}
+                      class="flex-1"
+                    >
+                      Unload
+                    </StudioButton>
+                  {:else}
+                    <StudioButton
+                      variant="primary"
+                      size="sm"
+                      loading={isLoadingTranslation}
+                      onclick={handleLoadTranslation}
+                      class="flex-1"
+                    >
+                      {isLoadingTranslation ? 'Loading...' : 'Load Model'}
+                    </StudioButton>
+                  {/if}
+                </div>
+
+                <div class="flex items-center gap-2 text-xs">
+                  {#if isLoadingTranslation}
+                    <Spinner size="sm" />
+                    <span class="text-[var(--color-text-muted)]">Downloading and loading translation model...</span>
+                  {:else if translationStatus?.loaded}
+                    <span class="w-2 h-2 rounded-full bg-[var(--color-success)]"></span>
+                    <span class="text-[var(--color-text-secondary)]">
+                      Model: {translationStatus.model_key} &bull; Device: {translationStatus.device}
+                    </span>
+                  {:else}
+                    <span class="w-2 h-2 rounded-full bg-[var(--color-text-muted)]"></span>
+                    <span class="text-[var(--color-text-muted)]">No translation model loaded</span>
+                  {/if}
+                </div>
+
+                {#if translationModelError}
+                  <p class="text-xs text-[var(--color-error)]">{translationModelError}</p>
+                {/if}
+              </div>
             {/if}
           </div>
         </div>

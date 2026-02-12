@@ -575,7 +575,7 @@
   }
 
   async function handleTranslateInputText() {
-    if (!settingsStore.state.enableWhisper) return;
+    if (!settingsStore.state.enableTranslation) return;
 
     if (!localText.trim()) {
       textTranslationError = "Enter text to translate";
@@ -590,6 +590,12 @@
     isTranslatingText = true;
     textTranslationError = null;
     try {
+      const translationStatus = await ttsClient.translationStatus();
+      if (!translationStatus.loaded) {
+        textTranslationError = "Translation model is not loaded. Open Settings > Optional Features > Translation helpers and click Load Model.";
+        return;
+      }
+
       const result = await ttsClient.translateText(localText, localLanguage, "auto");
       localText = result.text;
       ttsStore.setText(result.text);
@@ -675,7 +681,7 @@
           bind:language={localLanguage}
           bind:speaker={localSpeaker}
           bind:instruction={localInstruction}
-          hasTranslation={settingsStore.state.enableWhisper}
+          hasTranslation={settingsStore.state.enableTranslation}
           {isTranslatingText}
           {textTranslationError}
           modelSupported={customVoiceModelSupported}
@@ -707,7 +713,7 @@
           {elapsedTime}
           hasWhisper={settingsStore.state.enableWhisper}
           hasTranslation={settingsStore.state.enableWhisper}
-          canTranslateText={settingsStore.state.enableWhisper}
+          canTranslateText={settingsStore.state.enableTranslation}
           {isTranscribing}
           {transcriptionError}
           {translationText}
@@ -730,7 +736,7 @@
           bind:text={localText}
           bind:language={localLanguage}
           bind:voiceDescription={localVoiceDescription}
-          hasTranslation={settingsStore.state.enableWhisper}
+          hasTranslation={settingsStore.state.enableTranslation}
           {isTranslatingText}
           {textTranslationError}
           isGenerating={ttsState.isGenerating}
