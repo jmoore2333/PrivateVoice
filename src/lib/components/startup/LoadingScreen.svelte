@@ -176,13 +176,39 @@
     </div>
   {/if}
 
-  <div class="mt-6 animate-slide-up">
-    <button
-      class="text-xs text-[var(--color-accent)] hover:underline"
-      onclick={() => showDetails = !showDetails}
+  <div class="mt-6 animate-slide-up flex flex-col items-center gap-3 text-xs">
+    <div class="flex items-center gap-3">
+      <button
+        class="text-[var(--color-accent)] hover:underline"
+        onclick={() => showDetails = !showDetails}
+      >
+        {showDetails ? "Hide startup details" : "Show startup details"}
+      </button>
+      <span class="text-[var(--color-text-muted)]">•</span>
+      <a
+        href="https://github.com/jmoore2333/PrivateVoice"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-[var(--color-accent)] hover:underline"
+      >
+        GitHub
+      </a>
+    </div>
+
+    <a
+      href="https://www.buymeacoffee.com/jmoore2333"
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="Buy Me A Coffee"
+      class="inline-block"
     >
-      {showDetails ? "Hide startup details" : "Show startup details"}
-    </button>
+      <img
+        src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
+        alt="Buy Me A Coffee"
+        class="h-12 w-auto"
+        loading="lazy"
+      />
+    </a>
   </div>
 
   {#if showDetails}

@@ -799,10 +799,28 @@
             </div>
             <div class="flex flex-wrap gap-2">
               <a href="https://github.com/jmoore2333/PrivateVoice" target="_blank"
+                 rel="noopener noreferrer"
                  class="text-sm text-[var(--color-accent)] hover:underline">GitHub</a>
               <span class="text-[var(--color-text-muted)]">•</span>
               <a href="https://github.com/jmoore2333/PrivateVoice/issues" target="_blank"
+                 rel="noopener noreferrer"
                  class="text-sm text-[var(--color-accent)] hover:underline">Report Issue</a>
+            </div>
+            <div class="mt-3">
+              <a
+                href="https://www.buymeacoffee.com/jmoore2333"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Buy Me A Coffee"
+                class="inline-block"
+              >
+                <img
+                  src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
+                  alt="Buy Me A Coffee"
+                  class="h-12 w-auto"
+                  loading="lazy"
+                />
+              </a>
             </div>
           </div>
         </div>
