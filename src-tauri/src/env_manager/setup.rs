@@ -271,7 +271,7 @@ fn install_python(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_uv_cache_env(app, &mut cmd)?;
-
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let mut child = cmd
@@ -314,7 +314,7 @@ fn create_venv(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     apply_uv_cache_env(app, &mut cmd)?;
-
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd
@@ -414,6 +414,7 @@ fn install_dependencies(app: &tauri::AppHandle, uv: &Path, gpu: &GpuTarget) -> R
     }
 
     apply_uv_cache_env(app, &mut cmd)?;
+    clean_appimage_env(&mut cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     suppress_console_window(&mut cmd);
 
@@ -462,7 +463,7 @@ print('VERIFICATION_OK')
         .env("PYTHONPATH", env_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd
@@ -709,6 +710,36 @@ fn suppress_console_window(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// Remove environment variables injected by the Linux AppImage wrapper.
+///
+/// AppImages bundle libraries and set `LD_LIBRARY_PATH`, `PYTHONHOME`,
+/// `PYTHONPATH`, etc. to point at the mounted SquashFS image.  These leak
+/// into every subprocess we spawn and cause two classes of failure:
+///
+///   1. `PYTHONHOME` makes the standalone Python 3.11 look for its stdlib
+///      inside the AppImage instead of its own prefix → immediate crash.
+///   2. `LD_LIBRARY_PATH` can make uv or Python pick up incompatible
+///      bundled copies of glibc/libstdc++ → segfaults or subtle errors.
+///
+/// On macOS and Windows this is a no-op because AppImage is Linux-only.
+fn clean_appimage_env(cmd: &mut Command) {
+    #[cfg(target_os = "linux")]
+    {
+        // Remove variables that break Python/uv when inherited from AppImage.
+        cmd.env_remove("PYTHONHOME");
+        cmd.env_remove("PYTHONDONTWRITEBYTECODE");
+
+        // Only strip LD_LIBRARY_PATH if we're actually inside an AppImage
+        // (APPIMAGE or APPDIR is set by the AppRun wrapper).
+        if std::env::var_os("APPIMAGE").is_some() || std::env::var_os("APPDIR").is_some() {
+            cmd.env_remove("LD_LIBRARY_PATH");
+            // GI_TYPELIB_PATH can also leak and confuse gobject-introspection
+            cmd.env_remove("GI_TYPELIB_PATH");
+        }
+    }
+    let _ = cmd;
+}
+
 /// Keep uv/pip caches inside app-managed storage so uninstall cleanup can
 /// remove all setup artifacts.
 fn apply_uv_cache_env(app: &tauri::AppHandle, cmd: &mut Command) -> Result<(), String> {
@@ -729,6 +760,7 @@ pub fn check_uv_version(uv: &Path) -> Result<(String, bool), String> {
     cmd.args(["--version"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd

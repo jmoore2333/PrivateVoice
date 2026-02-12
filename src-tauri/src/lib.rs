@@ -583,6 +583,19 @@ async fn start_tts_server(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // Remove AppImage-injected env vars that break Python/uv on Linux.
+        #[cfg(target_os = "linux")]
+        {
+            cmd.env_remove("PYTHONHOME");
+            cmd.env_remove("PYTHONDONTWRITEBYTECODE");
+            if std::env::var_os("APPIMAGE").is_some()
+                || std::env::var_os("APPDIR").is_some()
+            {
+                cmd.env_remove("LD_LIBRARY_PATH");
+                cmd.env_remove("GI_TYPELIB_PATH");
+            }
+        }
+
         // Suppress console window on Windows
         #[cfg(target_os = "windows")]
         {
