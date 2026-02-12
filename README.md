@@ -118,9 +118,11 @@ Primary app data roots:
 - Windows: `%APPDATA%\\com.privatevoice.desktop\\`
 - Linux: `~/.local/share/com.privatevoice.desktop/`
 
-Windows NSIS uninstall now removes:
-- `%APPDATA%\\com.privatevoice.desktop\\`
-- `%LOCALAPPDATA%\\com.privatevoice.desktop\\` (WebView profile/cache)
+Windows NSIS uninstall prompts with two choices:
+1. **Keep or delete your voice library** — saved voices are irreplaceable, so you are asked first.
+2. **Remove AI models and runtime** — if you kept the library, a second prompt offers to free ~2-10 GB of re-downloadable data (models, Python, caches).
+
+Empty parent directories are cleaned up automatically after uninstall.
 
 macOS `.app` deletion and Linux AppImage deletion do not run a platform uninstaller; remove the app data directory manually if you want a full wipe.
 
