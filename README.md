@@ -116,8 +116,9 @@ If either changes, the app automatically triggers environment refresh so new API
 This script:
 1. downloads `uv.exe` (`scripts/download-uv.ps1`)
 2. stages Python source/resources in `src-tauri/resources/`
-3. runs `pnpm install`
-4. builds Tauri installer (`nsis` by default)
+3. verifies `python/requirements.txt` SHA-256 against `python/requirements.sha256`
+4. runs `pnpm install`
+5. builds Tauri installer (`nsis` by default)
 
 ### macOS/Linux/Windows via bash
 
@@ -126,6 +127,27 @@ This script:
 ```
 
 This script performs the same resource-staging flow using `scripts/download-uv.sh`.
+
+### Dependency Hash Gate (Release Builds)
+
+Release builds enforce a dependency manifest integrity gate:
+
+- `python/requirements.txt` must match `python/requirements.sha256`
+- staged `src-tauri/resources/requirements.txt` must match the same hash
+
+When updating Python dependencies, regenerate the tracked hash before building:
+
+```bash
+./scripts/update-requirements-hash.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\update-requirements-hash.ps1
+```
+
+Then re-run your release build script.
 
 ## Development
 

@@ -10,7 +10,7 @@
     "frontendDist": "../build"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "PrivateVoice",
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765 http://localhost:8765 ws://localhost:8765 http://localhost:1420 ws://localhost:1421 http://localhost:9223 ws://localhost:9223 http://127.0.0.1:9223 ws://127.0.0.1:9223 https://tauri.localhost tauri://localhost; img-src 'self' data: blob: asset: https://asset.localhost; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self';"
     }
   },
   "bundle": {

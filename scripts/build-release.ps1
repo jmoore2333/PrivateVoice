@@ -75,6 +75,11 @@ if (Test-Path $ReqSrc) {
     exit 1
 }
 
+# Verify staged dependency manifest hash
+Write-Host "Verifying dependency hash..."
+& "$ScriptDir\verify-dependency-hash.ps1"
+Write-Host ""
+
 Write-Host ""
 
 # -------------------------------------------------------

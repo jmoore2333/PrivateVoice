@@ -27,9 +27,11 @@ pnpm check                      # TypeScript/Svelte type checking
 cd python && pytest tests/      # Python backend tests
 
 # Building
+./scripts/update-requirements-hash.sh   # Refresh tracked SHA-256 after Python dependency edits
+.\scripts\update-requirements-hash.ps1  # Windows PowerShell equivalent
 ./python/build_sidecar.sh       # Build Python sidecar via PyInstaller
 pnpm tauri build                # Build Tauri app (requires sidecar built first)
-./scripts/build-release.sh      # Full release build (sidecar + Tauri + DMG)
+./scripts/build-release.sh      # Full release build (includes dependency hash verification)
 ```
 
 ## Architecture
@@ -83,6 +85,7 @@ Voice library uses two-tier storage:
 - **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright (90 tests across 4 spec files) in `e2e/` directory with full Tauri + API mocking (CI-compatible). Visual validation generates 46 screenshots at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080) with an HTML report at `docs/e2e-visual-validation-report.html`.
 - **Pre-commit hook** (Husky) runs `svelte-check` on staged `.ts`/`.svelte` files.
 - **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
+- **Dependency integrity gate**: if `python/requirements.txt` changes, run `./scripts/update-requirements-hash.sh` (or `.\scripts\update-requirements-hash.ps1` on Windows) and commit `python/requirements.sha256`. Release builds validate this hash and fail on mismatch.
 - The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
 
 ## Tauri Plugins

@@ -4,6 +4,7 @@ All tests run WITHOUT real model / torch / GPU dependencies.
 The model singleton is replaced with a mock via ``unittest.mock.patch``.
 """
 
+import os
 from unittest.mock import patch, MagicMock, PropertyMock
 
 import pytest
@@ -61,7 +62,27 @@ def _get_client():
     ``app`` object picks up the mocked dependencies.
     """
     from tts_server.main import app
-    return TestClient(app, raise_server_exceptions=False)
+    token = os.environ.get("TTS_ACCESS_TOKEN", "test-token")
+    return TestClient(
+        app,
+        raise_server_exceptions=False,
+        headers={"X-API-Key": token},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Auth middleware
+# ---------------------------------------------------------------------------
+
+class TestAuthMiddleware:
+    """Global API key checks."""
+
+    def test_missing_api_key_returns_401(self):
+        from tts_server.main import app
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/health")
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Unauthorized"
 
 
 # ---------------------------------------------------------------------------

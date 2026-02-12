@@ -157,6 +157,10 @@ body {
     var(--color-bg-deep);
 }
 
+.svelte-body {
+  display: contents;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

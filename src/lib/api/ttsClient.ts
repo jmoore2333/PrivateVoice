@@ -134,10 +134,29 @@ const GENERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 class TTSClient {
   private baseUrl: string;
+  private authToken: string | null = null;
   private _abortController: AbortController | null = null;
 
   constructor(baseUrl: string = BASE_URL) {
     this.baseUrl = baseUrl;
+  }
+
+  setAccessToken(token: string | null): void {
+    const trimmed = token?.trim();
+    this.authToken = trimmed ? trimmed : null;
+  }
+
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+    if (!this.authToken) {
+      if (Object.keys(init).length === 0) {
+        return fetch(`${this.baseUrl}${path}`);
+      }
+      return fetch(`${this.baseUrl}${path}`, init);
+    }
+
+    const headers = new Headers(init.headers);
+    headers.set("X-API-Key", this.authToken);
+    return fetch(`${this.baseUrl}${path}`, { ...init, headers });
   }
 
   /** Create a signal for generation requests with timeout + manual abort. */
@@ -196,13 +215,13 @@ class TTSClient {
   // ============================================================================
 
   async health(): Promise<HealthResponse> {
-    const res = await fetch(`${this.baseUrl}/health`);
+    const res = await this.request("/health");
     if (!res.ok) throw new Error("Server not available");
     return res.json();
   }
 
   async getStartupStatus(): Promise<StartupStatus> {
-    const res = await fetch(`${this.baseUrl}/startup-status`);
+    const res = await this.request("/startup-status");
     if (!res.ok) {
       const error = new Error("Failed to get startup status") as Error & { status?: number };
       error.status = res.status;
@@ -212,13 +231,13 @@ class TTSClient {
   }
 
   async getDownloadProgress(): Promise<DownloadProgress> {
-    const res = await fetch(`${this.baseUrl}/download-progress`);
+    const res = await this.request("/download-progress");
     if (!res.ok) throw new Error("Failed to get download progress");
     return res.json();
   }
 
   async getModelStatus(): Promise<ModelStatus> {
-    const res = await fetch(`${this.baseUrl}/model-status`);
+    const res = await this.request("/model-status");
     if (!res.ok) throw new Error("Failed to get model status");
     return res.json();
   }
@@ -228,7 +247,7 @@ class TTSClient {
   // ============================================================================
 
   async getSystemInfo(): Promise<SystemInfo> {
-    const res = await fetch(`${this.baseUrl}/system-info`);
+    const res = await this.request("/system-info");
     if (!res.ok) throw new Error("Failed to get system info");
     return res.json();
   }
@@ -237,7 +256,7 @@ class TTSClient {
     const params = new URLSearchParams({ count: count.toString() });
     if (level) params.append("level", level);
 
-    const res = await fetch(`${this.baseUrl}/logs?${params}`);
+    const res = await this.request(`/logs?${params}`);
     if (!res.ok) throw new Error("Failed to get logs");
     return res.json();
   }
@@ -247,20 +266,20 @@ class TTSClient {
   // ============================================================================
 
   async getSpeakers(): Promise<string[]> {
-    const res = await fetch(`${this.baseUrl}/speakers`);
+    const res = await this.request("/speakers");
     if (!res.ok) throw new Error("Failed to get speakers");
     const data = await res.json();
     return data.speakers;
   }
 
   async getSpeakersInfo(): Promise<SpeakerInfo[]> {
-    const res = await fetch(`${this.baseUrl}/speakers-info`);
+    const res = await this.request("/speakers-info");
     if (!res.ok) throw new Error("Failed to get speaker info");
     return res.json();
   }
 
   async getLanguages(): Promise<string[]> {
-    const res = await fetch(`${this.baseUrl}/languages`);
+    const res = await this.request("/languages");
     if (!res.ok) throw new Error("Failed to get languages");
     const data = await res.json();
     return data.languages;
@@ -271,7 +290,7 @@ class TTSClient {
   // ============================================================================
 
   async loadModel(modelId: string = "0.6b"): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/load-model`, {
+    const res = await this.request("/load-model", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model_id: modelId }),
@@ -282,7 +301,7 @@ class TTSClient {
   }
 
   async unloadModel(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/unload-model`, {
+    const res = await this.request("/unload-model", {
       method: "POST",
     });
     if (!res.ok) throw new Error("Failed to unload model");
@@ -295,7 +314,7 @@ class TTSClient {
   async generateCustomVoice(request: CustomVoiceRequest): Promise<Blob> {
     const signal = this.createGenerationSignal();
     try {
-      const res = await fetch(`${this.baseUrl}/generate/custom-voice`, {
+      const res = await this.request("/generate/custom-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
@@ -326,7 +345,7 @@ class TTSClient {
     if (options?.format) formData.append("format", options.format);
 
     try {
-      const res = await fetch(`${this.baseUrl}/generate/voice-clone`, {
+      const res = await this.request("/generate/voice-clone", {
         method: "POST",
         body: formData,
         signal,
@@ -343,7 +362,7 @@ class TTSClient {
   async generateVoiceDesign(request: VoiceDesignRequest): Promise<Blob> {
     const signal = this.createGenerationSignal();
     try {
-      const res = await fetch(`${this.baseUrl}/generate/voice-design`, {
+      const res = await this.request("/generate/voice-design", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
@@ -363,19 +382,19 @@ class TTSClient {
   // ============================================================================
 
   async whisperStatus(): Promise<WhisperStatus> {
-    const res = await fetch(`${this.baseUrl}/whisper-status`);
+    const res = await this.request("/whisper-status");
     if (!res.ok) throw new Error("Failed to get Whisper status");
     return res.json();
   }
 
   async whisperModels(): Promise<WhisperModelInfo[]> {
-    const res = await fetch(`${this.baseUrl}/whisper-models`);
+    const res = await this.request("/whisper-models");
     if (!res.ok) throw new Error("Failed to get Whisper models");
     return res.json();
   }
 
   async loadWhisper(modelSize: string = "base"): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/load-whisper`, {
+    const res = await this.request("/load-whisper", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model_size: modelSize }),
@@ -386,26 +405,26 @@ class TTSClient {
   }
 
   async unloadWhisper(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/unload-whisper`, {
+    const res = await this.request("/unload-whisper", {
       method: "POST",
     });
     if (!res.ok) throw new Error("Failed to unload Whisper model");
   }
 
   async translationStatus(): Promise<TranslationStatus> {
-    const res = await fetch(`${this.baseUrl}/translation-status`);
+    const res = await this.request("/translation-status");
     if (!res.ok) throw new Error("Failed to get translation status");
     return res.json();
   }
 
   async translationModels(): Promise<TranslationModelInfo[]> {
-    const res = await fetch(`${this.baseUrl}/translation-models`);
+    const res = await this.request("/translation-models");
     if (!res.ok) throw new Error("Failed to get translation models");
     return res.json();
   }
 
   async loadTranslation(modelKey: string = "nllb-600m"): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/load-translation`, {
+    const res = await this.request("/load-translation", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model_key: modelKey }),
@@ -416,7 +435,7 @@ class TTSClient {
   }
 
   async unloadTranslation(): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/unload-translation`, {
+    const res = await this.request("/unload-translation", {
       method: "POST",
     });
     if (!res.ok) throw new Error("Failed to unload translation model");
@@ -435,7 +454,7 @@ class TTSClient {
       formData.append("task", options.task);
     }
 
-    const res = await fetch(`${this.baseUrl}/transcribe`, {
+    const res = await this.request("/transcribe", {
       method: "POST",
       body: formData,
     });
@@ -450,7 +469,7 @@ class TTSClient {
     targetLanguage: string,
     sourceLanguage: string = "auto",
   ): Promise<TranslateTextResult> {
-    const res = await fetch(`${this.baseUrl}/translate-text`, {
+    const res = await this.request("/translate-text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -470,7 +489,7 @@ class TTSClient {
   // ============================================================================
 
   async shutdown(): Promise<void> {
-    await fetch(`${this.baseUrl}/shutdown`, { method: "POST" });
+    await this.request("/shutdown", { method: "POST" });
   }
 }
 

@@ -1,6 +1,7 @@
 """PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
 import asyncio
+import hmac
 import logging
 import os
 import platform
@@ -27,9 +28,9 @@ import torch
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS, request_cancel, clear_cancel, is_cancelled
@@ -250,6 +251,11 @@ async def lifespan(app: FastAPI):
 
 
 _is_dev = os.environ.get("TTS_SERVER_DEV", "false").lower() == "true"
+_access_token = os.environ.get("TTS_ACCESS_TOKEN", "").strip()
+_auth_enabled = bool(_access_token)
+
+if not _auth_enabled and not _is_dev:
+    raise RuntimeError("Missing TTS_ACCESS_TOKEN. Refusing to start without API authentication.")
 
 app = FastAPI(
     title="PrivateVoice Server",
@@ -260,15 +266,36 @@ app = FastAPI(
     redoc_url="/redoc" if _is_dev else None,
 )
 
-# Enable CORS — server is localhost-only so all origins are safe.
-# Tauri WebView origins vary by platform (tauri://localhost on macOS,
-# https://tauri.localhost on Windows/Linux) and may change across versions.
+_allowed_origins = [
+    "tauri://localhost",
+    "https://tauri.localhost",
+    "http://tauri.localhost",
+    "http://localhost",
+    "http://127.0.0.1",
+]
+if _is_dev:
+    _allowed_origins.extend([
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+    ])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+@app.middleware("http")
+async def validate_api_key(request: Request, call_next):
+    if not _auth_enabled:
+        return await call_next(request)
+
+    provided = request.headers.get("X-API-Key", "")
+    if not provided or not hmac.compare_digest(provided, _access_token):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 
 # ============================================================================
@@ -553,12 +580,12 @@ async def generate_voice_clone(
         logger.error(f"Voice clone RuntimeError:\n{tb}")
         if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
-        raise HTTPException(status_code=500, detail=f"{error_msg}\n\nTraceback:\n{tb}")
+        raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
         logger.error(f"Voice clone failed with full traceback:\n{tb}")
-        raise HTTPException(status_code=500, detail=f"{e}\n\nTraceback:\n{tb}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/generate/voice-design")

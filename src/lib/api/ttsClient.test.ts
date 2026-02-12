@@ -35,6 +35,7 @@ const fetchMock = vi.fn<(...args: Parameters<typeof fetch>) => Promise<Response>
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
+  ttsClient.setAccessToken(null);
 });
 
 afterEach(() => {
@@ -42,7 +43,21 @@ afterEach(() => {
   if (ttsClient.isGenerating) {
     ttsClient.abortGeneration();
   }
+  ttsClient.setAccessToken(null);
   vi.restoreAllMocks();
+});
+
+describe('request authentication', () => {
+  it('adds X-API-Key when an access token is configured', async () => {
+    ttsClient.setAccessToken('token-123');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '1.0.0' }));
+
+    await ttsClient.health();
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(options?.headers).toBeInstanceOf(Headers);
+    expect((options?.headers as Headers).get('X-API-Key')).toBe('token-123');
+  });
 });
 
 // ===========================================================================

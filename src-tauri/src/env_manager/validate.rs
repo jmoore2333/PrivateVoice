@@ -12,13 +12,9 @@ pub enum SetupState {
     /// No marker or no venv — full setup required.
     NeedsSetup,
     /// Marker exists but requirements hash changed (app update) — update required.
-    NeedsUpdate {
-        reason: String,
-    },
+    NeedsUpdate { reason: String },
     /// Marker exists but venv Python is missing/broken — repair required.
-    Corrupted {
-        reason: String,
-    },
+    Corrupted { reason: String },
 }
 
 /// Marker file structure (JSON).
@@ -73,7 +69,9 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
 
     println!(
         "[env_manager::validate] Marker found: version={}, gpu={}, hash={}",
-        marker.version, marker.gpu_target, &marker.requirements_hash[..8]
+        marker.version,
+        marker.gpu_target,
+        &marker.requirements_hash[..8]
     );
 
     // Check 3: Does the venv Python binary exist?
@@ -135,7 +133,8 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
                 &current_source_hash[..8]
             );
             return Ok(SetupState::NeedsUpdate {
-                reason: "Application backend source changed — syncing Python server code.".to_string(),
+                reason: "Application backend source changed — syncing Python server code."
+                    .to_string(),
             });
         }
         None => {
@@ -259,8 +258,7 @@ pub fn repair_environment(app: &tauri::AppHandle, delete_venv: bool) -> Result<(
     if delete_venv {
         let venv = paths::venv_dir(app)?;
         if venv.exists() {
-            std::fs::remove_dir_all(&venv)
-                .map_err(|e| format!("Failed to delete venv: {}", e))?;
+            std::fs::remove_dir_all(&venv).map_err(|e| format!("Failed to delete venv: {}", e))?;
             println!("[env_manager::validate] Deleted venv at {:?}", venv);
         }
 

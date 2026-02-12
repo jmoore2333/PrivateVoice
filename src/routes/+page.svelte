@@ -263,6 +263,8 @@
   async function startServer() {
     try {
       appStore.setStartupPhase("initializing", "Starting Python environment...");
+      const accessToken = await invoke<string>("get_tts_access_token");
+      ttsClient.setAccessToken(accessToken);
       await invoke("start_tts_server");
 
       // Attempt an immediate health check to unblock UI even if startup-status is delayed.

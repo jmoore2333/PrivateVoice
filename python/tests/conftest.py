@@ -1,5 +1,6 @@
 """Shared fixtures for TTS server tests."""
 
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -67,6 +68,7 @@ def _install_other_mocks():
 
 
 # Install mocks before any tts_server import
+os.environ.setdefault("TTS_ACCESS_TOKEN", "test-token")
 _torch_mock = _install_torch_mock()
 _install_other_mocks()
 
