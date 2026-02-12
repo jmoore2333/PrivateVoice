@@ -181,6 +181,7 @@ function createTTSStore() {
             instruction: state.instruction,
             language,
             format,
+            stable_lead_in: settingsStore.state.stableCustomVoiceLeadIn,
           });
           break;
 
@@ -208,6 +209,7 @@ function createTTSStore() {
             voice_description: state.voiceDescription,
             language,
             format,
+            stable_lead_in: settingsStore.state.stableVoiceDesignLeadIn,
           });
           break;
       }

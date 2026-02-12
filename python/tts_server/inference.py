@@ -174,6 +174,7 @@ class TTSModel:
         language: str = "english",
         output_format: str = "wav",
         mp3_bitrate: int = 192,
+        stable_lead_in: bool = True,
     ) -> tuple[bytes, str]:
         """
         Generate speech using a preset speaker voice.
@@ -195,13 +196,19 @@ class TTSModel:
         if speaker not in PRESET_SPEAKERS:
             raise ValueError(f"Unknown speaker: {speaker}. Available: {PRESET_SPEAKERS}")
 
+        generate_kwargs = {
+            "text": text,
+            "language": language,
+            "speaker": speaker,
+            "instruct": instruction if instruction else None,
+        }
+        if stable_lead_in:
+            # Reduce front-loaded disfluency/hallucinated lead-ins.
+            generate_kwargs["non_streaming_mode"] = False
+            generate_kwargs["subtalker_dosample"] = False
+
         with torch.no_grad():
-            wavs, sr = self.model.generate_custom_voice(
-                text=text,
-                language=language,
-                speaker=speaker,
-                instruct=instruction if instruction else None,
-            )
+            wavs, sr = self.model.generate_custom_voice(**generate_kwargs)
 
         synchronize_device(self.config.device)
         return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
@@ -275,6 +282,7 @@ class TTSModel:
         language: str = "english",
         output_format: str = "wav",
         mp3_bitrate: int = 192,
+        stable_lead_in: bool = True,
     ) -> tuple[bytes, str]:
         """
         Generate speech with a novel voice from natural language description.
@@ -297,12 +305,18 @@ class TTSModel:
         if "design" not in self.model_id.lower() and "1.7b" not in self.model_id:
             raise RuntimeError("Voice Design requires the 1.7B-VoiceDesign model")
 
+        generate_kwargs = {
+            "text": text,
+            "language": language,
+            "instruct": voice_description,
+        }
+        if stable_lead_in:
+            # Match Custom Voice stabilization for short lead-in filler reduction.
+            generate_kwargs["non_streaming_mode"] = False
+            generate_kwargs["subtalker_dosample"] = False
+
         with torch.no_grad():
-            wavs, sr = self.model.generate_voice_design(
-                text=text,
-                language=language,
-                instruct=voice_description,
-            )
+            wavs, sr = self.model.generate_voice_design(**generate_kwargs)
 
         synchronize_device(self.config.device)
         return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)

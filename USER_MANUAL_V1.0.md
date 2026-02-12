@@ -58,6 +58,10 @@ Steps:
 
 Required model: `0.6b` or `1.7b`
 
+Lead-in behavior:
+- By default, PrivateVoice uses a stable lead-in path to reduce short filler speech at the start of generated audio.
+- If you want the original model-default expressive behavior, disable `Stable Custom Voice lead-in` in `Settings -> Advanced`.
+
 ### 5.2 Voice Clone
 
 Clone voice from reference audio.
@@ -86,6 +90,10 @@ Steps:
 4. Click `Generate`
 
 Required model: `1.7b-design`
+
+Lead-in behavior:
+- Voice Design also uses stable lead-in by default to reduce minor front filler.
+- You can switch back to model-default behavior with `Stable Voice Design lead-in` in `Settings -> Advanced`.
 
 ## 6. Model Compatibility Reference
 
@@ -168,6 +176,8 @@ Key settings include:
 - Theme
 - Default model / default speaker
 - Auto-load model
+- Stable Custom Voice lead-in
+- Stable Voice Design lead-in
 - Export folder + default format
 - Whisper auto-transcription controls
 - Translation helper controls (separate toggle, model, load/unload, status)
@@ -227,6 +237,11 @@ If CUDA is unavailable, app falls back to CPU.
 - Ensure Base model is loaded (`0.6b-base` or `1.7b-base`)
 - Provide clear reference audio
 - Try import if microphone recording is blocked
+
+### Generated audio starts with filler speech
+
+- Ensure `Stable Custom Voice lead-in` (Custom Voice) or `Stable Voice Design lead-in` (Voice Design) is enabled in `Settings -> Advanced`.
+- If you prefer more expressive but less deterministic behavior, you can disable those toggles.
 
 ### Model download issues
 

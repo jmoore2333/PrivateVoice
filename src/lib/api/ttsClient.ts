@@ -65,6 +65,7 @@ export interface CustomVoiceRequest {
   instruction?: string;
   language?: string;
   format?: string;
+  stable_lead_in?: boolean;
 }
 
 export interface VoiceDesignRequest {
@@ -72,6 +73,7 @@ export interface VoiceDesignRequest {
   voice_description: string;
   language?: string;
   format?: string;
+  stable_lead_in?: boolean;
 }
 
 export interface WhisperStatus {

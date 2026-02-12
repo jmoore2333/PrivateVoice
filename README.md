@@ -35,6 +35,7 @@ This replaces the older large PyInstaller-sidecar installer model.
 - Model/mode compatibility guidance with one-click model switching
 - Optional Whisper auto-transcription for Voice Clone
 - Optional local text translation helpers (independent from Whisper)
+- Lead-in stabilization controls for Custom Voice and Voice Design
 - Save to Library + Export (WAV/MP3)
 - Debug console with live logs and system info
 - Settings panel includes **Environment status** and repair/rebuild actions
@@ -130,6 +131,7 @@ Legacy cache note for existing users:
 - Older versions may have model files in `~/.cache/huggingface/`.
 - New installs/updates use app-managed cache under `python_env/huggingface/`.
 - You can manually remove the legacy `~/.cache/huggingface/` directory if no other apps depend on it.
+- See `legacyusers.md` for step-by-step cleanup instructions by OS (Windows first).
 
 ## Build and Release
 
@@ -237,6 +239,11 @@ Core endpoints include:
 - `/load-translation`
 - `/unload-translation`
 - `/translate-text`
+
+Generation request notes:
+- `/generate/custom-voice` supports optional `stable_lead_in` (default `true`)
+- `/generate/voice-design` supports optional `stable_lead_in` (default `true`)
+- `stable_lead_in=true` prioritizes cleaner starts (less front filler); setting it `false` restores model-default expressive sampling behavior
 
 Full API details: `docs/API_REFERENCE.md`
 

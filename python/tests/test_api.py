@@ -632,6 +632,44 @@ class TestMP3Bitrate:
         call_kwargs = mock_model.generate_voice_design.call_args[1]
         assert call_kwargs["mp3_bitrate"] == 256
 
+    @patch("tts_server.main.get_model")
+    def test_custom_voice_stable_lead_in_toggle(self, mock_get_model):
+        """Custom voice stable_lead_in is passed through to model."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/custom-voice",
+            json={
+                "text": "Hello",
+                "speaker": "serena",
+                "stable_lead_in": False,
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_custom_voice.call_args[1]
+        assert call_kwargs["stable_lead_in"] is False
+
+    @patch("tts_server.main.get_model")
+    def test_voice_design_stable_lead_in_toggle(self, mock_get_model):
+        """Voice design stable_lead_in is passed through to model."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/voice-design",
+            json={
+                "text": "Hello",
+                "voice_description": "A warm voice",
+                "stable_lead_in": False,
+            },
+        )
+        assert resp.status_code == 200
+        call_kwargs = mock_model.generate_voice_design.call_args[1]
+        assert call_kwargs["stable_lead_in"] is False
+
 
 # ---------------------------------------------------------------------------
 # Empty text validation
