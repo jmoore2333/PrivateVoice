@@ -131,6 +131,7 @@ Legacy cache note for existing users:
 - Older versions may have model files in `~/.cache/huggingface/`.
 - New installs/updates use app-managed cache under `python_env/huggingface/`.
 - You can manually remove the legacy `~/.cache/huggingface/` directory if no other apps depend on it.
+- See `legacyusers.md` for step-by-step cleanup instructions by OS (Windows first).
 
 ## Build and Release
 
