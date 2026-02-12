@@ -87,6 +87,7 @@ Voice library uses two-tier storage:
 - **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
 - **Dependency integrity gate**: if `python/requirements.txt` changes, run `./scripts/update-requirements-hash.sh` (or `.\scripts\update-requirements-hash.ps1` on Windows) and commit `python/requirements.sha256`. Release builds validate this hash and fail on mismatch.
 - **Cache locality**: the sidecar sets `HF_HOME`/`HF_HUB_CACHE`/`TRANSFORMERS_CACHE` to `{appData}/python_env/huggingface` and setup sets `UV_CACHE_DIR`/`PIP_CACHE_DIR` under `{appData}/python_env`, keeping runtime/model/download artifacts app-scoped.
+- **Orphaned sidecar handling**: if the app crashes or is force-quit, the Python sidecar may survive as an orphan holding port 8765. On next launch the Rust side auto-detects this by checking the process command line against our app data path, then reclaims the port (SIGTERM → 2 s → SIGKILL). During dev, if `pnpm tauri dev` is killed abruptly, you may need to manually run `kill $(lsof -ti :8765)` or simply relaunch — the app will reclaim its own orphan automatically.
 - The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
 
 ## Tauri Plugins
