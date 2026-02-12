@@ -177,6 +177,7 @@ Full API details: `docs/API_REFERENCE.md`
 
 ## Docs
 
+- `docs/README.md` (documentation index + structure)
 - `docs/DEVELOPMENT.md`
 - `docs/API_REFERENCE.md`
 - `docs/crossplatform.md`
