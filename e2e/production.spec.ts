@@ -753,7 +753,7 @@ test.describe('6. Settings Panel', () => {
 
     await page.locator('button[aria-label="Settings"]').click();
 
-    await expect(page.getByText(/v1\.0\.0/).first()).toBeVisible();
+    await expect(page.getByText(/v\d+\.\d+\.\d+/).first()).toBeVisible();
   });
 
   test('auto-load model toggle exists', async ({ page }) => {
