@@ -7,6 +7,15 @@
 ;
 ; %LOCALAPPDATA%\com.privatevoice.desktop\ holds the WebView profile/cache.
 
+; ---------------------------------------------------------------------------
+; Finish page: add a GitHub link below the "Run" and "Desktop shortcut"
+; checkboxes.  Defined at top level (outside macros) so the !define is
+; processed before Tauri's !insertmacro MUI_PAGE_FINISH at line 393.
+; ---------------------------------------------------------------------------
+!define MUI_FINISHPAGE_LINK "Visit PrivateVoice on GitHub"
+!define MUI_FINISHPAGE_LINK_LOCATION "https://github.com/jmoore2333/PrivateVoice"
+!define MUI_FINISHPAGE_LINK_COLOR "4078c0"
+
 !macro NSIS_HOOK_PREUNINSTALL
   ; --- Prompt 1: Voice library (irreplaceable user content) ----------------
   MessageBox MB_YESNO|MB_ICONQUESTION \
