@@ -159,12 +159,12 @@
       id: 'getting-started',
       title: 'Getting Started',
       type: 'text',
-      content: `PrivateVoice is a personal voice studio that runs entirely on your machine. No cloud services, no subscriptions - just powerful TTS capabilities at your fingertips.
+      content: `PrivateVoice is a personal voice studio that runs entirely on your machine. No cloud services, no subscriptions — just powerful TTS capabilities powered by Qwen3-TTS. Works on Windows (NVIDIA GPU) and macOS (Apple Silicon).
 
 Three modes to explore:
-  - Custom Voice - Use preset speakers with optional style instructions
-  - Voice Clone - Clone any voice from a short audio sample
-  - Voice Design - Create new voices from natural language descriptions
+  - Custom Voice — Use preset speakers with optional style instructions
+  - Voice Clone — Clone any voice from a short audio sample
+  - Voice Design — Create new voices from natural language descriptions
 
 Model mapping:
   - Custom Voice uses CustomVoice models
@@ -235,17 +235,19 @@ Model mapping:
       id: 'system-requirements',
       title: 'System Requirements',
       type: 'text',
-      content: `Recommended: Apple Silicon Mac (M1/M2/M3/M4) with 16GB+ RAM
+      content: `16GB+ RAM recommended. GPU strongly recommended for usable generation speeds.
 
 Supported platforms:
-  - macOS (Apple Silicon) - Uses MPS for GPU acceleration
-  - macOS (Intel) - CPU only, slower
-  - Linux/Windows (NVIDIA) - CUDA support planned
-  - Linux/Windows (no GPU) - CPU only, slower
+  - Windows (NVIDIA GPU) - CUDA acceleration, fully supported
+  - macOS (Apple Silicon) - MPS acceleration, fully supported
+  - macOS (Intel) - CPU only, significantly slower
+  - Linux (NVIDIA GPU) - CUDA acceleration, coming soon
 
 Memory requirements:
-  - 0.6B model: ~8GB RAM
-  - 1.7B model: ~12GB RAM`
+  - 0.6B models: ~8GB RAM
+  - 1.7B models: ~12GB RAM
+
+First launch installs a local Python environment and dependencies (~2-5 min). Models download from HuggingFace on first use (1.2-3.4GB each).`
     },
     {
       id: 'tips',
@@ -265,7 +267,7 @@ Getting the best quality:
       subsections: [
         {
           title: "Model won't load",
-          text: "Check available memory: 0.6B models need ~8GB RAM, 1.7B models need ~12GB. Close other apps to free memory. If the download stalls, check your network — models are 1.2-3.4GB. On first launch, the Python environment also needs to unpack, which can take several minutes."
+          text: "Check available memory: 0.6B models need ~8GB RAM, 1.7B models need ~12GB. Close other apps to free memory. If the download stalls, check your network — models are 1.2-3.4GB. On first launch, the app installs a local Python environment which can take several minutes."
         },
         {
           title: "No audio output",
@@ -273,11 +275,11 @@ Getting the best quality:
         },
         {
           title: "Voice Clone recording not working",
-          text: "Microphone recording requires a production build due to macOS WebView security restrictions. In development mode, use the Import button to load a pre-recorded audio file instead."
+          text: "Microphone recording requires a production build (installed app). In development mode, the WebView may block microphone access — use the Import button to load a pre-recorded audio file instead. On Windows, microphone permissions are auto-granted on first launch."
         },
         {
           title: "Generation taking too long",
-          text: "Typical times: 0.6B model 5-15s, 1.7B model 15-60s depending on text length. CPU-only (Intel Mac) is significantly slower. Longer text takes more time — try shorter passages first. You can cancel generation with the Cancel button."
+          text: "Typical times: 0.6B model 5-15s, 1.7B model 15-60s depending on text length and GPU. CPU-only mode is significantly slower. Longer text takes more time — try shorter passages first. You can cancel generation with the Cancel button."
         },
         {
           title: "Wrong model for mode",
@@ -285,7 +287,7 @@ Getting the best quality:
         },
         {
           title: "Slow first launch",
-          text: "On first run, PrivateVoice unpacks its Python environment and downloads models. This can take 5-10 minutes depending on your internet connection. Subsequent launches are much faster."
+          text: "On first run, PrivateVoice installs a local Python environment, creates a virtual environment, and installs dependencies. This one-time setup takes 2-5 minutes depending on your internet connection. Models download separately on first use (1.2-3.4GB each). Subsequent launches start in seconds."
         },
       ]
     },
