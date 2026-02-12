@@ -84,6 +84,13 @@ class TestAuthMiddleware:
         assert resp.status_code == 401
         assert resp.json()["detail"] == "Unauthorized"
 
+    def test_options_preflight_bypasses_auth(self):
+        """CORS preflight must not require an API key."""
+        from tts_server.main import app
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.options("/health")
+        assert resp.status_code != 401
+
 
 # ---------------------------------------------------------------------------
 # Health & status

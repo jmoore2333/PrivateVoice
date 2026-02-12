@@ -125,7 +125,7 @@
       PrivateVoice
     </h1>
     <p class="text-sm text-[var(--color-text-secondary)] font-mono">
-      Local text-to-speech powered by Qwen3-TTS
+      Create, clone, and transcribe voices — privately, on your own hardware.
     </p>
   </div>
 
@@ -247,7 +247,7 @@
   <!-- Footer -->
   <div class="absolute bottom-6 text-center">
     <p class="text-xs text-[var(--color-text-muted)] font-mono">
-      PrivateVoice v1.0.0 • Powered by Qwen3-TTS
+      PrivateVoice v1.0.0
     </p>
   </div>
 </div>
