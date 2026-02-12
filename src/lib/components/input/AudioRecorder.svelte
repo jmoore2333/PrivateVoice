@@ -19,6 +19,7 @@
   let recordingTime = $state(0);
   let error = $state<string | null>(null);
   let microphoneSupported = $state(true);
+  let micPermissionDenied = $state(false);
   let isPlaying = $state(false);
 
   onMount(() => {
@@ -85,6 +86,24 @@
     wavesurfer?.destroy();
   });
 
+  async function retryMicPermission() {
+    micPermissionDenied = false;
+    error = null;
+
+    // On Windows, clear cached WebView2 permission denials before retrying
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const cleared = await invoke<boolean>('reset_mic_permissions');
+      if (cleared) {
+        console.log('[AudioRecorder] Cleared cached mic permission denial');
+      }
+    } catch {
+      // Not in Tauri or command unavailable — ignore
+    }
+
+    startRecording();
+  }
+
   async function startRecording() {
     if (!recorder || !microphoneSupported) {
       error = 'Recording not available. Please use the Import button to upload an audio file.';
@@ -106,7 +125,8 @@
       isRecording = false;
       if (err instanceof Error) {
         if (err.name === 'NotAllowedError' || err.message.includes('Permission')) {
-          error = 'Microphone access denied. Please allow microphone access in System Preferences > Privacy & Security > Microphone.';
+          micPermissionDenied = true;
+          error = null;
         } else if (err.name === 'NotFoundError') {
           error = 'No microphone found. Please connect a microphone and try again.';
         } else if (err.message.includes('mediaDevices')) {
@@ -172,6 +192,22 @@
       <p class="text-xs mt-1 text-amber-400/80">
         Microphone access is not available in this environment. Please use the <strong>Import</strong> button to upload a pre-recorded audio file.
       </p>
+    </div>
+  {/if}
+
+  <!-- Microphone permission denied -->
+  {#if micPermissionDenied}
+    <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm">
+      <p class="font-medium">Microphone access denied</p>
+      <p class="text-xs mt-1 text-amber-400/80">
+        Click "Try Again" to re-request permission, or use <strong>Import</strong> to upload a pre-recorded file.
+      </p>
+      <button
+        class="mt-2 px-3 py-1 text-xs font-medium rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 transition-colors"
+        onclick={retryMicPermission}
+      >
+        Try Again
+      </button>
     </div>
   {/if}
 

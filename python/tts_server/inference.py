@@ -132,6 +132,40 @@ class TTSModel:
         self._loaded = False
         logger.info("Model unloaded")
 
+    @staticmethod
+    def _load_audio_from_bytes(audio_bytes: bytes) -> tuple[np.ndarray, int]:
+        """Decode audio bytes into a numpy array + sample rate.
+
+        Works entirely in-memory (no temp files) to avoid Windows file-locking
+        issues with NamedTemporaryFile that cause [Errno 22] Invalid argument.
+        """
+        buf = io.BytesIO(audio_bytes)
+
+        # Try soundfile first (handles WAV, FLAC, OGG)
+        try:
+            data, sr = sf.read(buf)
+            # Ensure mono float32
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            logger.info(f"Loaded reference audio via soundfile ({sr}Hz, {len(data)} samples)")
+            return data.astype(np.float32), sr
+        except Exception as e:
+            logger.debug(f"soundfile couldn't read audio: {e}")
+
+        # Fall back to librosa (handles WebM, MP3, etc. via ffmpeg/audioread)
+        try:
+            import librosa
+            buf.seek(0)
+            data, sr = librosa.load(buf, sr=None, mono=True)
+            logger.info(f"Loaded reference audio via librosa ({sr}Hz, {len(data)} samples)")
+            return data.astype(np.float32), sr
+        except Exception as e:
+            logger.warning(f"librosa couldn't read audio: {e}")
+
+        raise RuntimeError(
+            "Could not decode reference audio. Please upload a WAV file."
+        )
+
     def generate_custom_voice(
         self,
         text: str,
@@ -204,25 +238,35 @@ class TTSModel:
 
         effective_ref_text = "" if x_vector_only_mode else reference_text
 
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(reference_audio)
-            ref_audio_path = f.name
+        # Load audio into memory (avoids Windows temp file locking issues)
+        logger.info(f"[vc step 1/5] Loading reference audio ({len(reference_audio)} bytes)...")
+        ref_audio_np, ref_sr = self._load_audio_from_bytes(reference_audio)
+        logger.info(f"[vc step 2/5] Reference audio loaded: shape={ref_audio_np.shape}, sr={ref_sr}, dtype={ref_audio_np.dtype}")
 
+        logger.info(f"[vc step 3/5] Starting voice clone inference on {self.config.device}...")
         try:
             with torch.no_grad():
                 wavs, sr = self.model.generate_voice_clone(
                     text=text,
                     language=language,
-                    ref_audio=ref_audio_path,
+                    ref_audio=(ref_audio_np, ref_sr),
                     ref_text=effective_ref_text,
                 )
+        except OSError as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"[vc step 3/5] OSError during inference: {e}\n{tb}")
+            raise
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"[vc step 3/5] Error during inference: {type(e).__name__}: {e}\n{tb}")
+            raise
 
-            synchronize_device(self.config.device)
-            return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
-        finally:
-            import os
-            os.unlink(ref_audio_path)
+        logger.info(f"[vc step 4/5] Inference complete, got {len(wavs)} wav(s), sr={sr}")
+        synchronize_device(self.config.device)
+        logger.info("[vc step 5/5] Converting output to audio format...")
+        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
 
     def generate_voice_design(
         self,

@@ -23,27 +23,41 @@ const isCI = !!process.env.CI;
  */
 async function setupTauriMocks(page: Page) {
   await page.addInitScript(() => {
+    const mockInvoke = async (cmd: string, args?: any) => {
+      console.log('[Mock Tauri] invoke:', cmd);
+      // Mock env_manager commands
+      if (cmd === 'get_environment_status') {
+        return {
+          setup_complete: true,
+          gpu_target: 'mps',
+          gpu_display: 'Apple Silicon (MPS)',
+          python_path: '/mock/venv/bin/python',
+          venv_path: '/mock/venv',
+          disk_usage_mb: 2500,
+          uv_version: '0.6.6',
+          uv_needs_update: false,
+          state: 'ready',
+          state_detail: null,
+        };
+      }
+      if (cmd === 'repair_environment') {
+        return 'Environment marked for repair. Restart the app to re-run setup.';
+      }
+      if (cmd === 'detect_gpu') {
+        return JSON.stringify({ target: 'mps', display: 'Apple Silicon (MPS)' });
+      }
+      return Promise.resolve();
+    };
+
     // Mock Tauri API
     (window as any).__TAURI_INTERNALS__ = {
-      invoke: async (cmd: string) => {
-        console.log('[Mock Tauri] invoke:', cmd);
-        if (cmd === 'start_tts_server') {
-          return Promise.resolve();
-        }
-        return Promise.resolve();
-      },
+      invoke: mockInvoke,
       transformCallback: () => 0,
     };
 
     // Mock @tauri-apps/api/core
     (window as any).__TAURI__ = {
-      invoke: async (cmd: string) => {
-        console.log('[Mock Tauri] invoke:', cmd);
-        if (cmd === 'start_tts_server') {
-          return Promise.resolve();
-        }
-        return Promise.resolve();
-      },
+      invoke: mockInvoke,
     };
   });
 }

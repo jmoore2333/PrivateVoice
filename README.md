@@ -1,348 +1,187 @@
 # PrivateVoice
 
-**Local, private text-to-speech for Apple Silicon.** No cloud, no API keys, no data leaves your Mac.
+PrivateVoice is a local desktop text-to-speech app powered by Qwen3-TTS.
+It runs speech generation on your machine with a Tauri desktop app + Python backend.
 
-PrivateVoice is a self-contained desktop application that runs Qwen3-TTS locally on Apple Silicon. Generate natural speech with preset voices, clone any voice from a short sample, or design entirely new voices from text descriptions.
+## Architecture (This Branch)
 
-## Features
+This branch uses a **deferred dependency installer** architecture:
 
-- **Custom Voice**: 9 preset speakers with style instructions ("speak slowly", "whisper", etc.)
-- **Voice Clone**: Clone any voice from 5-15 seconds of audio + transcript
-- **Voice Design**: Create new voices from natural language descriptions ("a warm, elderly British gentleman")
-- **Fully Local**: All processing happens on your Mac - no internet required after model download
-- **Native App**: Fast, responsive macOS app built with Tauri
+- Installer ships a lightweight desktop app + `uv` + Python source (`tts_server/`) + `requirements.txt`
+- On first launch, the app:
+  - detects hardware (GPU/CPU)
+  - installs standalone Python 3.11 via `uv`
+  - creates a venv in app data
+  - installs dependencies with GPU-appropriate PyTorch index
+  - verifies environment and starts the local FastAPI server
+- On later launches, setup is skipped if `.setup-complete` is valid
 
-## Tech Stack
+This replaces the older large PyInstaller-sidecar installer model.
 
-- Frontend: Svelte 5 + Tailwind CSS 4 + TypeScript
-- Desktop: Tauri 2 (Rust)
-- Backend: Python FastAPI sidecar with Qwen3-TTS
-- Testing: Vitest (unit) + Playwright (E2E)
+## Platform Status (Branch `claude/fix-crossplatform-setup-AAIjb`)
 
-## Requirements
+| Platform | Status | Notes |
+|---|---|---|
+| Windows 11 x64 | Working and tested | NSIS installer (lightweight), first-run CUDA setup validated |
+| macOS (Apple Silicon) | Pending validation on new installer path | MPS path implemented in code |
+| Linux x64 | Planned next for validation | CUDA/ROCm/XPU detection paths implemented |
 
-- macOS 12.3+ on Apple Silicon (M1/M2/M3/M4)
-- 16GB RAM recommended (8GB minimum for 0.6B model)
-- ~1.2GB disk for 0.6B model, ~3.4GB for 1.7B models
+## Core Features
 
-## Installation
+- 3 generation modes:
+  - Custom Voice
+  - Voice Clone
+  - Voice Design
+- Model/mode compatibility guidance with one-click model switching
+- Optional Whisper auto-transcription for Voice Clone
+- Save to Library + Export (WAV/MP3)
+- Debug console with live logs and system info
+- Settings panel includes **Environment status** and repair/rebuild actions
 
-Download the latest `.dmg` from [Releases](https://github.com/jmoore/PrivateVoice/releases) and drag to Applications.
+## Model Compatibility
 
-**First launch notes:**
-- Initial startup takes ~60 seconds while the Python environment initializes
-- You'll be prompted to select a model - 0.6B is faster, 1.7B is higher quality
-- Model weights download from HuggingFace on first use (~1.2-3.4GB)
+| Model | Custom Voice | Voice Clone | Voice Design |
+|---|:---:|:---:|:---:|
+| `0.6b` | Yes | No | No |
+| `1.7b` | Yes | No | No |
+| `0.6b-base` | No | Yes | No |
+| `1.7b-base` | No | Yes | No |
+| `1.7b-design` | No | No | Yes |
 
-## Quick Start
+## Windows CUDA and GPU Acceleration (Current Behavior)
 
-1. Launch PrivateVoice
-2. Select a TTS mode (Custom Voice, Voice Clone, or Voice Design)
-3. Enter your text
-4. Click Generate
-5. Play, save, or export your audio
+Code-verified behavior in this branch:
 
-### Keyboard Shortcuts
+- Hardware target is detected in Rust (`src-tauri/src/env_manager/gpu.rs`)
+- NVIDIA detection uses `nvidia-smi`
+- CUDA wheel target is selected automatically:
+  - newer GPUs: `cu124`
+  - older supported GPUs: `cu121`
+- Dependency install uses `uv pip install -r requirements.txt --extra-index-url <torch index>`
+- Runtime backend chooses device via `torch.cuda.is_available()` (`python/tts_server/device.py`)
+- Attention backend on CUDA:
+  - `flash_attention_2` only if `flash_attn` is installed
+  - otherwise falls back to PyTorch SDPA (default current behavior)
 
-| Shortcut | Action |
-|----------|--------|
-| `Cmd+Enter` | Generate audio |
-| `Cmd+S` | Save to library |
-| `Space` | Play/pause audio |
-| `Cmd+1/2/3` | Switch modes |
-| `Escape` | Close panels |
+Additional targets implemented in detection code:
+- AMD ROCm target
+- Intel XPU target
+- CPU fallback
 
-## Model List (Qwen3-TTS)
+## System Requirements
 
-### 1.7B Models
+- Recommended RAM: 16 GB+
+- Minimum RAM for smaller models: ~8 GB
+- Typical first model download size: ~1.2-3.4 GB
+- First-run environment setup needs additional disk/network (depends on GPU target)
+- Internet required for first-time setup and model downloads
 
-| Model | Features | Language Support | Streaming | Instruction Control |
-|------|----------|------------------|-----------|---------------------|
-| Qwen3-TTS-12Hz-1.7B-VoiceDesign | Voice design from user descriptions | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | ✅ |
-| Qwen3-TTS-12Hz-1.7B-CustomVoice | Preset timbres with instruction control | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | ✅ |
-| Qwen3-TTS-12Hz-1.7B-Base | 3-second rapid voice clone; base for fine-tuning | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | — |
+## Installation and First Run
 
-### 0.6B Models
+### Installer contents
 
-| Model | Features | Language Support | Streaming | Instruction Control |
-|------|----------|------------------|-----------|---------------------|
-| Qwen3-TTS-12Hz-0.6B-CustomVoice | Preset timbres (fast, lightweight) | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | Limited |
-| Qwen3-TTS-12Hz-0.6B-Base | 3-second rapid voice clone; base for fine-tuning | CN, EN, JA, KO, DE, FR, RU, PT, ES, IT | ✅ | — |
+Release build includes lightweight resources, not prebuilt full Python environments.
 
-**Mode mapping in this app**
-- Custom Voice → CustomVoice models
-- Voice Clone → Base models
-- Voice Design → VoiceDesign model
+### First launch flow
 
-**Note:** Streaming is a model capability; this app currently uses non-streaming generation.
+Startup phases include:
+- hardware detection
+- disk check
+- copy Python source
+- install Python 3.11
+- create virtual environment
+- install dependencies
+- verify environment
+- start server
 
-## Qwen3-TTS Key Features (Reported)
+If setup is interrupted or corrupted, use **Settings -> Environment -> Repair/Rebuild**.
 
-- **Powerful speech representation** via the Qwen3-TTS-Tokenizer-12Hz (high-fidelity acoustic compression + semantic modeling).
-- **Universal end-to-end architecture** using a discrete multi-codebook LM to avoid cascaded errors.
-- **Dual-track hybrid streaming** for low-latency generation (reported first audio after a single character; ~97ms end-to-end latency).
-- **Instruction-driven control** over timbre, emotion, and prosody.
+## Build and Release
 
-## Performance Highlights (Reported by Qwen)
+### Windows (PowerShell)
 
-- Voice Design outperforms closed-source baselines on InstructTTS-Eval for instruction following and expressiveness.
-- Voice Control reports WER 2.34% with strong style control fidelity.
-- Voice Clone reports average WER 1.835 and speaker similarity 0.789 across 10 languages.
-- Cross-lingual cloning reported to exceed prior baselines (MiniMax, SeedTTS, CosyVoice3).
-
-## Tokenizer Performance (Reported by Qwen)
-
-- PESQ: 3.21 (wideband), 3.68 (narrowband)
-- STOI: 0.96
-- UTMOS: 4.16
-- Speaker similarity: 0.95
-
-## Example Prompts & Instructions
-
-**Voice Design**
-- "A relaxed, naturally expressive male voice in his late twenties with a warm, conversational tone and clear articulation."
-- "Older gentleman, early 60s, confident and authoritative, slightly gravelly texture, measured pace."
-
-**Instruction Control**
-- "Speak with a very sad, tearful voice. Keep the pace slow and the volume low."
-- "Fast-paced delivery, bright tone, excited and upbeat with clear emphasis on key words."
-
-**Multi-character / narration**
-- Narrator: "Calm, objective, slightly cinematic delivery with gentle pauses."
-- Character: "Anxious young adult, hesitant with small stutters, then resolves confidently."
-
-## Preset Timbres (Custom Voice)
-
-| Timbre | Language/Dialect | Notes |
-|------|-------------------|------|
-| Serena | Chinese | Warm, gentle female |
-| Uncle Fu | Chinese | Seasoned, mellow male |
-| Vivian | Chinese | Bright young female |
-| Aiden | English | Natural American male |
-| Ryan | English | Dynamic male, strong rhythm |
-| Ono Anna | Japanese | Playful Japanese female |
-| Sohee | Korean | Warm Korean female |
-| Dylan | Chinese (Beijing) | Youthful Beijing male |
-| Eric | Chinese (Sichuan) | Lively Chengdu male |
-
-## Development
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete development guide including:
-- Development setup
-- Running tests
-- Building for release
-- Release checklist
-
-### Quick Development Start
-
-```bash
-# Install dependencies
-pnpm install
-
-# Start the Python TTS server (in a separate terminal)
-python python/tts_server_entry.py
-
-# Start the frontend dev server
-pnpm dev
-
-# Or run the full Tauri app in development mode
-pnpm tauri dev
+```powershell
+.\scripts\build-release.ps1
 ```
 
-### Running Tests
+This script:
+1. downloads `uv.exe` (`scripts/download-uv.ps1`)
+2. stages Python source/resources in `src-tauri/resources/`
+3. runs `pnpm install`
+4. builds Tauri installer (`nsis` by default)
 
-```bash
-# Unit tests
-pnpm test
-
-# Unit tests with coverage
-pnpm test:coverage
-
-# E2E tests (90 tests, full API mocking, CI-compatible)
-pnpm test:e2e
-
-# Type checking
-pnpm check
-```
-
-### Building for Local Testing
-
-Some features (like microphone recording for voice cloning) require a production build due to macOS WebView security restrictions. To test these features locally:
-
-```bash
-# 1. Build the production app
-pnpm tauri build
-
-# 2. The built app will be at:
-#    src-tauri/target/release/bundle/macos/PrivateVoice.app
-
-# 3. Run the production build
-open src-tauri/target/release/bundle/macos/PrivateVoice.app
-
-# Or run the unsigned binary directly
-./src-tauri/target/release/qwen3-tts-desktop
-```
-
-**Note:** The first production build takes several minutes as it compiles the Rust backend and bundles all dependencies.
-
-### Build for Release
+### macOS/Linux/Windows via bash
 
 ```bash
 ./scripts/build-release.sh
 ```
 
-## Architecture
+This script performs the same resource-staging flow using `scripts/download-uv.sh`.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Tauri App (Svelte 5 + Tailwind CSS 4)                      │
-│  - Modern dark UI with three TTS modes                      │
-│  - Waveform visualization with wavesurfer.js                │
-│  - Voice library with recent/saved items                    │
-└─────────────────────────────────────────────────────────────┘
-                         │ HTTP (localhost:8765)
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  Python Sidecar (FastAPI)                                   │
-│  - Bundled via PyInstaller (~266MB)                         │
-│  - Qwen3-TTS with MPS optimization                          │
-│  - bfloat16 precision for M-series chips                    │
-└─────────────────────────────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│  HuggingFace Hub                                            │
-│  - Model weights downloaded on first use                    │
-│  - Cached in ~/.cache/huggingface/                          │
-└─────────────────────────────────────────────────────────────┘
+## Development
+
+```bash
+pnpm install
+pnpm tauri dev
 ```
 
-## Key Files
+For backend-only debugging:
 
-- `src/routes/+page.svelte` - Main app shell and orchestration
-- `src/lib/stores/ttsStore.svelte.ts` - TTS state, model loading, generation
-- `src/lib/stores/settingsStore.svelte.ts` - Persistent settings (localStorage)
-- `src/lib/components/input/*` - Mode input panels (Custom, Clone, Design)
-- `src/lib/components/output/OutputPanel.svelte` - Playback + export
-- `python/tts_server/main.py` - FastAPI backend (Qwen3-TTS)
-- `src-tauri/src/lib.rs` - Tauri backend bootstrap
+```bash
+cd python
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python -m tts_server.main
+```
 
-## Project Status
+## Tests
 
-### Current State (February 2026)
+```bash
+pnpm check
+pnpm test:run
+pnpm test:e2e
+cd python && pytest
+```
 
-v1.0 release candidate. All core features complete and tested.
+## API
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| Core Infrastructure | ✅ Complete | Tauri + Svelte 5 + Python sidecar |
-| Python TTS Server | ✅ Complete | FastAPI with Qwen3-TTS |
-| UI Implementation | ✅ Complete | Multi-column macOS layout, responsive (900x650 to 1920x1080) |
-| Settings & Debug Tools | ✅ Complete | Persistent settings, debug console |
-| Model Management | ✅ Complete | Load/switch with download progress, memory check, auto-load |
-| Custom Voice Mode | ✅ Complete | 9 preset speakers + style instructions |
-| Voice Clone Mode | ✅ Complete | Import + recording (production build), low-quality mode |
-| Voice Design Mode | ✅ Complete | Description templates, character counter |
-| Audio Export | ✅ Complete | WAV + MP3 (configurable 128-320 kbps) |
-| Voice Library | ✅ Complete | File-based persistence, search, tabs |
-| Help System | ✅ Complete | Troubleshooting, speaker gallery, keyboard shortcuts |
-| Model Compatibility UX | ✅ Complete | Visual indicators, one-click model switching |
-| Generation Feedback | ✅ Complete | Elapsed time spinner, cancel button |
-| Testing Infrastructure | ✅ Complete | 343 automated tests (216 unit + 90 E2E + visual validation) |
-| TTS Round-Trip Validation | ✅ Complete | Whisper transcription via faster-whisper API (see below) |
-| Code Signing & Distribution | 🔲 Planned | Required for public release |
-| Cross-Platform Support | 🔲 Planned | Device detection ready; builds not yet tested |
+Local backend base URL:
 
-### Known Limitations
+`http://127.0.0.1:8765`
 
-- **Voice Clone Recording:** Microphone recording requires a production build (macOS WebView security). Use the **Import** button in development mode.
-- **Model Download:** First model load requires internet and downloads 1.2-3.4GB from HuggingFace. Progress is now displayed during download.
-- **Streaming Generation:** The models support streaming, but the app uses non-streaming generation with elapsed time display.
-- **Cross-platform:** Device detection supports CUDA/CPU but Windows/Linux builds are not yet tested.
+Core endpoints include:
+- `/health`
+- `/startup-status`
+- `/download-progress`
+- `/model-status`
+- `/load-model`
+- `/generate/custom-voice`
+- `/generate/voice-clone`
+- `/generate/voice-design`
+- `/cancel-generation`
+- `/whisper-status`
+- `/whisper-models`
+- `/load-whisper`
+- `/unload-whisper`
+- `/transcribe`
 
-### TTS Round-Trip Validation (Implemented)
+Full API details: `docs/API_REFERENCE.md`
 
-Whisper-based transcription is integrated into the Python backend using faster-whisper (CTranslate2). Generated audio can be transcribed back to text via the REST API to validate TTS output quality.
+## Known Notes
 
-**Implementation:**
-- **STT Engine:** faster-whisper (CTranslate2-based, runs on CPU to avoid competing with TTS GPU memory)
-- **Models:** 6 Whisper variants from tiny (75MB) to large-v3 (3.1GB), downloaded from HuggingFace on demand
-- **API Endpoints:** 5 endpoints for model management and transcription (`/whisper-status`, `/whisper-models`, `/load-whisper`, `/unload-whisper`, `/transcribe`)
-- **Output:** Transcribed text, detected language, confidence score (0-1), and audio duration
+- First launch can take several minutes (network and GPU target dependent)
+- Voice Clone recording can be unavailable in some dev/runtime environments; import still works
+- On Windows, WebView2 mic/camera permission cache is explicitly managed in this branch
+- `sox` warnings can appear in logs but are not required for core TTS generation
 
-**Usage:**
-1. Load a Whisper model: `POST /load-whisper` with `{"model_size": "base"}`
-2. Transcribe audio: `POST /transcribe` with multipart form upload
-3. Compare transcription against original text to compute accuracy metrics
+## Docs
 
-> Whisper transcription is accessible in the desktop UI via Settings > Optional Features (auto-transcription toggle with model selector) and as an "Auto-transcribe" button in Voice Clone mode.
-
-See `docs/e2e-visual-validation-report.html` for E2E visual validation results.
-
-### Cross-Platform Roadmap
-
-| Platform | GPU Support | Status |
-|----------|-------------|--------|
-| macOS (Apple Silicon) | MPS | Current focus |
-| macOS (Intel) | CPU only | Planned |
-| Linux (NVIDIA) | CUDA | Planned |
-| Windows (NVIDIA) | CUDA | Planned |
-
-## API Reference
-
-The Python backend exposes a REST API at `http://127.0.0.1:8765`. See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for full endpoint documentation including request/response schemas.
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Server health check |
-| `/model-status` | GET | Current model info |
-| `/download-progress` | GET | Model download progress |
-| `/memory-check/{model_id}` | GET | Check RAM requirements before loading |
-| `/system-info` | GET | Device, memory, supported settings |
-| `/speakers` | GET | List preset speakers |
-| `/speakers-info` | GET | Speaker metadata with descriptions |
-| `/load-model` | POST | Load model by ID (background thread) |
-| `/generate/custom-voice` | POST | Generate with preset voice |
-| `/generate/voice-clone` | POST | Clone from reference audio |
-| `/generate/voice-design` | POST | Generate from description |
-| `/cancel-generation` | POST | Cancel in-progress generation |
-| `/whisper-status` | GET | Whisper model status |
-| `/whisper-models` | GET | Available Whisper model sizes |
-| `/load-whisper` | POST | Load a Whisper model |
-| `/unload-whisper` | POST | Unload Whisper model |
-| `/transcribe` | POST | Transcribe audio file |
-
-## Troubleshooting
-
-**Voice Clone recording not working?**
-Microphone access requires a production build on macOS. In development mode, use the **Import** button to upload pre-recorded audio files. To test recording, build the app with `pnpm tauri build` and run the production `.app` bundle.
-
-**"Recording not available" message?**
-This appears in development mode because Tauri's WebView doesn't expose `navigator.mediaDevices`. This is expected - use Import instead, or test with a production build.
-
-**Slow first launch?**
-Normal - PyInstaller extracts the bundled Python environment (~60 seconds). Subsequent launches are faster.
-
-**Out of memory?**
-Try the smaller 0.6B model. The 1.7B models need ~12GB RAM.
-
-**Model download stuck?**
-Check your internet connection. Models are 1.2-3.4GB from HuggingFace Hub.
-
-**MPS errors?**
-Ensure you're on Apple Silicon with macOS 12.3+. Intel Macs use slower CPU inference.
-
-**Export always saves as WAV?**
-Check Settings > Audio > Default Format. Both WAV and MP3 (128-320 kbps) are supported.
-
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#troubleshooting) for more solutions.
-
-## Acknowledgments
-
-- [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) - The underlying TTS model by Alibaba
-- [Tauri](https://tauri.app/) - Desktop application framework
-- [MPS Optimization Guide](https://lingshunlab.com/ai/qwen3-tts-on-mac-mini-m4-the-ultimate-installation-optimization-guide) - M4 compatibility reference
+- `docs/DEVELOPMENT.md`
+- `docs/API_REFERENCE.md`
+- `docs/crossplatform.md`
+- `USER_MANUAL_V1.0.md`
 
 ## License
 
-MIT License - Open source for public benefit.
+MIT

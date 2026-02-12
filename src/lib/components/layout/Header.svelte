@@ -30,6 +30,13 @@
   let showModelMenu = $state(false);
   let modelSwitchPrompt = $state<{ mode: TTSMode; recommendedModel: string; label: string } | null>(null);
 
+  // Clear the model-switch banner when the loaded model becomes compatible
+  $effect(() => {
+    if (modelSwitchPrompt && modelSupportsMode(modelId, currentMode)) {
+      modelSwitchPrompt = null;
+    }
+  });
+
   const modes: { id: TTSMode; label: string }[] = [
     { id: 'custom-voice', label: 'Custom Voice' },
     { id: 'voice-clone', label: 'Voice Clone' },
@@ -210,7 +217,7 @@
 </header>
 
 <!-- Model switch prompt -->
-{#if modelSwitchPrompt && !isLoadingModel}
+{#if modelSwitchPrompt && !isLoadingModel && !modelSupportsMode(modelId, currentMode)}
   <div class="flex items-center justify-between px-4 py-2 bg-[var(--color-accent)]/10 border-b border-[var(--color-accent)]/30">
     <span class="text-sm text-[var(--color-text-secondary)]">
       This mode requires a different model.

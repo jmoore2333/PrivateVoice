@@ -142,6 +142,62 @@
   const isCPU = $derived(debugStore.state.systemInfo?.device === "cpu");
   const cacheDir = $derived(debugStore.state.systemInfo?.cache_dir ?? "~/.cache/huggingface/hub");
 
+  // Environment status (deferred installer)
+  interface EnvironmentStatus {
+    setup_complete: boolean;
+    gpu_target: string | null;
+    gpu_display: string | null;
+    python_path: string | null;
+    venv_path: string | null;
+    disk_usage_mb: number | null;
+    uv_version: string | null;
+    uv_needs_update: boolean;
+    state: string;
+    state_detail: string | null;
+  }
+
+  let envStatus = $state<EnvironmentStatus | null>(null);
+  let isRepairingEnv = $state(false);
+  let envRepairMessage = $state<string | null>(null);
+
+  async function fetchEnvironmentStatus() {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const result = await invoke<EnvironmentStatus>("get_environment_status");
+      envStatus = result;
+    } catch {
+      // Not in Tauri or command not available
+    }
+  }
+
+  async function handleRepairEnvironment(deleteVenv: boolean) {
+    isRepairingEnv = true;
+    envRepairMessage = null;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const message = await invoke<string>("repair_environment", { deleteVenv });
+      envRepairMessage = message;
+      await fetchEnvironmentStatus();
+    } catch (e) {
+      envRepairMessage = e instanceof Error ? e.message : "Failed to repair environment";
+    } finally {
+      isRepairingEnv = false;
+    }
+  }
+
+  function formatDiskUsage(mb: number | null): string {
+    if (mb === null) return "Unknown";
+    if (mb >= 1000) return `${(mb / 1000).toFixed(1)} GB`;
+    return `${Math.round(mb)} MB`;
+  }
+
+  // Fetch environment status when settings opens
+  $effect(() => {
+    if (settingsStore.isOpen && !envStatus) {
+      fetchEnvironmentStatus();
+    }
+  });
+
   async function browseExportFolder() {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -472,6 +528,89 @@
               </span>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- Environment Section (deferred installer status) -->
+      <section>
+        <h3 class="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wider mb-3">
+          Environment
+        </h3>
+        <div class="space-y-3">
+          {#if envStatus}
+            <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] space-y-2">
+              <div class="flex justify-between items-center">
+                <span class="text-sm text-[var(--color-text-secondary)]">Status</span>
+                <span class="text-sm font-medium {envStatus.setup_complete
+                  ? 'text-emerald-400'
+                  : 'text-amber-400'}">
+                  {envStatus.setup_complete ? 'Ready' : envStatus.state === 'needs_update' ? 'Update needed' : envStatus.state === 'corrupted' ? 'Needs repair' : 'Not set up'}
+                </span>
+              </div>
+
+              {#if envStatus.gpu_display}
+                <div class="flex justify-between items-center">
+                  <span class="text-sm text-[var(--color-text-secondary)]">GPU Target</span>
+                  <span class="text-sm text-[var(--color-text-muted)]">{envStatus.gpu_display}</span>
+                </div>
+              {/if}
+
+              {#if envStatus.disk_usage_mb}
+                <div class="flex justify-between items-center">
+                  <span class="text-sm text-[var(--color-text-secondary)]">Disk Usage</span>
+                  <span class="text-sm text-[var(--color-text-muted)]">{formatDiskUsage(envStatus.disk_usage_mb)}</span>
+                </div>
+              {/if}
+
+              {#if envStatus.uv_version}
+                <div class="flex justify-between items-center">
+                  <span class="text-sm text-[var(--color-text-secondary)]">uv Version</span>
+                  <span class="text-sm text-[var(--color-text-muted)]">
+                    {envStatus.uv_version}
+                    {#if envStatus.uv_needs_update}
+                      <span class="text-amber-400 text-xs ml-1">(update available)</span>
+                    {/if}
+                  </span>
+                </div>
+              {/if}
+
+              {#if envStatus.venv_path}
+                <div class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-secondary)]">Venv Path</span>
+                  <span class="text-xs text-[var(--color-text-muted)] font-mono break-all">{envStatus.venv_path}</span>
+                </div>
+              {/if}
+
+              {#if envStatus.state_detail}
+                <p class="text-xs text-amber-400">{envStatus.state_detail}</p>
+              {/if}
+            </div>
+
+            {#if envRepairMessage}
+              <p class="text-xs text-[var(--color-text-secondary)] p-2 rounded bg-[var(--color-bg-elevated)]">{envRepairMessage}</p>
+            {/if}
+
+            <div class="flex gap-2">
+              <button
+                class="flex-1 text-xs py-2 rounded-lg border border-[var(--color-border-default)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors disabled:opacity-50"
+                onclick={() => handleRepairEnvironment(false)}
+                disabled={isRepairingEnv}
+              >
+                {isRepairingEnv ? 'Repairing...' : 'Repair (re-verify)'}
+              </button>
+              <button
+                class="flex-1 text-xs py-2 rounded-lg border border-[var(--color-accent-red)]/40 text-[var(--color-accent-red)] hover:bg-[var(--color-accent-red)]/10 transition-colors disabled:opacity-50"
+                onclick={() => handleRepairEnvironment(true)}
+                disabled={isRepairingEnv}
+              >
+                {isRepairingEnv ? 'Rebuilding...' : 'Full rebuild'}
+              </button>
+            </div>
+          {:else}
+            <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
+              <span class="text-sm text-[var(--color-text-muted)]">Loading environment status...</span>
+            </div>
+          {/if}
         </div>
       </section>
 

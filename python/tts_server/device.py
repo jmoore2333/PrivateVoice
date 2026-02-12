@@ -46,10 +46,21 @@ def get_device_config() -> DeviceConfig:
         # bfloat16 requires compute capability >= 8.0 (Ampere+)
         if capability[0] >= 8:
             dtype = torch.bfloat16
-            attn = "flash_attention_2"
         else:
             dtype = torch.float16
+
+        # Use flash_attention_2 if the package is installed, otherwise sdpa.
+        # flash_attn requires special compilation per CUDA version/GPU arch,
+        # so it won't always be available. SDPA (built into PyTorch) is a
+        # solid fallback that still uses GPU-accelerated attention.
+        try:
+            import flash_attn  # noqa: F401
+            attn = "flash_attention_2"
+            logger.info("FlashAttention2 available — using flash_attention_2")
+        except ImportError:
             attn = "sdpa"
+            logger.info("flash_attn not installed — using PyTorch SDPA attention")
+
         device_name = torch.cuda.get_device_name(0)
         logger.info(f"Using CUDA device: {device_name} (compute {capability[0]}.{capability[1]})")
         return DeviceConfig(

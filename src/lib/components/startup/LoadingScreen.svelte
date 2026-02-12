@@ -5,6 +5,7 @@
   import StudioButton from "$lib/components/ui/StudioButton.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
   import type { StartupPhase } from "$lib/stores/appStore.svelte";
+  import { isSetupPhase } from "$lib/stores/appStore.svelte";
 
   interface Props {
     phase: StartupPhase;
@@ -25,6 +26,7 @@
 
   const isDownloading = $derived(download?.status === "downloading");
   const isError = $derived(phase === "error");
+  const isSetup = $derived(isSetupPhase(phase));
   let showDetails = $state(false);
   let showRawLogs = $state(true);
   let logsInterval: ReturnType<typeof setInterval> | null = null;
@@ -123,7 +125,7 @@
       PrivateVoice
     </h1>
     <p class="text-sm text-[var(--color-text-secondary)] font-mono">
-      Local text-to-speech for Apple Silicon
+      Local text-to-speech powered by Qwen3-TTS
     </p>
   </div>
 
@@ -132,9 +134,22 @@
     <StartupProgress {phase} {message} {progress} />
   </div>
 
-  <p class="mt-3 text-xs text-[var(--color-text-muted)] font-mono">
-    First launch can take several minutes while the Python environment initializes and models download.
-  </p>
+  <!-- First-run setup info panel -->
+  {#if isSetup}
+    <div class="mt-4 w-full max-w-md p-3 rounded-lg border border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/5 text-center">
+      <p class="text-xs font-medium text-[var(--color-accent-amber)] mb-1">
+        One-time setup
+      </p>
+      <p class="text-xs text-[var(--color-text-muted)]">
+        Setting up the Python environment and installing dependencies.
+        Subsequent launches will be instant.
+      </p>
+    </div>
+  {:else}
+    <p class="mt-3 text-xs text-[var(--color-text-muted)] font-mono">
+      First launch can take several minutes while the Python environment initializes and models download.
+    </p>
+  {/if}
 
   <!-- Download progress (shown during model download) -->
   {#if isDownloading && download}

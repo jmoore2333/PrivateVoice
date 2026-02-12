@@ -1,148 +1,200 @@
 # Cross-Platform Build Status & Tracking
 
-Last updated: 2025-02-11 (commit context: after `dc51378` --onedir architecture)
+Last updated: 2026-02-11 (branch: `claude/fix-crossplatform-setup-AAIjb`)
+
+## Architecture: Deferred Dependency Installer
+
+The app ships a **lightweight stub installer** (~14 MB) containing:
+- Tauri app binary
+- `uv` binary (Astral's fast Python package manager)
+- Python source code (`tts_server/`)
+- `requirements.txt`
+
+On **first launch**, the app detects GPU hardware, downloads Python 3.11 via `uv`, creates a virtual environment, and installs all dependencies with GPU-appropriate PyTorch wheels. Subsequent launches validate a `.setup-complete` marker in ~10ms and skip setup entirely.
+
+**Single code path** for all platforms in `lib.rs`. No `#[cfg(target_os)]` branching in the launch logic except `CREATE_NO_WINDOW` on Windows. `tauri-plugin-shell` has been fully removed.
+
+---
 
 ## Platform Status
 
-| Platform | Status | Installer | Sidecar Mode | GPU |
-|----------|--------|-----------|-------------|-----|
-| macOS (Apple Silicon) | **Production-ready** | DMG (`externalBin`) | `--onefile` | MPS |
-| Windows 11 x64 | **In Progress** | NSIS (`resources`) | `--onedir` | CPU-only (CUDA deferred) |
-| Linux | Not started | — | `--onedir` (planned) | — |
+| Platform | Status | Installer | GPU | Tested |
+|----------|--------|-----------|-----|--------|
+| Windows 11 x64 | **Working** | NSIS (~13 MB) | CUDA (RTX 3090) | 2026-02-11 |
+| macOS (Apple Silicon) | Untested on new arch | DMG | MPS | Pending |
+| Linux x64 (Ubuntu) | **Next** | .deb / .AppImage | CUDA / ROCm / XPU | Planned |
 
 ---
 
-## Changes from macOS Baseline
+## Windows Testing Results (2026-02-11)
 
-The following changes were made on the `main` branch during Windows bring-up. All are backward-compatible with the macOS build.
+### Environment
+- Windows 11 Pro (10.0.26200), x64
+- NVIDIA GeForce RTX 3090 (compute capability 8.6)
+- CUDA 12.4 detected via `nvidia-smi`
 
-### 1. `python/tts_server.spec` — Reduced torch excludes
+### What Works
+- **NSIS installer**: ~13 MB, per-user install (`currentUser`), no admin required
+- **First-run setup**: GPU detection → Python 3.11 install → venv → CUDA 12.4 dependencies (~5.3 GB env). Completes in ~2-5 minutes depending on network.
+- **Second-run fast path**: Marker validated in milliseconds, server starts in ~5 seconds
+- **Re-setup after uninstall**: 6 seconds with cached packages (uv cache persists across installs)
+- **Model loading**: 0.6b CustomVoice model loads on CUDA with SDPA attention
+- **Custom Voice generation**: Produces valid audio output
+- **Voice Design generation**: Produces valid audio output
+- **Microphone recording**: Auto-granted via WebView2 COM API (no browser permission prompt)
+- **Auto-transcription**: Whisper model loads and transcribes reference audio
+- **Model switching**: Mode tabs detect compatibility, banner auto-clears after load
+- **Server health**: Python FastAPI server starts, responds to all endpoints
+- **Voice Clone generation**: Produces valid audio output (1.7B Base model)
+- **Debug panel**: Full server logs visible in-app
+- **Clean reinstall**: Full setup completes after "remove all application data" uninstall
 
-**Commits**: `dc51378`, current session
+### Issues Found and Fixed
 
-The macOS build excluded several torch submodules for size savings:
-```python
-# Previously excluded (macOS baseline):
-'torch._dynamo', 'torch._inductor', 'torch.compiler', 'torch.distributed',
-'torch.testing', 'torch.profiler', 'torch.onnx', 'triton'
-```
+| # | Issue | Root Cause | Fix | Commit |
+|---|-------|------------|-----|--------|
+| 1 | `uv binary not found` after install | `resource_dir()` returns install root; Tauri preserves `resources/` subdirectory | Added `bundled_resources_dir()` helper in `paths.rs` | `ae99aed` |
+| 2 | Wrong `python.exe` found during venv creation | Recursive `walkdir` found stdlib template before real interpreter | Targeted `cpython-*` directory lookup in `setup.rs` | `ae99aed` |
+| 3 | Frontend stuck on LoadingScreen | `isStartupComplete` only accepted `"ready"` phase | Accepts both `"ready"` and `"checking-models"` | `ae99aed` |
+| 4 | Uvicorn startup not detected | `process_stderr_line()` didn't do phase detection | Added phase detection to `process_stderr_line()` | `a5f9a4c` |
+| 5 | `OPTIONS /load-model` returns 400 | CORS preflight rejected — WebView origin mismatch | Changed to `allow_origins=["*"]` (localhost-only server) | `a5f9a4c` |
+| 6 | FlashAttention2 error on model load | `device.py` unconditionally set `flash_attention_2` | Added runtime `import flash_attn` check, falls back to SDPA | `a5f9a4c` |
+| 7 | Noisy error tracebacks in logs | `StreamHandler.emit()` fails with `OSError` on piped streams | `logging.raiseExceptions = False` in production | `a5f9a4c` |
+| 8 | Model-switch banner persists | `modelSwitchPrompt` only cleared by banner's own buttons | Added `$effect` + template guard `!modelSupportsMode(...)` | `06e6062` |
+| 9 | Mic permission denied permanently | WebView2 caches denial, `PermissionRequested` stops firing | Auto-grant mic/camera via WebView2 COM API in `setup()` hook | `373752d` |
+| 10 | Cached mic denial survives reinstall | WebView2 Preferences file persists across installs | Startup cleanup clears cached denials + `reset_mic_permissions` command | `60db0e9` |
+| 11 | Voice clone WebM format mismatch | MediaRecorder records `audio/webm`, model expects WAV | Client-side WebM-to-WAV conversion via Web Audio API | `93093ec` |
+| 12 | Voice clone `[Errno 22]` from temp files | Windows `NamedTemporaryFile` file handle locking | In-memory audio loading via `soundfile.read(BytesIO(...))` | `35e5b2e` |
+| 13 | Voice clone `[Errno 22]` from print() | qwen_tts `mel_spectrogram()` uses bare `print()` to piped stdout | `SafeWriter` wrapper on `sys.stdout/stderr` catches `OSError` | `ad4c6f2` |
+| 14 | HuggingFace symlink warnings | Windows requires Developer Mode for symlinks | `HF_HUB_DISABLE_SYMLINKS_WARNING=1` env var | `35e5b2e` |
+| 15 | Voice clone blocked event loop | `async def` endpoint called sync inference directly | `asyncio.to_thread()` + traceback in error detail | (this commit) |
+| 16 | Clean install fails (`uv python install` exit 2) | `python_env/python/` dir not pre-created on clean install | `create_dir_all(&python_dir)` before `uv python install` | (this commit) |
 
-On Windows, `torch.utils.data.dataloader` imports `torch.distributed`, and `torch.autograd.gradcheck` imports `torch.testing`. These deep cross-imports mean most torch submodules **cannot** be safely excluded.
+### Remaining Non-Critical Items
 
-**Current excludes** (all platforms):
-```python
-'torch.utils.tensorboard',  # Requires external tensorboard package
-'triton',                    # Linux-only compiler, not needed at runtime
-```
-
-**Impact on macOS**: Sidecar binary will be slightly larger (~10-20 MB). No functional change — these modules were unused but not harmful to include.
-
-### 2. `src-tauri/tauri.conf.json` — NSIS per-user install config
-
-**Current session only**
-
-Added Windows NSIS configuration for per-user install (no admin required):
-```json
-"bundle": {
-  "windows": {
-    "nsis": {
-      "installMode": "currentUser"
-    }
-  }
-}
-```
-
-**Impact on macOS**: None. This config section is only used by the NSIS bundler on Windows.
-
-### 3. `scripts/build-release.ps1` — New Windows build script
-
-**Current session**
-
-PowerShell equivalent of `scripts/build-release.sh` with Windows-specific lessons learned:
-- Auto-detects Python from common install locations
-- Handles CUDA/CPU torch installation ordering (torch installed AFTER `requirements.txt` to avoid PyPI overwriting CUDA variant)
-- Writes resources config to temp file (PowerShell strips quotes from inline JSON)
-- Uses nested `Join-Path` calls (PS 5.1 only accepts 2 arguments)
-- Size warnings for NSIS (>1.5 GB) and both bundlers (>3 GB)
-
-**Impact on macOS**: None. PowerShell script is Windows-only.
-
-### 4. Architecture changes (from commit `dc51378`)
-
-These were already documented in `start-here.md` but are noted here for completeness:
-- `src-tauri/src/lib.rs` — `SidecarProcess` enum, 3 spawn paths (dev / macOS-release / Windows-release)
-- `src-tauri/tauri.macos.conf.json` — macOS-specific `externalBin` config (split from base)
-- `python/build_sidecar.sh` / `python/build_sidecar.ps1` — OS-aware sidecar copy
-- `.gitignore` — Added `src-tauri/sidecar/`
+| Item | Status | Notes |
+|------|--------|-------|
+| SoX "not found" stderr messages | Cosmetic | `sox` Python package checks for SoX binary at import time. Not needed for core TTS. |
 
 ---
 
-## Current Windows Issues
+## Linux Build Plan (Ubuntu)
 
-### Issue 1: Log flooding in startup console (ACTIVE)
+### Prerequisites
+- Ubuntu 22.04+ (or equivalent)
+- Rust toolchain (`rustup`)
+- Node.js + pnpm
+- System libraries for Tauri: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, etc.
+- GPU drivers (NVIDIA CUDA, AMD ROCm, or CPU-only)
 
-**Symptom**: After install and launch, the startup console floods with repeated `/logs?count=200` and `/system-info` GET requests, multiple times per second. The server IS running (responds 200 OK) but the frontend appears stuck in a rapid polling loop.
+### Expected Work
+1. **Build script**: `scripts/build-release.sh` — adapt from Windows `.ps1` (stage resources, build Tauri)
+2. **Bundle format**: `.deb` and/or `.AppImage`
+3. **GPU detection**: `env_manager/gpu.rs` already handles `nvidia-smi`, `rocm-smi`, `lspci` for Linux
+4. **Python venv**: `uv` supports Linux natively; venv path uses `python_env_dir()` which respects `app_data_dir()`
+5. **No `CREATE_NO_WINDOW`**: The `#[cfg(target_os = "windows")]` guard already skips it on Linux
+6. **No WebView2 issues**: Linux uses WebKitGTK, not WebView2 — no mic permission caching problems
+7. **No SafeWriter needed**: POSIX pipes handle `SIGPIPE` gracefully (already have `signal.signal(SIGPIPE, SIG_IGN)`)
 
-**Likely cause**: The frontend's startup detection or log polling interval is too aggressive, or the "server ready" signal isn't being recognized properly, keeping the app in startup mode indefinitely.
-
-**Where to investigate**:
-- `src/lib/stores/serverStatus.svelte.ts` — Server health check / startup detection
-- `src/lib/api/ttsClient.ts` — Log polling endpoint and interval
-- `src-tauri/src/lib.rs` — `sidecar-startup` event emission in Windows release path
-- The sidecar may not be emitting the expected startup-complete message that the frontend watches for
-
-### Issue 2: CUDA sidecar too large for installers (DEFERRED)
-
-**Symptom**: CUDA torch (cu124) produces a 4.08 GB sidecar with 5,600+ files. Both NSIS (~2 GB PE limit) and WiX/MSI (~2 GB embedded CAB limit) fail.
-
-**Current workaround**: Ship CPU-only installer (241.7 MB NSIS). CPU inference works but is slower.
-
-**Long-term solution**: See `docs/plans/deferred-dependency-install.md` — ship a ~50-60 MB installer with `uv` + Python source, download PyTorch (CUDA or CPU) on first launch. This matches industry practice (LM Studio, Ollama, ComfyUI all download GPU runtimes at install/first-launch time).
-
-**Interim options** (if needed before deferred-install is ready):
-- Portable `.7z` distribution for CUDA users (no installer, extract and run)
-- InnoSetup with disk spanning (not integrated with Tauri)
-
-### Issue 3: `requirements.txt` overwrites CUDA torch (RESOLVED)
-
-**Symptom**: `pip install -r requirements.txt` with `torch>=2.1.0` pulls CPU-only torch from PyPI, replacing a previously installed CUDA variant.
-
-**Fix**: In `scripts/build-release.ps1`, torch is installed AFTER `requirements.txt` so the correct variant always wins. The `-CudaVersion cu124` or `-CpuOnly` flag force-reinstalls from the correct index as the final step.
+### Potential Linux-Specific Issues
+- WebKitGTK mic permissions may need `gstreamer` plugins
+- `.deb` package might need to declare system dependencies
+- ROCm PyTorch wheels are Linux-only (good — this is where they'll be tested)
+- AppImage sandboxing may affect `uv` binary execution
 
 ---
 
-## Build Quick Reference (Windows)
+## GPU Optimization: Deferred Package Installation
+
+Since the deferred installer runs `uv pip install` at first launch, we can dynamically source GPU-specific optimization packages based on detected hardware. This is a key advantage over the old PyInstaller approach.
+
+### Current GPU Support
+
+| GPU Vendor | Detection Method | PyTorch Backend | Attention | Status |
+|------------|-----------------|-----------------|-----------|--------|
+| NVIDIA (Ampere+, compute ≥8.0) | `nvidia-smi` | CUDA 12.4 | SDPA (flash_attn if available) | **Working** |
+| NVIDIA (older, compute <8.0) | `nvidia-smi` | CUDA 12.4 | SDPA | Untested |
+| AMD (Linux only) | `rocm-smi` / `lspci` | ROCm | SDPA | Untested |
+| Intel (Arc/Xe) | `xpu-smi` / `sycl-ls` | Intel XPU | SDPA | Untested |
+| Apple Silicon | platform detection | MPS | SDPA | Untested on new arch |
+| CPU-only | Fallback | CPU | Eager | Untested on new arch |
+
+### Planned: GPU-Specific Acceleration Packages
+
+The stub installer approach opens the door to installing optimal acceleration packages at setup time. These packages require specific builds per GPU architecture and cannot be bundled universally.
+
+**NVIDIA — flash_attn**
+- `flash_attn` provides FlashAttention2, significantly faster for long sequences on Ampere+ GPUs
+- Requires pre-built wheels matching the CUDA version and compute capability
+- Can be installed via: `uv pip install flash-attn --no-build-isolation`
+- Or from pre-built wheels: `pip install flash-attn` (if wheels exist for the CUDA/Python combo)
+- **Action**: During setup, after detecting NVIDIA GPU with compute ≥8.0, attempt `flash_attn` install. If it fails (no wheel available), fall back gracefully to SDPA.
+
+**NVIDIA — xformers**
+- Alternative to flash_attn with broader GPU support
+- `pip install xformers` — has pre-built wheels for common CUDA versions
+- Provides `memory_efficient_attention` and other optimizations
+
+**AMD — ROCm torch**
+- Already handled: `--extra-index-url https://download.pytorch.org/whl/rocm6.2`
+- ROCm wheels are Linux-only
+
+**Intel — XPU torch**
+- Already handled: `--extra-index-url https://pytorch-extension.intel.com/release-whl/stable/xpu/us/`
+- Intel Extension for PyTorch provides XPU acceleration
+
+**CPU — Intel MKL / OpenBLAS**
+- Default PyTorch CPU includes Intel MKL on x86_64
+- Consider: `intel-extension-for-pytorch` for additional CPU optimizations on Intel processors
+
+### Implementation Notes
+
+The setup flow in `setup.rs` → `install_dependencies()` is the right place to add GPU-specific packages. After the base `requirements.txt` install succeeds:
+
+```
+1. Base install: uv pip install -r requirements.txt [+ torch index URL]
+2. GPU extras (NEW): attempt flash_attn/xformers install based on detected GPU
+3. Verify: import torch; check GPU availability
+4. Write marker
+```
+
+Step 2 should be best-effort — if extra packages fail to install, the app still works with SDPA attention. The marker should record what was installed so the Settings panel can show optimization status.
+
+---
+
+## Build Quick Reference
+
+### Windows (PowerShell)
 
 ```powershell
-# CPU-only build (recommended for initial testing)
-.\scripts\build-release.ps1 -CpuOnly
+# Ensure resources are staged
+.\scripts\download-uv.ps1
+Copy-Item -Recurse python\tts_server src-tauri\resources\tts_server -Force
+Copy-Item python\requirements.txt src-tauri\resources\requirements.txt -Force
 
-# CUDA build (produces >2 GB sidecar — no working installer yet)
-.\scripts\build-release.ps1 -CudaVersion cu124
-
-# Skip sidecar rebuild (use existing)
-.\scripts\build-release.ps1 -CpuOnly -SkipSidecar
-
-# Use MSI instead of NSIS (admin required, no install mode choice)
-.\scripts\build-release.ps1 -CpuOnly -Bundle msi
+# Build NSIS installer
+pnpm tauri build
+# Output: src-tauri\target\release\bundle\nsis\PrivateVoice_1.0.0_x64-setup.exe
 ```
 
-Output: `src-tauri\target\release\bundle\nsis\PrivateVoice_1.0.0_x64-setup.exe`
+### macOS / Linux (bash)
+
+```bash
+./scripts/build-release.sh
+# Output: src-tauri/target/release/bundle/{dmg,deb,appimage}/...
+```
 
 ---
 
-## File Map
+## Key Files
 
-| File | Role | Changed from macOS baseline? |
-|------|------|------------------------------|
-| `python/tts_server.spec` | PyInstaller spec | Yes — reduced excludes, platform-conditional --onefile/--onedir |
-| `src-tauri/tauri.conf.json` | Base Tauri config | Yes — added NSIS installMode, removed externalBin |
-| `src-tauri/tauri.macos.conf.json` | macOS override | New — holds externalBin (split from base) |
-| `src-tauri/src/lib.rs` | Sidecar lifecycle | Yes — SidecarProcess enum, 3 spawn paths |
-| `scripts/build-release.ps1` | Windows build script | New |
-| `scripts/build-release.sh` | Cross-platform build script | Yes — platform-aware verification, --config injection |
-| `python/build_sidecar.sh` | Sidecar build (bash) | Yes — OS-aware copy |
-| `python/build_sidecar.ps1` | Sidecar build (PS) | Yes — directory copy |
-| `.gitignore` | Git ignores | Yes — added src-tauri/sidecar/ |
-| `docs/plans/deferred-dependency-install.md` | Long-term bundling plan | New |
-| `docs/crossplatform.md` | This file | New |
+| File | Role |
+|------|------|
+| `src-tauri/src/env_manager/` | Rust: GPU detection, setup orchestration, validation |
+| `src-tauri/src/lib.rs` | Rust: sidecar lifecycle, Tauri commands |
+| `python/tts_server/device.py` | Python: runtime GPU/dtype/attention config |
+| `python/tts_server/main.py` | Python: FastAPI server, CORS, startup phases |
+| `scripts/download-uv.ps1` / `.sh` | Download platform-specific uv binary |
+| `scripts/build-release.ps1` / `.sh` | Full release build scripts |
+| `src-tauri/resources/` | Staged build resources (gitignored except .gitkeep) |
+| `agent-handover-deferred-installer.md` | Full architecture handover document |

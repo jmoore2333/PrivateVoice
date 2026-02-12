@@ -1,331 +1,219 @@
-# PrivateVoice User Manual
+# PrivateVoice User Manual (v1.0)
 
-**Version:** 1.0.0
-**Date:** February 2026
-**Platform:** macOS (Apple Silicon)
+Version: 1.0.0  
+Updated: February 11, 2026 (deferred-installer branch)
 
----
+## 1. What PrivateVoice Does
 
-PrivateVoice is a macOS desktop application for generating speech from text using AI models that run entirely on your computer. No audio data ever leaves your machine.
+PrivateVoice generates speech locally with Qwen3-TTS.
+You can:
+- use preset speakers (Custom Voice)
+- clone a voice from reference audio (Voice Clone)
+- create a voice from a description (Voice Design)
 
----
+## 2. Platform Status
 
-## Table of Contents
+| Platform | Status |
+|---|---|
+| Windows 11 x64 | Working and validated on this branch |
+| macOS (Apple Silicon) | Implemented, validation pending on new installer path |
+| Linux x64 | Implemented paths, validation pending |
 
-- [System Requirements](#system-requirements)
-- [First Launch](#first-launch)
-- [Three Generation Modes](#three-generation-modes)
-  - [Custom Voice](#mode-1-custom-voice)
-  - [Voice Clone](#mode-2-voice-clone)
-  - [Voice Design](#mode-3-voice-design)
-- [Switching Models](#switching-models)
-- [Exporting Audio](#exporting-audio)
-- [Saving to Library](#saving-to-library)
-- [Whisper Transcription](#whisper-transcription)
-- [Settings](#settings)
-- [Debug Console](#debug-console)
-- [Help System](#help-system)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
-- [Troubleshooting](#troubleshooting)
-- [API Reference (Advanced)](#api-reference-advanced)
+## 3. New Installer Model (Important)
 
----
+This build uses a lightweight installer.
+It does **not** include a huge prebuilt Python sidecar.
 
-## System Requirements
+On first launch, the app automatically:
+1. detects your hardware (GPU/CPU)
+2. checks disk space
+3. installs standalone Python 3.11 via `uv`
+4. creates a virtual environment
+5. installs Python dependencies (with GPU-appropriate PyTorch index)
+6. verifies setup and starts the local server
 
-- **macOS** 12.3 or later
-- **Apple Silicon** Mac (M1/M2/M3/M4) recommended. Intel Macs fall back to CPU.
-- **RAM:** 16GB+ recommended
-  - 0.6B models require approximately 8GB available RAM
-  - 1.7B models require approximately 12GB available RAM
-- **Disk space:** 1.2-3.4GB per model (downloaded from HuggingFace on first use)
+If setup has already completed, future launches skip this process.
 
----
+## 4. First Launch Expectations
 
-## First Launch
+- First launch can take several minutes
+- A startup progress screen shows setup phases
+- Network is required for dependency/model downloads
+- No admin install should be required for normal per-user Windows NSIS installs
 
-1. **Open PrivateVoice.** The app starts a local TTS server on port 8765. The first launch takes approximately 60 seconds while the Python environment initializes.
-2. **Welcome screen.** On first launch, an onboarding overlay walks you through the basics.
-3. **Choose a model.** Select a default model to start with:
-   - **0.6B** -- Smallest, fastest. Good for basic text-to-speech with preset voices.
-   - **0.6B-Base** -- Same size, but supports voice cloning.
-   - **1.7B** -- Higher quality preset voices. Needs more RAM.
-   - **1.7B-Base** -- Higher quality voice cloning.
-   - **1.7B-Design** -- Create novel voices from text descriptions.
-4. **Model download.** The first time you select a model, it downloads from HuggingFace (1.2-3.4GB depending on the model). A progress bar shows download speed and ETA.
-5. **Ready.** Once the model loads, the status changes to "Ready" and you can start generating speech.
+If setup fails or is interrupted, open **Settings -> Environment** and use repair controls.
 
----
+## 5. Generation Modes
 
-## Three Generation Modes
+### 5.1 Custom Voice
 
-PrivateVoice offers three distinct ways to generate speech. Each mode requires a specific model type.
+Use one of the preset speakers.
 
-### Mode 1: Custom Voice
+Steps:
+1. Open `Custom Voice`
+2. Enter text (max 2000 chars)
+3. Select language and speaker
+4. (Optional) add style instruction
+5. Click `Generate`
 
-**Model required:** 0.6B or 1.7B (CustomVoice variants)
+Required model: `0.6b` or `1.7b`
 
-Use a preset speaker voice to read your text aloud.
+### 5.2 Voice Clone
 
-1. Make sure the **Custom Voice** tab is selected (it is the default).
-2. **Enter text** in the input area. The text can be in any of the 10 supported languages: Chinese, English, Japanese, Korean, German, French, Russian, Portuguese, Spanish, or Italian.
-3. **Choose a speaker** from the dropdown. There are 9 preset voices:
+Clone voice from reference audio.
 
-   | Speaker | Description | Native Language | Gender |
-   |---------|-------------|-----------------|--------|
-   | Aiden | Sunny American male, clear midrange | English | Male |
-   | Ryan | Dynamic male, strong rhythmic drive | English | Male |
-   | Serena | Warm, gentle young female | Chinese | Female |
-   | Vivian | Bright, slightly edgy young female | Chinese | Female |
-   | Dylan | Youthful Beijing male, clear and natural | Chinese (Beijing) | Male |
-   | Eric | Lively Chengdu male, slightly husky | Chinese (Sichuan) | Male |
-   | Uncle Fu | Seasoned male, low mellow timbre | Chinese | Male |
-   | Ono Anna | Playful Japanese female, light and nimble | Japanese | Female |
-   | Sohee | Warm Korean female, rich in emotion | Korean | Female |
+Steps:
+1. Open `Voice Clone`
+2. Provide reference audio (record or import)
+3. Enter transcript (or use low-quality mode)
+4. Enter target text
+5. Click `Generate`
 
-4. **(Optional) Add a style instruction.** Type a phrase like "Speak cheerfully" or "Read slowly and calmly" to guide the speaking style. Preset instruction options may also be available in the UI.
-5. **Select language** from the dropdown (matches the language of your text).
-6. **Click Generate.** Wait for the audio to appear in the output panel.
-7. **Play** the generated audio using the built-in player.
+Required model: `0.6b-base` or `1.7b-base`
 
-### Mode 2: Voice Clone
+Notes:
+- In this branch, backend voice clone uses in-memory audio decoding to avoid Windows temp-file issues.
+- If recording is unavailable in your environment, importing audio still works.
 
-**Model required:** 0.6B-Base or 1.7B-Base
+### 5.3 Voice Design
 
-Clone a real person's voice from a short audio sample.
+Create a voice from descriptive text.
 
-1. Switch to the **Voice Clone** tab. If a Custom Voice model is loaded, you will see a compatibility warning with a button to load the correct model.
-2. **Provide reference audio** (5-15 seconds of speech):
-   - **Import** an existing WAV file, or
-   - **Record** directly (requires a production build for microphone access)
-3. **Enter reference transcript** -- type what is spoken in the reference audio. This improves cloning accuracy.
-   - Alternatively, enable **low-quality mode** (x-vector only) to skip the transcript requirement.
-4. **Enter the text** you want spoken in the cloned voice.
-5. **Click Generate.**
+Steps:
+1. Open `Voice Design`
+2. Describe the target voice
+3. Enter target text
+4. Click `Generate`
 
-### Mode 3: Voice Design
+Required model: `1.7b-design`
 
-**Model required:** 1.7B-Design only
-
-Create a completely new voice by describing it in natural language.
-
-1. Switch to the **Voice Design** tab. If the wrong model is loaded, follow the prompt to load the 1.7B-Design model.
-2. **Describe the voice** you want. For example:
-   - "A warm male voice with a slight British accent"
-   - "A cheerful young woman speaking quickly"
-   - "A deep, authoritative news anchor voice"
-3. **Enter the text** to be spoken.
-4. **Click Generate.**
-
----
-
-## Switching Models
-
-Different modes require different model types. The app shows compatibility indicators:
+## 6. Model Compatibility Reference
 
 | Model | Custom Voice | Voice Clone | Voice Design |
-|-------|:---:|:---:|:---:|
-| 0.6B | Yes | No | No |
-| 0.6B-Base | No | Yes | No |
-| 1.7B | Yes | No | No |
-| 1.7B-Base | No | Yes | No |
-| 1.7B-Design | No | No | Yes |
+|---|:---:|:---:|:---:|
+| `0.6b` | Yes | No | No |
+| `1.7b` | Yes | No | No |
+| `0.6b-base` | No | Yes | No |
+| `1.7b-base` | No | Yes | No |
+| `1.7b-design` | No | No | Yes |
 
-When you switch to a mode that requires a different model, a banner appears with a one-click "Load compatible model" action. Mode tabs may show orange dot indicators when they are incompatible with the currently loaded model.
+When incompatible, the app shows warnings and model-load actions.
 
-To manually change models, go to **Settings** and select a different default model, or use the model switch prompt that appears in the mode panel.
+## 7. GPU and CUDA Behavior (Windows)
 
----
+In this branch:
+- NVIDIA GPUs are detected via `nvidia-smi`
+- CUDA wheel target is selected automatically (`cu124` or `cu121`)
+- Runtime uses CUDA when `torch.cuda.is_available()` is true
+- If `flash_attn` is not installed, attention falls back to SDPA
 
-## Exporting Audio
+CPU fallback is automatic when GPU acceleration is unavailable.
 
-After generating speech:
+## 8. Whisper Auto-Transcription
 
-1. **Click Export** (or the save/download button in the output panel).
-2. A native save dialog opens. Choose where to save the file.
-3. The default format is WAV (24kHz, 16-bit, mono).
+Whisper is optional and can auto-fill Voice Clone transcript text.
 
-To change the export format:
+Enable:
+1. Open `Settings`
+2. Enable `Auto-transcription`
+3. Pick/load Whisper model
 
-1. Open **Settings** (gear icon in the header).
-2. Change **Export Format** to MP3.
-3. Choose the MP3 bitrate: 128, 192 (default), 256, or 320 kbps.
+Use:
+1. Add reference audio in Voice Clone
+2. Click `Auto-transcribe`
+3. Review transcript and generate
 
-> **Known Issue (v1.0):** MP3 export has a known issue and may not work correctly in all cases. WAV export is reliable and recommended for v1.0.
+## 9. Library and Export
 
----
+### Save to Library
 
-## Saving to Library
+- `Save` stores generated output in library
+- Tabs: `Recent`, `Saved Voices`, `Audio`
+- Persistence uses Tauri filesystem APIs when available
 
-The Library lets you save and organize generated audio clips and cloned voices.
+### Export
 
-1. After generating audio, click **Save to Library**.
-2. The clip appears in the Library drawer under the **Audio** tab.
-3. Cloned voice profiles appear under the **Voices** tab.
-4. Use the **Search** bar at the top of the Library to find items by name or comments.
+- `Export` opens native save dialog
+- Formats: WAV or MP3
+- Format is controlled by Settings
 
-### Library Tabs
+## 10. Settings Overview
 
-- **Audio** -- Saved audio clips from any generation mode
-- **Voices** -- Saved voice profiles (from Voice Clone)
-- **All** -- Combined view
+Key settings include:
+- Theme
+- Default model / default speaker
+- Auto-load model
+- Export folder + default format
+- Whisper auto-transcription controls
+- Debug console on startup
 
-### Persistence
+### Environment Section (New)
 
-- During a session, audio is stored as in-memory blob URLs (recent cache).
-- Saved items persist to disk via the Tauri filesystem plugin at `{appData}/library/`.
-- If running in a development/test environment, library metadata falls back to localStorage (audio files are not persisted).
+The `Environment` section shows:
+- setup state (ready, update needed, corrupted, etc.)
+- GPU target
+- environment disk usage
+- uv version
+- venv path
 
----
+Actions:
+- `Repair (re-verify)`
+- `Full rebuild`
 
-## Whisper Transcription
+Use these if first-run setup or environment validation fails.
 
-PrivateVoice includes built-in speech-to-text transcription powered by faster-whisper (CTranslate2). This feature can transcribe audio files back to text, which is useful for validating TTS output quality.
+## 11. Keyboard Shortcuts
 
-> **Note (v1.0):** Whisper transcription is currently accessible via the REST API only. There is no UI for transcription in the desktop app yet, but the feature is fully functional through the API endpoints described below.
+- `Cmd/Ctrl + Enter`: Generate
+- `Cmd/Ctrl + S`: Save
+- `Cmd/Ctrl + 1`: Custom Voice
+- `Cmd/Ctrl + 2`: Voice Clone
+- `Cmd/Ctrl + 3`: Voice Design
+- `Space`: Play/pause (outside text input)
+- `Escape`: Close open panel
 
-### Loading a Whisper Model
+## 12. Troubleshooting
 
-The Whisper model must be loaded separately from the TTS model. It runs on CPU and does not compete with GPU memory used by TTS models.
+### Setup takes too long
 
-Available Whisper models:
+First launch may take time due to Python/dependency install and downloads.
+Keep the app open until setup completes.
 
-| Model | Parameters | Download Size |
-|-------|-----------|---------------|
-| tiny | 39M | 75 MB |
-| base | 74M | 145 MB |
-| small | 244M | 465 MB |
-| medium | 769M | 1.5 GB |
-| large-v3 | 1.5B | 3.1 GB |
-| large-v3-turbo | 809M | 1.6 GB |
+### Setup failed
 
-Load a model via the API:
+Open **Settings -> Environment** and run `Repair` or `Full rebuild`.
+Also verify network and free disk space.
 
-```bash
-curl -X POST http://127.0.0.1:8765/load-whisper \
-  -H "Content-Type: application/json" \
-  -d '{"model_size": "base"}'
-```
+### GPU not used
 
-### Transcribing Audio
+Check `System` and `Environment` sections in Settings.
+If CUDA is unavailable, app falls back to CPU.
 
-Send an audio file to the transcription endpoint:
+### Voice Clone errors
 
-```bash
-curl -X POST http://127.0.0.1:8765/transcribe \
-  -F "file=@your_audio.wav"
-```
+- Ensure Base model is loaded (`0.6b-base` or `1.7b-base`)
+- Provide clear reference audio
+- Try import if microphone recording is blocked
 
-The response includes:
-- Transcribed text
-- Detected language
-- Confidence score (0-1)
-- Audio duration in seconds
+### Model download issues
 
-### Whisper API Endpoints
+Models are fetched from HuggingFace.
+Check connectivity and available disk.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/whisper-status` | GET | Check if a Whisper model is loaded and which one |
-| `/whisper-models` | GET | List available Whisper model sizes and download sizes |
-| `/load-whisper` | POST | Load a Whisper model by size |
-| `/unload-whisper` | POST | Unload the current Whisper model and free memory |
-| `/transcribe` | POST | Transcribe an audio file (multipart form upload) |
+### Out of memory
 
----
+Use smaller models (`0.6b` / `0.6b-base`) and close other heavy apps.
 
-## Settings
+## 13. Privacy and Network
 
-Open Settings by clicking the gear icon in the app header.
+- Inference runs locally on your machine
+- Internet is used for setup-time dependency/model downloads
+- Server listens on localhost (`127.0.0.1:8765`)
 
-Available settings:
+## 14. Advanced API Access
 
-- **Default Model** -- Which TTS model to load on startup
-- **Auto-load Model** -- Whether to automatically load the default model at startup
-- **Export Format** -- WAV or MP3
-- **MP3 Bitrate** -- 128, 192, 256, or 320 kbps (only applies when exporting as MP3)
-- **Theme** -- Dark or light mode (visual preference)
-- **App Version** -- Displayed for reference
+Local API base URL:
 
-To reset all settings to defaults, use the reset option in Settings.
+`http://127.0.0.1:8765`
 
----
-
-## Debug Console
-
-For troubleshooting:
-
-1. Click the debug/terminal icon to open the Debug Console.
-2. **Logs tab** -- View real-time server log entries (INFO, ERROR levels).
-3. **System tab** -- View device info, memory usage, Python/PyTorch versions, and model status.
-
-The debug console can help diagnose:
-
-- Model loading failures
-- Memory issues
-- Generation errors
-- Network/download problems
-
----
-
-## Help System
-
-Click the help icon (question mark) in the app header to open the Help panel. It provides in-app documentation about modes, models, and usage tips.
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Cmd+Enter` | Generate audio |
-| `Cmd+S` | Save to library |
-| `Space` | Play/pause audio |
-| `Cmd+1/2/3` | Switch modes |
-| `Escape` | Close panels |
-
-Additional keyboard shortcuts are documented in the Help panel within the app.
-
----
-
-## Troubleshooting
-
-### "Model not loaded" error
-
-The TTS model needs to be loaded before you can generate speech. Go to Settings and ensure a model is selected, or click "Load Model" in the mode panel.
-
-### Not enough memory
-
-The memory check endpoint reports whether you have enough free RAM for a given model. Close other applications to free memory. The 0.6B models need approximately 8GB free; 1.7B models need approximately 12GB.
-
-### Model download stalls
-
-Check the download progress at `/download-progress`. If the download fails, try again -- models are cached locally after the first successful download in `~/.cache/huggingface/`.
-
-### Voice Clone mode asks to switch models
-
-Voice Clone requires a "Base" model variant. Accept the prompt to automatically load the compatible model.
-
-### Audio export fails
-
-If MP3 export fails, switch to WAV format in Settings. WAV export is more reliable in v1.0.
-
-### App won't start
-
-The Python backend server runs on port 8765. If another process is using that port, the app cannot start. Check with: `lsof -i :8765`
-
-### Slow first launch
-
-This is normal. PyInstaller extracts the bundled Python environment on first launch, which takes approximately 60 seconds. Subsequent launches are faster.
-
----
-
-## API Reference (Advanced)
-
-For automation and scripting, the full REST API is available at:
-
-- **Swagger UI:** http://127.0.0.1:8765/docs
-- **ReDoc:** http://127.0.0.1:8765/redoc
-- **OpenAPI JSON:** http://127.0.0.1:8765/openapi.json
-
-The API has 21+ endpoints covering health checks, model management, speech generation, and transcription. The server only accepts connections from localhost.
+See full endpoint details in `docs/API_REFERENCE.md`.

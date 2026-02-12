@@ -13,6 +13,16 @@ import sys
 if hasattr(signal, 'SIGPIPE'):
     signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
+import warnings
+# Suppress expected warnings from optional dependencies on Windows:
+# - sox: not needed for core TTS (only used by some audio preprocessing)
+# - flash_attn: optional CUDA optimization, falls back to SDPA
+# - HuggingFace symlink warning: Windows doesn't support symlinks without
+#   Developer Mode, but the degraded cache still works fine
+warnings.filterwarnings("ignore", message=".*sox.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*flash.attn.*", category=UserWarning)
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
 import torch
 from contextlib import asynccontextmanager
 from typing import Optional, List
@@ -208,18 +218,12 @@ app = FastAPI(
     redoc_url="/redoc" if _is_dev else None,
 )
 
-# Enable CORS for Tauri frontend
-ALLOWED_ORIGINS = [
-    "http://localhost:1420",
-    "http://127.0.0.1:1420",
-    "tauri://localhost",
-    "https://tauri.localhost",
-]
-
+# Enable CORS — server is localhost-only so all origins are safe.
+# Tauri WebView origins vary by platform (tauri://localhost on macOS,
+# https://tauri.localhost on Windows/Linux) and may change across versions.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -483,7 +487,10 @@ async def generate_voice_clone(
             raise HTTPException(status_code=400, detail=f"Reference audio exceeds maximum size of {MAX_AUDIO_SIZE // (1024*1024)} MB")
         if not x_vector_only_mode and not reference_text:
             raise HTTPException(status_code=400, detail="Reference text is required unless low-quality mode is enabled.")
-        audio_bytes, media_type = model.generate_voice_clone(
+
+        # Run inference in a thread so the event loop stays free for /logs polling
+        audio_bytes, media_type = await asyncio.to_thread(
+            model.generate_voice_clone,
             text=text,
             reference_audio=audio_data,
             reference_text=reference_text,
@@ -498,13 +505,18 @@ async def generate_voice_clone(
     except HTTPException:
         raise
     except RuntimeError as e:
+        import traceback
+        tb = traceback.format_exc()
         error_msg = str(e)
+        logger.error(f"Voice clone RuntimeError:\n{tb}")
         if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"{error_msg}\n\nTraceback:\n{tb}")
     except Exception as e:
-        logger.error(f"Voice clone failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Voice clone failed with full traceback:\n{tb}")
+        raise HTTPException(status_code=500, detail=f"{e}\n\nTraceback:\n{tb}")
 
 
 @app.post("/generate/voice-design")
@@ -688,6 +700,40 @@ def main():
 
     port = int(os.environ.get("TTS_SERVER_PORT", "8765"))
     host = os.environ.get("TTS_SERVER_HOST", "127.0.0.1")
+
+    # On Windows, when spawned with CREATE_NO_WINDOW and piped streams,
+    # logging writes from background threads can fail with OSError.
+    # Suppress the verbose "--- Logging error ---" tracebacks in production.
+    if not _is_dev:
+        logging.raiseExceptions = False
+
+    # On Windows, replace sys.stdout/stderr with safe wrappers that catch
+    # write errors ([Errno 22] Invalid argument). Third-party libraries
+    # (e.g., qwen_tts, transformers) use bare print() calls that crash when
+    # stdout is a pipe with CREATE_NO_WINDOW flag.
+    if platform.system() == "Windows" and not _is_dev:
+        class SafeWriter:
+            """Wraps a stream to silently handle broken pipe / invalid argument errors."""
+            def __init__(self, stream):
+                self._stream = stream
+            def write(self, data):
+                try:
+                    if self._stream and not self._stream.closed:
+                        return self._stream.write(data)
+                except OSError:
+                    pass  # [Errno 22] or broken pipe — silently ignore
+                return len(data) if data else 0
+            def flush(self):
+                try:
+                    if self._stream and not self._stream.closed:
+                        self._stream.flush()
+                except OSError:
+                    pass
+            def __getattr__(self, name):
+                return getattr(self._stream, name)
+
+        sys.stdout = SafeWriter(sys.stdout)
+        sys.stderr = SafeWriter(sys.stderr)
 
     state = get_startup_state()
     state.set_phase("starting-server", f"Starting TTS server on {host}:{port}", 5)
