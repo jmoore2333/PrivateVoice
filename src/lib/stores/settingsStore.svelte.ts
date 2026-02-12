@@ -16,7 +16,6 @@ export interface Settings {
   recentCacheSize: number;
   // Optional features
   enableWhisper: boolean;
-  enableTranslation: boolean;
   // Onboarding
   hasCompletedOnboarding: boolean;
 }
@@ -35,7 +34,6 @@ const DEFAULT_SETTINGS: Settings = {
   recentCacheSize: 10,
   // Optional features
   enableWhisper: false,
-  enableTranslation: false,
   // Onboarding
   hasCompletedOnboarding: false,
 };

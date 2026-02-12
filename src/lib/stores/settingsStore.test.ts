@@ -59,14 +59,6 @@ describe('Settings Store', () => {
     expect(settingsStore.state.autoLoadModel).toBe(false);
   });
 
-  it('can update optional translation setting', async () => {
-    vi.resetModules();
-    const { settingsStore } = await import('./settingsStore.svelte');
-
-    settingsStore.updateSetting('enableTranslation', true);
-    expect(settingsStore.state.enableTranslation).toBe(true);
-  });
-
   it('can complete onboarding with selected model', async () => {
     vi.resetModules();
     const { settingsStore } = await import('./settingsStore.svelte');

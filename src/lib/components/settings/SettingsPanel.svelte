@@ -431,28 +431,19 @@
             {/if}
           </div>
 
-          <!-- Translation toggle -->
-          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
-            <div>
-              <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation support</span>
-              <p class="text-xs text-[var(--color-text-muted)]">
-                Enable local translation helpers for text inputs in all modes and Whisper translation in Voice Clone auto-transcribe
+          <!-- Translation note -->
+          <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
+            <span class="text-sm font-medium text-[var(--color-text-primary)]">Translation helpers</span>
+            {#if settingsStore.state.enableWhisper}
+              <p class="text-xs text-[var(--color-text-muted)] mt-1">
+                Enabled with Auto-transcription. You can translate text-to-generate to the selected speech language in all modes.
               </p>
-            </div>
-            <button
-              onclick={handleToggle("enableTranslation")}
-              class="relative w-11 h-6 rounded-full transition-colors
-                {settingsStore.state.enableTranslation ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
-              role="switch"
-              aria-checked={settingsStore.state.enableTranslation}
-              aria-label="Toggle translation support"
-            >
-              <span
-                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
-                  {settingsStore.state.enableTranslation ? 'translate-x-5' : ''}"
-              ></span>
-            </button>
-          </label>
+            {:else}
+              <p class="text-xs text-[var(--color-text-muted)] mt-1">
+                Enable Auto-transcription to unlock local translation helpers.
+              </p>
+            {/if}
+          </div>
         </div>
       </section>
 

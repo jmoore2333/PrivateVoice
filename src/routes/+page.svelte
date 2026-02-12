@@ -557,7 +557,7 @@
       localReferenceText = transcriptResult.text;
       ttsStore.setReferenceText(transcriptResult.text);
 
-      if (settingsStore.state.enableTranslation) {
+      if (settingsStore.state.enableWhisper) {
         try {
           const translated = await ttsClient.transcribe(file, { task: "translate" });
           translationText = translated.text;
@@ -575,7 +575,7 @@
   }
 
   async function handleTranslateInputText() {
-    if (!settingsStore.state.enableTranslation) return;
+    if (!settingsStore.state.enableWhisper) return;
 
     if (!localText.trim()) {
       textTranslationError = "Enter text to translate";
@@ -675,7 +675,7 @@
           bind:language={localLanguage}
           bind:speaker={localSpeaker}
           bind:instruction={localInstruction}
-          hasTranslation={settingsStore.state.enableTranslation}
+          hasTranslation={settingsStore.state.enableWhisper}
           {isTranslatingText}
           {textTranslationError}
           modelSupported={customVoiceModelSupported}
@@ -706,8 +706,8 @@
           isGenerating={ttsState.isGenerating}
           {elapsedTime}
           hasWhisper={settingsStore.state.enableWhisper}
-          hasTranslation={settingsStore.state.enableWhisper && settingsStore.state.enableTranslation}
-          canTranslateText={settingsStore.state.enableTranslation}
+          hasTranslation={settingsStore.state.enableWhisper}
+          canTranslateText={settingsStore.state.enableWhisper}
           {isTranscribing}
           {transcriptionError}
           {translationText}
@@ -730,7 +730,7 @@
           bind:text={localText}
           bind:language={localLanguage}
           bind:voiceDescription={localVoiceDescription}
-          hasTranslation={settingsStore.state.enableTranslation}
+          hasTranslation={settingsStore.state.enableWhisper}
           {isTranslatingText}
           {textTranslationError}
           isGenerating={ttsState.isGenerating}

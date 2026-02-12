@@ -124,7 +124,7 @@ Use:
 3. Review transcript and generate
 
 Optional translation:
-1. In `Settings -> Optional Features`, enable `Translation support`
+1. In `Settings -> Optional Features`, enable `Auto-transcription`
 2. In any mode, use `Translate text to <Language>` next to the text input
 3. The input text is translated locally to your selected generation language
 4. In Voice Clone, `Auto-transcribe` also shows an optional local Whisper translation helper
