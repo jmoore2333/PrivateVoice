@@ -5,7 +5,7 @@
 No cloud APIs. No subscriptions. No data sent anywhere.
 
 <p align="center">
-  <img src="e2e/screenshots/default-1280x800-main.png" alt="PrivateVoice — Custom Voice mode" width="720" />
+  <img src="docs/images/screenshot-custom-voice.png" alt="PrivateVoice — Custom Voice mode" width="720" />
 </p>
 
 ---
@@ -36,8 +36,8 @@ Describe the voice you want in plain text — *"warm baritone, slight British ac
 </table>
 
 <p align="center">
-  <img src="e2e/screenshots/default-1280x800-voice-clone.png" alt="Voice Clone mode" width="355" />
-  <img src="e2e/screenshots/default-1280x800-voice-design.png" alt="Voice Design mode" width="355" />
+  <img src="docs/images/screenshot-voice-clone.png" alt="Voice Clone mode" width="355" />
+  <img src="docs/images/screenshot-voice-design.png" alt="Voice Design mode" width="355" />
 </p>
 
 ## Key Features
@@ -129,7 +129,7 @@ The Tauri desktop shell manages a Python sidecar process that runs the TTS model
 ## Settings & Environment
 
 <p align="center">
-  <img src="e2e/screenshots/default-1280x800-settings.png" alt="Settings panel" width="720" />
+  <img src="docs/images/screenshot-settings.png" alt="Settings panel" width="720" />
 </p>
 
 Configure theme, default model/speaker, export format, auto-load behavior, and optional features (Whisper, translation). The **Environment** section shows GPU target, setup state, and disk usage — with **Repair** and **Full Rebuild** buttons if anything goes wrong.
