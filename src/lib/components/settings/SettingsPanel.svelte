@@ -201,6 +201,22 @@
     { value: "mp3", label: "MP3", description: "Compressed (192kbps)" },
   ];
 
+  const WAV_SAMPLE_RATES = [
+    { value: "native", label: "Native", description: "Use model output sample rate" },
+    { value: "8000", label: "8,000 Hz" },
+    { value: "16000", label: "16,000 Hz" },
+    { value: "22050", label: "22,050 Hz" },
+    { value: "24000", label: "24,000 Hz" },
+    { value: "44100", label: "44,100 Hz" },
+    { value: "48000", label: "48,000 Hz" },
+  ];
+
+  const WAV_BIT_DEPTHS = [
+    { value: "16", label: "16-bit PCM" },
+    { value: "24", label: "24-bit PCM" },
+    { value: "32", label: "32-bit PCM" },
+  ];
+
   const CACHE_SIZES = [
     { value: "5", label: "5 items" },
     { value: "10", label: "10 items" },
@@ -228,6 +244,17 @@
     return (value: string) => {
       settingsStore.updateSetting(key, parseInt(value, 10) as Settings[K]);
     };
+  }
+
+  function handleWavSampleRateChange(value: string) {
+    settingsStore.updateSetting(
+      "wavSampleRate",
+      (value === "native" ? null : parseInt(value, 10)) as Settings["wavSampleRate"],
+    );
+  }
+
+  function handleWavBitDepthChange(value: string) {
+    settingsStore.updateSetting("wavBitDepth", parseInt(value, 10) as Settings["wavBitDepth"]);
   }
 
   function handleToggle(key: keyof Settings) {
@@ -396,6 +423,22 @@
             label="Default Format"
             onchange={handleChange("exportFormat")}
           />
+
+          {#if settingsStore.state.exportFormat === "wav"}
+            <StudioSelect
+              value={settingsStore.state.wavSampleRate === null ? "native" : settingsStore.state.wavSampleRate.toString()}
+              options={WAV_SAMPLE_RATES}
+              label="WAV Sample Rate"
+              onchange={handleWavSampleRateChange}
+            />
+
+            <StudioSelect
+              value={settingsStore.state.wavBitDepth.toString()}
+              options={WAV_BIT_DEPTHS}
+              label="WAV Bit Depth"
+              onchange={handleWavBitDepthChange}
+            />
+          {/if}
         </div>
       </section>
 

@@ -2,6 +2,7 @@
   import TextInput from './TextInput.svelte';
   import LanguageSelector from './LanguageSelector.svelte';
   import VoiceSelector from './VoiceSelector.svelte';
+  import SeedControls from './SeedControls.svelte';
   import { helpStore } from '$lib/stores/helpStore.svelte';
   const instructionId = "custom-voice-instructions";
 
@@ -23,6 +24,7 @@
     language: string;
     speaker: string;
     instruction: string;
+    seed: number | null;
     isGenerating: boolean;
     elapsedTime?: number;
     modelSupported?: boolean;
@@ -37,6 +39,7 @@
     onLanguageChange?: (lang: string) => void;
     onSpeakerChange?: (speaker: string, isPreset: boolean) => void;
     onInstructionChange?: (instruction: string) => void;
+    onSeedChange?: (seed: number | null) => void;
     onTranslateText?: () => void;
     onLoadModel?: () => void;
   }
@@ -46,6 +49,7 @@
     language = $bindable(),
     speaker = $bindable(),
     instruction = $bindable(),
+    seed = $bindable(),
     isGenerating,
     elapsedTime = 0,
     modelSupported = true,
@@ -60,6 +64,7 @@
     onLanguageChange,
     onSpeakerChange,
     onInstructionChange,
+    onSeedChange,
     onTranslateText,
     onLoadModel,
   }: Props = $props();
@@ -198,6 +203,11 @@
       </div>
     {/if}
   </div>
+
+  <SeedControls
+    bind:seed={seed}
+    {onSeedChange}
+  />
 
   <!-- Generate Button -->
   <button

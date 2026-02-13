@@ -14,6 +14,9 @@ export interface Settings {
   // Audio settings
   exportFolder: string;
   exportFormat: "wav" | "mp3";
+  wavSampleRate: number | null;
+  wavBitDepth: 16 | 24 | 32;
+  wavChannels: 1 | 2;
   // Library settings
   recentCacheSize: number;
   // Optional features
@@ -35,6 +38,9 @@ const DEFAULT_SETTINGS: Settings = {
   // Audio settings
   exportFolder: "~/Documents/PrivateVoice",
   exportFormat: "wav",
+  wavSampleRate: null,
+  wavBitDepth: 16,
+  wavChannels: 1,
   // Library settings
   recentCacheSize: 10,
   // Optional features

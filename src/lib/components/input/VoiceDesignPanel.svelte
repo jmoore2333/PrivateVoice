@@ -1,6 +1,7 @@
 <script lang="ts">
   import TextInput from './TextInput.svelte';
   import LanguageSelector from './LanguageSelector.svelte';
+  import SeedControls from './SeedControls.svelte';
   import { helpStore } from '$lib/stores/helpStore.svelte';
   const descriptionId = "voice-design-description";
 
@@ -15,6 +16,7 @@
     text: string;
     language: string;
     voiceDescription: string;
+    seed: number | null;
     isGenerating: boolean;
     elapsedTime?: number;
     modelLoaded: boolean;
@@ -28,6 +30,7 @@
     onTextChange?: (text: string) => void;
     onLanguageChange?: (lang: string) => void;
     onDescriptionChange?: (description: string) => void;
+    onSeedChange?: (seed: number | null) => void;
     onTranslateText?: () => void;
   }
 
@@ -35,6 +38,7 @@
     text = $bindable(),
     language = $bindable(),
     voiceDescription = $bindable(),
+    seed = $bindable(),
     isGenerating,
     elapsedTime = 0,
     modelLoaded,
@@ -48,6 +52,7 @@
     onTextChange,
     onLanguageChange,
     onDescriptionChange,
+    onSeedChange,
     onTranslateText,
   }: Props = $props();
 
@@ -156,6 +161,11 @@
   <LanguageSelector
     bind:value={language}
     onSelect={onLanguageChange}
+  />
+
+  <SeedControls
+    bind:seed={seed}
+    {onSeedChange}
   />
 
   {#if hasTranslation}

@@ -43,6 +43,11 @@ describe('Settings Store', () => {
     expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(true);
     expect(settingsStore.state.stableVoiceDesignLeadIn).toBe(true);
 
+    // WAV export controls
+    expect(settingsStore.state.wavSampleRate).toBeNull();
+    expect(settingsStore.state.wavBitDepth).toBe(16);
+    expect(settingsStore.state.wavChannels).toBe(1);
+
     // Verify onboarding not completed by default
     expect(settingsStore.state.hasCompletedOnboarding).toBe(false);
   }, 15000);

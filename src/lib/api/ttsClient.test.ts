@@ -306,6 +306,21 @@ describe('generateVoiceClone', () => {
     expect(formData.get('x_vector_only_mode')).toBe('false');
   });
 
+  it('includes seed and WAV options when provided', async () => {
+    fetchMock.mockResolvedValueOnce(blobResponse());
+
+    await ttsClient.generateVoiceClone('Hi', 'Ref', fakeFile, {
+      seed: 42,
+      sample_rate: 16000,
+      bit_depth: 24,
+    });
+
+    const formData = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(formData.get('seed')).toBe('42');
+    expect(formData.get('sample_rate')).toBe('16000');
+    expect(formData.get('bit_depth')).toBe('24');
+  });
+
   it('throws with parsed error on failure', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'Audio too short' }, 422));
 
@@ -377,6 +392,52 @@ describe('generateVoiceDesign', () => {
 
     const options = fetchMock.mock.calls[0][1];
     expect(options?.signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+// ===========================================================================
+// Batch APIs
+// ===========================================================================
+
+describe('batch APIs', () => {
+  it('posts JSON body for generateBatch and returns zip blob', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('zip-data', {
+        status: 200,
+        headers: { 'Content-Type': 'application/zip' },
+      }),
+    );
+
+    const request = {
+      mode: 'custom-voice' as const,
+      items: [{ text: 'hello', output_filename: 'hello.wav' }],
+    };
+    const blob = await ttsClient.generateBatch(request);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://127.0.0.1:8765/generate/batch');
+    expect(options?.method).toBe('POST');
+    expect(options?.headers).toEqual({ 'Content-Type': 'application/json' });
+    expect(JSON.parse(options?.body as string)).toEqual(request);
+    expect(blob.size).toBeGreaterThan(0);
+  });
+
+  it('gets batch progress', async () => {
+    const payload = { total: 3, completed: 1, current_item: 'a.wav', status: 'running' };
+    fetchMock.mockResolvedValueOnce(jsonResponse(payload));
+
+    const progress = await ttsClient.getBatchProgress();
+    expect(progress).toEqual(payload);
+  });
+
+  it('sends cancel request for cancelBatch', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'cancelled' }));
+
+    await ttsClient.cancelBatch();
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:8765/cancel-generation', {
+      method: 'POST',
+    });
   });
 });
 

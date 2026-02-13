@@ -46,6 +46,7 @@ describe("ttsStore", () => {
     ttsStore.setSpeaker("aiden");
     ttsStore.setInstruction("");
     ttsStore.setVoiceDescription("");
+    ttsStore.setSeed(null);
     ttsStore.setReferenceAudio(null);
     ttsStore.setReferenceText("");
     ttsStore.setCloneLowQualityMode(false);
@@ -72,6 +73,7 @@ describe("ttsStore", () => {
       expect(ttsStore.state.speaker).toBe("aiden");
       expect(ttsStore.state.instruction).toBe("");
       expect(ttsStore.state.voiceDescription).toBe("");
+      expect(ttsStore.state.seed).toBeNull();
     });
 
     it("has correct default voice clone state", () => {
@@ -646,6 +648,19 @@ describe("ttsStore", () => {
     it("updates referenceText state", () => {
       ttsStore.setReferenceText("The reference transcript");
       expect(ttsStore.state.referenceText).toBe("The reference transcript");
+    });
+  });
+
+  describe("setSeed()", () => {
+    it("updates seed state", () => {
+      ttsStore.setSeed(123456);
+      expect(ttsStore.state.seed).toBe(123456);
+    });
+
+    it("clears seed state", () => {
+      ttsStore.setSeed(99);
+      ttsStore.setSeed(null);
+      expect(ttsStore.state.seed).toBeNull();
     });
   });
 

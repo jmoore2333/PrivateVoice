@@ -66,6 +66,9 @@ export interface CustomVoiceRequest {
   language?: string;
   format?: string;
   stable_lead_in?: boolean;
+  seed?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number;
 }
 
 export interface VoiceDesignRequest {
@@ -74,6 +77,48 @@ export interface VoiceDesignRequest {
   language?: string;
   format?: string;
   stable_lead_in?: boolean;
+  seed?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number;
+}
+
+export interface VoiceCloneRequestOptions {
+  xVectorOnly?: boolean;
+  language?: string;
+  format?: string;
+  seed?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number;
+}
+
+export interface BatchItem {
+  text: string;
+  output_filename: string;
+}
+
+export interface BatchRequest {
+  mode: "custom-voice" | "voice-clone" | "voice-design";
+  language?: string;
+  format?: string;
+  mp3_bitrate?: number;
+  seed?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number;
+  speaker?: string;
+  instruction?: string;
+  voice_description?: string;
+  stable_lead_in?: boolean;
+  reference_text?: string;
+  reference_audio_base64?: string | null;
+  x_vector_only_mode?: boolean;
+  items: BatchItem[];
+}
+
+export interface BatchProgress {
+  total: number;
+  completed: number;
+  current_item: string;
+  status: string;
 }
 
 export interface WhisperStatus {
@@ -335,7 +380,7 @@ class TTSClient {
     text: string,
     referenceText: string,
     referenceAudio: File,
-    options?: { xVectorOnly?: boolean; language?: string; format?: string }
+    options?: VoiceCloneRequestOptions
   ): Promise<Blob> {
     const signal = this.createGenerationSignal();
     const formData = new FormData();
@@ -345,6 +390,13 @@ class TTSClient {
     formData.append("x_vector_only_mode", options?.xVectorOnly ? "true" : "false");
     if (options?.language) formData.append("language", options.language);
     if (options?.format) formData.append("format", options.format);
+    if (typeof options?.seed === "number") formData.append("seed", options.seed.toString());
+    if (typeof options?.sample_rate === "number") {
+      formData.append("sample_rate", options.sample_rate.toString());
+    }
+    if (typeof options?.bit_depth === "number") {
+      formData.append("bit_depth", options.bit_depth.toString());
+    }
 
     try {
       const res = await this.request("/generate/voice-clone", {
@@ -377,6 +429,35 @@ class TTSClient {
     } finally {
       this._abortController = null;
     }
+  }
+
+  async generateBatch(request: BatchRequest): Promise<Blob> {
+    const signal = this.createGenerationSignal();
+    try {
+      const res = await this.request("/generate/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal,
+      });
+      if (!res.ok) {
+        throw new Error(await this.readErrorMessage(res, "Failed to generate batch"));
+      }
+      return res.blob();
+    } finally {
+      this._abortController = null;
+    }
+  }
+
+  async getBatchProgress(): Promise<BatchProgress> {
+    const res = await this.request("/batch-progress");
+    if (!res.ok) throw new Error("Failed to get batch progress");
+    return res.json();
+  }
+
+  async cancelBatch(): Promise<void> {
+    const res = await this.request("/cancel-generation", { method: "POST" });
+    if (!res.ok) throw new Error("Failed to cancel batch");
   }
 
   // ============================================================================

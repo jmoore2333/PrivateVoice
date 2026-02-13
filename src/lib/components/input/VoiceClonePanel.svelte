@@ -2,6 +2,7 @@
   import TextInput from './TextInput.svelte';
   import LanguageSelector from './LanguageSelector.svelte';
   import AudioRecorder from './AudioRecorder.svelte';
+  import SeedControls from './SeedControls.svelte';
   import { helpStore } from '$lib/stores/helpStore.svelte';
   const transcriptId = "voice-clone-transcript";
 
@@ -9,6 +10,7 @@
     text: string;
     language: string;
     referenceText: string;
+    seed: number | null;
     referenceAudioUrl: string | null;
     referenceAudioBlob: Blob | null;
     isGenerating: boolean;
@@ -35,6 +37,7 @@
     onUseTranslation?: () => void;
     onTranslateText?: () => void;
     onLowQualityModeChange?: (enabled: boolean) => void;
+    onSeedChange?: (seed: number | null) => void;
     onLoadModel?: () => void;
   }
 
@@ -42,6 +45,7 @@
     text = $bindable(),
     language = $bindable(),
     referenceText = $bindable(),
+    seed = $bindable(),
     referenceAudioUrl,
     referenceAudioBlob,
     isGenerating,
@@ -68,6 +72,7 @@
     onUseTranslation,
     onTranslateText,
     onLowQualityModeChange,
+    onSeedChange,
     onLoadModel,
   }: Props = $props();
 
@@ -269,6 +274,11 @@
   <LanguageSelector
     bind:value={language}
     onSelect={onLanguageChange}
+  />
+
+  <SeedControls
+    bind:seed={seed}
+    {onSeedChange}
   />
 
   <!-- Generate Button -->
