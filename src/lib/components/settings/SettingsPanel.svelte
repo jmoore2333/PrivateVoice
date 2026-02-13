@@ -774,6 +774,27 @@
             </button>
           </label>
 
+          <!-- Toggle: Enable batch mode -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Enable batch mode</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Show batch processing toggle in the main workspace</p>
+            </div>
+            <button
+              onclick={handleToggle("enableBatchMode")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.enableBatchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.enableBatchMode}
+              aria-label="Toggle batch mode feature"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.enableBatchMode ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
           <!-- Model cache location (read-only) -->
           <div class="flex flex-col gap-1.5 min-w-0">
             <div class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">

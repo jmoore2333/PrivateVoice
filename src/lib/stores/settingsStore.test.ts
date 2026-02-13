@@ -38,6 +38,7 @@ describe('Settings Store', () => {
 
     // Translation helpers are opt-in by default
     expect(settingsStore.state.enableTranslation).toBe(false);
+    expect(settingsStore.state.enableBatchMode).toBe(false);
 
     // Stable lead-in controls are enabled by default
     expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(true);

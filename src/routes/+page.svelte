@@ -173,6 +173,7 @@
   }
 
   const recommendedCloneHint = $derived(buildRecommendedHint(debugStore.state.systemInfo));
+  const batchModeEnabled = $derived(settingsStore.state.enableBatchMode);
 
   // Sync local state from store when store changes
   $effect(() => {
@@ -201,6 +202,12 @@
 
   $effect(() => {
     localSeed = ttsState.seed;
+  });
+
+  $effect(() => {
+    if (!batchModeEnabled && batchMode) {
+      batchMode = false;
+    }
   });
 
   // Auto-load model when server is ready and onboarding was already completed
@@ -719,6 +726,10 @@
   }
 
   function handleBatchModeToggle() {
+    if (!batchModeEnabled) {
+      batchMode = false;
+      return;
+    }
     batchMode = !batchMode;
   }
 
@@ -781,25 +792,27 @@
   <Workspace>
     {#snippet inputPanel()}
       <div class="space-y-4">
-        <div class="flex items-center justify-between rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-3">
-          <div>
-            <p class="text-sm font-medium text-[var(--color-text-primary)]">Batch mode</p>
-            <p class="text-xs text-[var(--color-text-muted)]">Use queued text files with your current voice configuration.</p>
+        {#if batchModeEnabled}
+          <div class="flex items-center justify-between rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-3">
+            <div>
+              <p class="text-sm font-medium text-[var(--color-text-primary)]">Batch mode</p>
+              <p class="text-xs text-[var(--color-text-muted)]">Use queued text files with your current voice configuration.</p>
+            </div>
+            <button
+              class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={batchMode}
+              aria-label="Toggle batch mode"
+              onclick={handleBatchModeToggle}
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform {batchMode ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
           </div>
-          <button
-            class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
-            role="switch"
-            aria-checked={batchMode}
-            aria-label="Toggle batch mode"
-            onclick={handleBatchModeToggle}
-          >
-            <span
-              class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform {batchMode ? 'translate-x-5' : ''}"
-            ></span>
-          </button>
-        </div>
+        {/if}
 
-        {#if batchMode}
+        {#if batchModeEnabled && batchMode}
           <BatchPanel
             files={batchState.files}
             isProcessing={batchState.isProcessing}
@@ -900,7 +913,7 @@
     {/snippet}
 
     {#snippet outputPanel()}
-      {#if batchMode}
+      {#if batchModeEnabled && batchMode}
         <div class="h-full flex flex-col justify-center">
           <div class="max-w-xl mx-auto w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-6 space-y-4">
             <div>

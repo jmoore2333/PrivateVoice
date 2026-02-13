@@ -22,6 +22,7 @@ export interface Settings {
   // Optional features
   enableWhisper: boolean;
   enableTranslation: boolean;
+  enableBatchMode: boolean;
   // Onboarding
   hasCompletedOnboarding: boolean;
 }
@@ -46,6 +47,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Optional features
   enableWhisper: false,
   enableTranslation: false,
+  enableBatchMode: false,
   // Onboarding
   hasCompletedOnboarding: false,
 };
