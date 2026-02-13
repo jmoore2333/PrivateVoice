@@ -21,20 +21,16 @@ impl GpuTarget {
     pub fn torch_extra_index_url(&self) -> Option<String> {
         match self {
             GpuTarget::Mps => None, // Default PyPI torch includes MPS
-            GpuTarget::Cuda(version) => Some(format!(
-                "https://download.pytorch.org/whl/{}",
-                version
-            )),
-            GpuTarget::Rocm(version) => Some(format!(
-                "https://download.pytorch.org/whl/{}",
-                version
-            )),
+            GpuTarget::Cuda(version) => {
+                Some(format!("https://download.pytorch.org/whl/{}", version))
+            }
+            GpuTarget::Rocm(version) => {
+                Some(format!("https://download.pytorch.org/whl/{}", version))
+            }
             GpuTarget::IntelXpu => {
                 Some("https://pytorch-extension.intel.com/release-whl/stable/xpu/us/".to_string())
             }
-            GpuTarget::Cpu => {
-                Some("https://download.pytorch.org/whl/cpu".to_string())
-            }
+            GpuTarget::Cpu => Some("https://download.pytorch.org/whl/cpu".to_string()),
         }
     }
 
@@ -105,8 +101,8 @@ pub fn detect_gpu() -> GpuTarget {
 fn detect_nvidia() -> Option<GpuTarget> {
     let nvidia_smi = if cfg!(target_os = "windows") {
         // nvidia-smi is typically at a fixed path on Windows
-        let program_files = std::env::var("ProgramFiles")
-            .unwrap_or_else(|_| "C:\\Program Files".to_string());
+        let program_files =
+            std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
         let path = format!(
             "{}\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
             program_files
@@ -121,7 +117,10 @@ fn detect_nvidia() -> Option<GpuTarget> {
     };
 
     match Command::new(&nvidia_smi)
-        .args(["--query-gpu=name,compute_cap,driver_version", "--format=csv,noheader"])
+        .args([
+            "--query-gpu=name,compute_cap,driver_version",
+            "--format=csv,noheader",
+        ])
         .output()
     {
         Ok(output) if output.status.success() => {
@@ -180,7 +179,10 @@ fn select_cuda_version(compute_cap: &str) -> String {
 /// Detect AMD GPU via rocm-smi or ROCm installation check.
 fn detect_amd() -> Option<GpuTarget> {
     // Method 1: Try rocm-smi
-    if let Ok(output) = Command::new("rocm-smi").args(["--showproductname"]).output() {
+    if let Ok(output) = Command::new("rocm-smi")
+        .args(["--showproductname"])
+        .output()
+    {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             println!("[env_manager::gpu] rocm-smi detected: {}", stdout.trim());
@@ -205,7 +207,8 @@ fn detect_amd() -> Option<GpuTarget> {
         if let Ok(output) = Command::new("lspci").output() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-                if stdout.contains("amd") && (stdout.contains("vga") || stdout.contains("display")) {
+                if stdout.contains("amd") && (stdout.contains("vga") || stdout.contains("display"))
+                {
                     // AMD GPU present but ROCm may not be installed
                     // We'll try ROCm — worst case it fails during pip install
                     // and user can fall back to CPU
@@ -277,7 +280,10 @@ fn detect_intel() -> Option<GpuTarget> {
     if let Ok(output) = Command::new("xpu-smi").args(["discovery"]).output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            println!("[env_manager::gpu] xpu-smi detected: {}", stdout.lines().next().unwrap_or(""));
+            println!(
+                "[env_manager::gpu] xpu-smi detected: {}",
+                stdout.lines().next().unwrap_or("")
+            );
             return Some(GpuTarget::IntelXpu);
         }
     }
@@ -286,7 +292,8 @@ fn detect_intel() -> Option<GpuTarget> {
     if let Ok(output) = Command::new("sycl-ls").output() {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
-            if stdout.contains("intel") && (stdout.contains("gpu") || stdout.contains("level_zero")) {
+            if stdout.contains("intel") && (stdout.contains("gpu") || stdout.contains("level_zero"))
+            {
                 println!("[env_manager::gpu] Intel GPU detected via sycl-ls");
                 return Some(GpuTarget::IntelXpu);
             }

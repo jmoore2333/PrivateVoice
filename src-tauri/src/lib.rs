@@ -1,13 +1,16 @@
 mod env_manager;
 
+use rand::{distributions::Alphanumeric, Rng};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::thread;
 use tauri::{Emitter, Manager};
 
 const MAX_LOG_ENTRIES: usize = 500;
+const TTS_SERVER_PORT: u16 = 8765;
 
 #[derive(Clone, serde::Serialize)]
 struct LogEntry {
@@ -25,6 +28,10 @@ struct StartupEvent {
 
 struct SidecarState {
     child: Option<std::process::Child>,
+}
+
+struct TtsServerAuthState {
+    access_token: String,
 }
 
 struct LogBuffer {
@@ -46,7 +53,13 @@ impl LogBuffer {
     }
 
     fn get_recent(&self, count: usize) -> Vec<LogEntry> {
-        self.entries.iter().rev().take(count).rev().cloned().collect()
+        self.entries
+            .iter()
+            .rev()
+            .take(count)
+            .rev()
+            .cloned()
+            .collect()
     }
 }
 
@@ -76,43 +89,196 @@ fn get_timestamp() -> String {
         .to_string()
 }
 
-/// Kill any process listening on the given port.
-/// Uses platform-specific commands: lsof on macOS/Linux, netstat+taskkill on Windows.
-fn kill_process_on_port(port: u16) {
-    if cfg!(target_os = "windows") {
-        // Windows: use netstat to find PID, then taskkill
-        if let Ok(output) = Command::new("netstat").args(["-ano"]).output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let port_str = format!(":{}", port);
-            for line in stdout.lines() {
-                if line.contains(&port_str) && line.contains("LISTENING") {
-                    if let Some(pid) = line.split_whitespace().last() {
-                        if pid.parse::<u32>().is_ok() {
-                            println!("Killing existing process {} on port {}", pid, port);
-                            let _ = Command::new("taskkill")
-                                .args(["/F", "/PID", pid])
-                                .output();
-                        }
-                    }
-                }
-            }
+fn generate_access_token() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(48)
+        .map(char::from)
+        .collect()
+}
+
+/// Ensure the TTS server port is available, reclaiming it from an orphaned
+/// sidecar if necessary.
+///
+/// 1. Try to bind the port — if it succeeds the port is free.
+/// 2. If occupied, identify the process via platform tools.
+/// 3. If the process is an orphaned `tts_server.main` under our app data
+///    directory, kill it (SIGTERM → wait → SIGKILL fallback).
+/// 4. If it belongs to something else, return an error.
+fn ensure_port_available(port: u16, app: &tauri::AppHandle) -> Result<(), String> {
+    if TcpListener::bind(("127.0.0.1", port)).is_ok() {
+        return Ok(());
+    }
+
+    println!(
+        "[sidecar] Port {} in use — checking for orphaned sidecar...",
+        port
+    );
+
+    let pids = get_pids_on_port(port);
+    if pids.is_empty() {
+        return Err(format!(
+            "Port {} is already in use but the owning process could not be identified. \
+             Close it manually and retry.",
+            port
+        ));
+    }
+
+    // Resolve our app-data directory to match against the process command.
+    let app_data_prefix = app
+        .path()
+        .app_data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    for pid in &pids {
+        let cmd_line = get_process_command(*pid);
+        let is_our_sidecar = cmd_line.contains("tts_server")
+            && (!app_data_prefix.is_empty() && cmd_line.contains(&app_data_prefix));
+
+        if !is_our_sidecar {
+            return Err(format!(
+                "Port {} is in use by another process (PID {}: {}). \
+                 Close that process and retry.",
+                port,
+                pid,
+                truncate_str(&cmd_line, 120)
+            ));
         }
-    } else {
-        // macOS and Linux: use lsof
-        if let Ok(output) = Command::new("lsof")
-            .args(["-ti", &format!(":{}", port)])
-            .output()
+
+        println!(
+            "[sidecar] Reclaiming port {} from orphaned sidecar PID {}",
+            port, pid
+        );
+        kill_process_gracefully(*pid);
+    }
+
+    // Wait briefly and verify the port is now free.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    TcpListener::bind(("127.0.0.1", port)).map(drop).map_err(|_| {
+        format!(
+            "Port {} is still in use after reclaiming orphaned sidecar. \
+             Close the process manually and retry.",
+            port
+        )
+    })
+}
+
+/// Return PIDs listening on the given TCP port.
+#[cfg(not(target_os = "windows"))]
+fn get_pids_on_port(port: u16) -> Vec<u32> {
+    let output = Command::new("lsof")
+        .args(["-ti", &format!(":{}", port)])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|l| l.trim().parse::<u32>().ok())
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn get_pids_on_port(port: u16) -> Vec<u32> {
+    let output = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output();
+
+    let port_str = format!(":{}", port);
+    match output {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|l| l.contains(&port_str) && l.contains("LISTENING"))
+            .filter_map(|l| l.split_whitespace().last()?.parse::<u32>().ok())
+            .collect(),
+        Err(_) => vec![],
+    }
+}
+
+/// Get the full command line of a process by PID.
+#[cfg(not(target_os = "windows"))]
+fn get_process_command(pid: u32) -> String {
+    Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+fn get_process_command(pid: u32) -> String {
+    Command::new("wmic")
+        .args(["process", "where", &format!("ProcessId={}", pid), "get", "CommandLine", "/value"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .find(|l| l.starts_with("CommandLine="))
+                .map(|l| l.trim_start_matches("CommandLine=").trim().to_string())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+/// Send SIGTERM, wait up to 2 seconds, then SIGKILL if still alive.
+#[cfg(not(target_os = "windows"))]
+fn kill_process_gracefully(pid: u32) {
+    use std::time::{Duration, Instant};
+
+    // SIGTERM
+    let _ = Command::new("kill")
+        .args(["-15", &pid.to_string()])
+        .output();
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+        // Check if process still exists (kill -0)
+        if Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| !s.success())
+            .unwrap_or(true)
         {
-            let pids = String::from_utf8_lossy(&output.stdout);
-            for pid in pids.lines() {
-                if let Ok(pid_num) = pid.trim().parse::<i32>() {
-                    println!("Killing existing process {} on port {}", pid_num, port);
-                    let _ = Command::new("kill")
-                        .args(["-9", &pid_num.to_string()])
-                        .output();
-                }
-            }
+            println!("[sidecar] Orphaned PID {} exited after SIGTERM", pid);
+            return;
         }
+    }
+
+    // Still alive — SIGKILL
+    println!(
+        "[sidecar] PID {} did not exit after SIGTERM, sending SIGKILL",
+        pid
+    );
+    let _ = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .output();
+}
+
+#[cfg(target_os = "windows")]
+fn kill_process_gracefully(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .output();
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
     }
 }
 
@@ -239,19 +405,27 @@ fn spawn_std_child_streaming(app: &tauri::AppHandle, child: &mut std::process::C
 async fn start_tts_server(
     app: tauri::AppHandle,
     state: tauri::State<'_, Mutex<SidecarState>>,
+    auth_state: tauri::State<'_, TtsServerAuthState>,
 ) -> Result<String, String> {
     let mut state_guard = state.lock().map_err(|e| e.to_string())?;
 
-    // Kill any existing server on our port first
-    kill_process_on_port(8765);
-
+    // Stop only the child process we own.
     if let Some(ref mut child) = state_guard.child {
         let _ = child.kill();
+        let _ = child.wait();
     }
     state_guard.child = None;
 
     // Small delay to let port be released
     std::thread::sleep(std::time::Duration::from_millis(100));
+
+    ensure_port_available(TTS_SERVER_PORT, &app)?;
+
+    // Keep all Hugging Face artifacts inside app-managed storage.
+    let hf_home = env_manager::paths::huggingface_home_dir(&app)?;
+    let hf_hub_cache = env_manager::paths::huggingface_hub_cache_dir(&app)?;
+    std::fs::create_dir_all(&hf_hub_cache)
+        .map_err(|e| format!("Failed to create Hugging Face cache directory: {}", e))?;
 
     // Emit startup event
     let _ = app.emit(
@@ -295,10 +469,7 @@ async fn start_tts_server(
             println!("Using venv Python: {:?}", venv_python);
             venv_python.to_string_lossy().to_string()
         } else {
-            println!(
-                "Warning: venv not found, using system {}",
-                system_python
-            );
+            println!("Warning: venv not found, using system {}", system_python);
             system_python.to_string()
         };
 
@@ -307,6 +478,11 @@ async fn start_tts_server(
             .current_dir(&python_dir)
             .env("PYTHONUNBUFFERED", "1")
             .env("TTS_SERVER_DEV", "true")
+            .env("TTS_SERVER_PORT", TTS_SERVER_PORT.to_string())
+            .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
+            .env("HF_HOME", &hf_home)
+            .env("HF_HUB_CACHE", &hf_hub_cache)
+            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -336,10 +512,7 @@ async fn start_tts_server(
                 gpu_target,
                 gpu_display,
             } => {
-                println!(
-                    "Environment ready: {} ({})",
-                    gpu_display, gpu_target
-                );
+                println!("Environment ready: {} ({})", gpu_display, gpu_target);
             }
             env_manager::SetupState::NeedsSetup => {
                 println!("First-time setup required — running installer...");
@@ -388,10 +561,7 @@ async fn start_tts_server(
         let venv_python = env_manager::paths::venv_python(&app)?;
         let env_dir = env_manager::paths::python_env_dir(&app)?;
 
-        println!(
-            "Release mode: spawning TTS server from {:?}",
-            venv_python
-        );
+        println!("Release mode: spawning TTS server from {:?}", venv_python);
 
         if !venv_python.exists() {
             return Err(format!(
@@ -404,9 +574,27 @@ async fn start_tts_server(
         cmd.args(["-u", "-m", "tts_server.main"])
             .current_dir(&env_dir)
             .env("PYTHONUNBUFFERED", "1")
+            .env("TTS_SERVER_PORT", TTS_SERVER_PORT.to_string())
+            .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
+            .env("HF_HOME", &hf_home)
+            .env("HF_HUB_CACHE", &hf_hub_cache)
+            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .env("PYTHONPATH", env_dir.to_string_lossy().to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Remove AppImage-injected env vars that break Python/uv on Linux.
+        #[cfg(target_os = "linux")]
+        {
+            cmd.env_remove("PYTHONHOME");
+            cmd.env_remove("PYTHONDONTWRITEBYTECODE");
+            if std::env::var_os("APPIMAGE").is_some()
+                || std::env::var_os("APPDIR").is_some()
+            {
+                cmd.env_remove("LD_LIBRARY_PATH");
+                cmd.env_remove("GI_TYPELIB_PATH");
+            }
+        }
 
         // Suppress console window on Windows
         #[cfg(target_os = "windows")]
@@ -459,6 +647,13 @@ fn get_server_status(state: tauri::State<'_, Mutex<SidecarState>>) -> Result<boo
 }
 
 #[tauri::command]
+fn get_tts_access_token(
+    auth_state: tauri::State<'_, TtsServerAuthState>,
+) -> Result<String, String> {
+    Ok(auth_state.access_token.clone())
+}
+
+#[tauri::command]
 fn get_sidecar_logs(
     state: tauri::State<'_, Mutex<LogBuffer>>,
     count: Option<usize>,
@@ -495,8 +690,8 @@ fn reset_mic_permissions() -> Result<bool, String> {
     {
         use std::path::PathBuf;
 
-        let local_app_data = std::env::var("LOCALAPPDATA")
-            .map_err(|_| "Could not find LOCALAPPDATA")?;
+        let local_app_data =
+            std::env::var("LOCALAPPDATA").map_err(|_| "Could not find LOCALAPPDATA")?;
         let prefs_path = PathBuf::from(&local_app_data)
             .join("com.privatevoice.desktop")
             .join("EBWebView")
@@ -598,14 +793,9 @@ fn clear_cached_webview2_denials() {
             if let Some(exceptions) = content_settings.get_mut("exceptions") {
                 for key in &["media_stream_mic", "media_stream_camera"] {
                     if exceptions.get(*key).is_some() {
-                        exceptions
-                            .as_object_mut()
-                            .map(|obj| obj.remove(*key));
+                        exceptions.as_object_mut().map(|obj| obj.remove(*key));
                         modified = true;
-                        println!(
-                            "WebView2: cleared cached {} permission denial",
-                            key
-                        );
+                        println!("WebView2: cleared cached {} permission denial", key);
                     }
                 }
             }
@@ -637,29 +827,58 @@ fn setup_webview2_permissions(window: &tauri::WebviewWindow) {
 
             let mut token: i64 = 0;
             let _ = core.add_PermissionRequested(
-                &PermissionRequestedEventHandler::create(Box::new(
-                    move |_webview, args| {
-                        if let Some(args) = args {
-                            let mut kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
-                            let _ = args.PermissionKind(&mut kind);
+                &PermissionRequestedEventHandler::create(Box::new(move |_webview, args| {
+                    if let Some(args) = args {
+                        let mut kind = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
+                        let _ = args.PermissionKind(&mut kind);
 
-                            match kind {
-                                COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
-                                | COREWEBVIEW2_PERMISSION_KIND_CAMERA => {
-                                    let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
-                                    println!("WebView2: auto-granted {:?} permission", kind);
-                                }
-                                _ => {
-                                    // Default behavior for other permissions
-                                }
+                        match kind {
+                            COREWEBVIEW2_PERMISSION_KIND_MICROPHONE
+                            | COREWEBVIEW2_PERMISSION_KIND_CAMERA => {
+                                let _ = args.SetState(COREWEBVIEW2_PERMISSION_STATE_ALLOW);
+                                println!("WebView2: auto-granted {:?} permission", kind);
+                            }
+                            _ => {
+                                // Default behavior for other permissions
                             }
                         }
-                        Ok(())
-                    },
-                )),
+                    }
+                    Ok(())
+                })),
                 &mut token,
             );
         }
+    });
+}
+
+/// Configure Linux WebKit mic/camera behavior for Tauri.
+///
+/// WebKitGTK requires media stream support to be enabled, and user-media requests
+/// come through the `permission-request` signal.
+#[cfg(target_os = "linux")]
+fn setup_webkit_permissions(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webkit2gtk::glib::object::Cast;
+        use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+
+        let inner = webview.inner();
+
+        if let Some(settings) = inner.settings() {
+            settings.set_enable_media_stream(true);
+        }
+
+        inner.connect_permission_request(|_, request| {
+            if request
+                .dynamic_cast_ref::<webkit2gtk::UserMediaPermissionRequest>()
+                .is_some()
+            {
+                request.allow();
+                println!("WebKitGTK: auto-granted user media permission");
+                true
+            } else {
+                false
+            }
+        });
     });
 }
 
@@ -669,6 +888,8 @@ pub fn run() {
     // This must run before tauri::Builder so the Preferences file isn't locked.
     #[cfg(target_os = "windows")]
     clear_cached_webview2_denials();
+
+    let access_token = generate_access_token();
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
@@ -684,21 +905,31 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            // Auto-grant microphone/camera permissions on Windows
-            #[cfg(target_os = "windows")]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    setup_webview2_permissions(&window);
-                }
+            if let Some(window) = app.get_webview_window("main") {
+                // Set window icon explicitly so the taskbar always shows the correct icon
+                // (Windows caches the old icon from previous installs)
+                let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))
+                    .expect("failed to load app icon");
+                let _ = window.set_icon(icon);
+
+                // Auto-grant microphone/camera permissions on Windows
+                #[cfg(target_os = "windows")]
+                setup_webview2_permissions(&window);
+
+                // Enable and auto-approve user-media permissions on Linux WebKitGTK.
+                #[cfg(target_os = "linux")]
+                setup_webkit_permissions(&window);
             }
             Ok(())
         })
         .manage(Mutex::new(SidecarState { child: None }))
         .manage(Mutex::new(LogBuffer::new()))
+        .manage(TtsServerAuthState { access_token })
         .invoke_handler(tauri::generate_handler![
             start_tts_server,
             stop_tts_server,
             get_server_status,
+            get_tts_access_token,
             get_sidecar_logs,
             get_environment_status,
             repair_environment,

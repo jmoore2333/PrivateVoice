@@ -12,13 +12,9 @@ pub enum SetupState {
     /// No marker or no venv — full setup required.
     NeedsSetup,
     /// Marker exists but requirements hash changed (app update) — update required.
-    NeedsUpdate {
-        reason: String,
-    },
+    NeedsUpdate { reason: String },
     /// Marker exists but venv Python is missing/broken — repair required.
-    Corrupted {
-        reason: String,
-    },
+    Corrupted { reason: String },
 }
 
 /// Marker file structure (JSON).
@@ -73,7 +69,9 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
 
     println!(
         "[env_manager::validate] Marker found: version={}, gpu={}, hash={}",
-        marker.version, marker.gpu_target, &marker.requirements_hash[..8]
+        marker.version,
+        marker.gpu_target,
+        &marker.requirements_hash[..8]
     );
 
     // Check 3: Does the venv Python binary exist?
@@ -135,7 +133,8 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
                 &current_source_hash[..8]
             );
             return Ok(SetupState::NeedsUpdate {
-                reason: "Application backend source changed — syncing Python server code.".to_string(),
+                reason: "Application backend source changed — syncing Python server code."
+                    .to_string(),
             });
         }
         None => {
@@ -247,7 +246,8 @@ pub fn get_environment_status(app: &tauri::AppHandle) -> Result<EnvironmentStatu
     })
 }
 
-/// Delete the setup marker (and optionally the entire venv) to force a fresh setup.
+/// Delete the setup marker (and optionally the entire python_env tree)
+/// to force a fresh setup.
 pub fn repair_environment(app: &tauri::AppHandle, delete_venv: bool) -> Result<(), String> {
     let marker = paths::setup_marker_path(app)?;
     if marker.exists() {
@@ -257,20 +257,13 @@ pub fn repair_environment(app: &tauri::AppHandle, delete_venv: bool) -> Result<(
     }
 
     if delete_venv {
-        let venv = paths::venv_dir(app)?;
-        if venv.exists() {
-            std::fs::remove_dir_all(&venv)
-                .map_err(|e| format!("Failed to delete venv: {}", e))?;
-            println!("[env_manager::validate] Deleted venv at {:?}", venv);
-        }
-
-        let python_dir = paths::standalone_python_dir(app)?;
-        if python_dir.exists() {
-            std::fs::remove_dir_all(&python_dir)
-                .map_err(|e| format!("Failed to delete Python installation: {}", e))?;
+        let env_dir = paths::python_env_dir(app)?;
+        if env_dir.exists() {
+            std::fs::remove_dir_all(&env_dir)
+                .map_err(|e| format!("Failed to delete python_env directory: {}", e))?;
             println!(
-                "[env_manager::validate] Deleted Python installation at {:?}",
-                python_dir
+                "[env_manager::validate] Deleted full python_env at {:?}",
+                env_dir
             );
         }
     }

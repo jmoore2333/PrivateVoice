@@ -91,41 +91,24 @@
   <!-- Logo / App name -->
   <div class="mb-10 text-center animate-fade-in">
     <div class="relative mb-6">
-      <!-- Glowing ring -->
+      <!-- Pulsing glow (matches icon's rounded-square shape) -->
       <div
-        class="absolute inset-0 w-24 h-24 mx-auto rounded-full animate-glow"
-        style="background: radial-gradient(circle, var(--color-accent-cyan-glow) 0%, transparent 70%);"
+        class="absolute inset-0 w-24 h-24 mx-auto rounded-2xl animate-glow"
       ></div>
 
-      <!-- Icon container -->
-      <div
-        class="relative w-24 h-24 mx-auto rounded-2xl flex items-center justify-center
-          bg-gradient-to-br from-[var(--color-bg-elevated)] to-[var(--color-bg-surface)]
-          border border-[var(--color-border-default)]
-          shadow-lg"
-      >
-        <!-- Waveform icon -->
-        <svg
-          class="w-12 h-12 text-[var(--color-accent-cyan)]"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z"
-          />
-        </svg>
-      </div>
+      <!-- App icon -->
+      <img
+        src="/app-icon.png"
+        alt="PrivateVoice"
+        class="relative w-24 h-24 mx-auto rounded-2xl"
+      />
     </div>
 
     <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2 tracking-tight">
       PrivateVoice
     </h1>
     <p class="text-sm text-[var(--color-text-secondary)] font-mono">
-      Local text-to-speech powered by Qwen3-TTS
+      Create, clone, and transcribe voices — privately, on your own hardware.
     </p>
   </div>
 
@@ -203,7 +186,7 @@
       class="inline-block"
     >
       <img
-        src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
+        src="/bmc-button.png"
         alt="Buy Me A Coffee"
         class="h-12 w-auto"
         loading="lazy"
@@ -247,7 +230,7 @@
   <!-- Footer -->
   <div class="absolute bottom-6 text-center">
     <p class="text-xs text-[var(--color-text-muted)] font-mono">
-      PrivateVoice v1.0.0 • Powered by Qwen3-TTS
+      PrivateVoice v{__APP_VERSION__}
     </p>
   </div>
 </div>

@@ -35,6 +35,7 @@ const fetchMock = vi.fn<(...args: Parameters<typeof fetch>) => Promise<Response>
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockReset();
+  ttsClient.setAccessToken(null);
 });
 
 afterEach(() => {
@@ -42,7 +43,21 @@ afterEach(() => {
   if (ttsClient.isGenerating) {
     ttsClient.abortGeneration();
   }
+  ttsClient.setAccessToken(null);
   vi.restoreAllMocks();
+});
+
+describe('request authentication', () => {
+  it('adds X-API-Key when an access token is configured', async () => {
+    ttsClient.setAccessToken('token-123');
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'ok', version: '1.0.0' }));
+
+    await ttsClient.health();
+
+    const options = fetchMock.mock.calls[0][1];
+    expect(options?.headers).toBeInstanceOf(Headers);
+    expect((options?.headers as Headers).get('X-API-Key')).toBe('token-123');
+  });
 });
 
 // ===========================================================================
@@ -195,6 +210,19 @@ describe('generateCustomVoice', () => {
     expect(parsed.language).toBe('French');
   });
 
+  it('includes stable_lead_in in payload when provided', async () => {
+    fetchMock.mockResolvedValueOnce(blobResponse());
+
+    await ttsClient.generateCustomVoice({
+      text: 'Test',
+      speaker: 'aiden',
+      stable_lead_in: false,
+    });
+
+    const parsed = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(parsed.stable_lead_in).toBe(false);
+  });
+
   it('throws with parsed error on failure', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: 'GPU out of memory' }, 500));
 
@@ -210,6 +238,19 @@ describe('generateCustomVoice', () => {
 
     const options = fetchMock.mock.calls[0][1];
     expect(options?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('includes stable_lead_in in voice design payload when provided', async () => {
+    fetchMock.mockResolvedValueOnce(blobResponse());
+
+    await ttsClient.generateVoiceDesign({
+      text: 'Hi',
+      voice_description: 'deep male voice',
+      stable_lead_in: false,
+    });
+
+    const parsed = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(parsed.stable_lead_in).toBe(false);
   });
 });
 

@@ -1,6 +1,7 @@
 """PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
 import asyncio
+import hmac
 import logging
 import os
 import platform
@@ -27,9 +28,9 @@ import torch
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS, request_cancel, clear_cancel, is_cancelled
@@ -75,6 +76,7 @@ class LoadModelRequest(BaseModel):
 
 MAX_TEXT_LENGTH = 2000
 MAX_AUDIO_SIZE = 50 * 1024 * 1024  # 50 MB
+INTERNAL_ERROR_DETAIL = "Internal server error"
 
 
 SUPPORTED_FORMATS = ("wav", "mp3")
@@ -87,6 +89,7 @@ class CustomVoiceRequest(BaseModel):
     language: str = "english"
     format: str = "wav"
     mp3_bitrate: int = 192
+    stable_lead_in: bool = True
 
 
 class VoiceDesignRequest(BaseModel):
@@ -95,6 +98,7 @@ class VoiceDesignRequest(BaseModel):
     language: str = "english"
     format: str = "wav"
     mp3_bitrate: int = 192
+    stable_lead_in: bool = True
 
 
 class StartupStatusResponse(BaseModel):
@@ -250,6 +254,11 @@ async def lifespan(app: FastAPI):
 
 
 _is_dev = os.environ.get("TTS_SERVER_DEV", "false").lower() == "true"
+_access_token = os.environ.get("TTS_ACCESS_TOKEN", "").strip()
+_auth_enabled = bool(_access_token)
+
+if not _auth_enabled and not _is_dev:
+    raise RuntimeError("Missing TTS_ACCESS_TOKEN. Refusing to start without API authentication.")
 
 app = FastAPI(
     title="PrivateVoice Server",
@@ -260,15 +269,42 @@ app = FastAPI(
     redoc_url="/redoc" if _is_dev else None,
 )
 
-# Enable CORS — server is localhost-only so all origins are safe.
-# Tauri WebView origins vary by platform (tauri://localhost on macOS,
-# https://tauri.localhost on Windows/Linux) and may change across versions.
+_allowed_origins = [
+    "tauri://localhost",
+    "https://tauri.localhost",
+    "http://tauri.localhost",
+    "http://localhost",
+    "http://127.0.0.1",
+]
+if _is_dev:
+    _allowed_origins.extend([
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+    ])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_allowed_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "X-API-Key"],
 )
+
+@app.middleware("http")
+async def validate_api_key(request: Request, call_next):
+    if not _auth_enabled:
+        return await call_next(request)
+
+    # CORS preflight (OPTIONS) never carries custom headers — let it
+    # through so the CORSMiddleware can respond with the proper
+    # Access-Control-Allow-* headers.
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
+    provided = request.headers.get("X-API-Key", "")
+    if not provided or not hmac.compare_digest(provided, _access_token):
+        return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    return await call_next(request)
 
 
 # ============================================================================
@@ -437,10 +473,10 @@ async def load_model(request: LoadModelRequest):
         await asyncio.to_thread(model.load, request.model_id)
         state.set_phase("ready", "Model loaded and ready", 100)
         return {"status": "loaded", "model_id": request.model_id}
-    except Exception as e:
-        state.set_phase("error", str(e), 0)
-        logger.error(f"Failed to load model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        state.set_phase("error", "Model load failed", 0)
+        logger.exception("Failed to load model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-model")
@@ -485,15 +521,16 @@ async def generate_custom_voice(request: CustomVoiceRequest):
             language=request.language,
             output_format=fmt,
             mp3_bitrate=bitrate,
+            stable_lead_in=request.stable_lead_in,
         )
         if is_cancelled():
             return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Generation failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/generate/voice-clone")
@@ -547,18 +584,14 @@ async def generate_voice_clone(
     except HTTPException:
         raise
     except RuntimeError as e:
-        import traceback
-        tb = traceback.format_exc()
         error_msg = str(e)
-        logger.error(f"Voice clone RuntimeError:\n{tb}")
+        logger.exception("Voice clone runtime error")
         if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
-        raise HTTPException(status_code=500, detail=f"{error_msg}\n\nTraceback:\n{tb}")
-    except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"Voice clone failed with full traceback:\n{tb}")
-        raise HTTPException(status_code=500, detail=f"{e}\n\nTraceback:\n{tb}")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+    except Exception:
+        logger.exception("Voice clone failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/generate/voice-design")
@@ -587,15 +620,16 @@ async def generate_voice_design(request: VoiceDesignRequest):
             language=request.language,
             output_format=fmt,
             mp3_bitrate=bitrate,
+            stable_lead_in=request.stable_lead_in,
         )
         if is_cancelled():
             return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Voice design failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Voice design failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 # ============================================================================
@@ -663,9 +697,9 @@ async def load_whisper(request: LoadWhisperRequest):
         logger.info(f"Loading Whisper model: {request.model_size}")
         await asyncio.to_thread(whisper.load, request.model_size)
         return {"status": "loaded", "model_size": request.model_size}
-    except Exception as e:
-        logger.error(f"Failed to load Whisper model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Failed to load Whisper model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-whisper")
@@ -724,9 +758,9 @@ async def transcribe(
             confidence=result.language_probability,
             duration_seconds=result.duration_seconds,
         )
-    except Exception as e:
-        logger.error(f"Transcription failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Transcription failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.get("/translation-status", response_model=TranslationStatusResponse)
@@ -776,9 +810,9 @@ async def load_translation(request: LoadTranslationRequest):
         return {"status": "loaded", "model_key": translator.model_key}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Failed to load translation model: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Failed to load translation model")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 @app.post("/unload-translation")
@@ -825,9 +859,9 @@ async def translate_text(request: TranslateTextRequest):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Text translation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Text translation failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
 # ============================================================================

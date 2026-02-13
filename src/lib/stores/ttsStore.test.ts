@@ -283,6 +283,7 @@ describe("ttsStore", () => {
           text: "Hello world",
           speaker: "aiden",
           language: "english",
+          stable_lead_in: true,
         })
       );
     });
@@ -347,6 +348,7 @@ describe("ttsStore", () => {
           text: "Designed speech",
           voice_description: "A warm, deep male voice",
           language: "english",
+          stable_lead_in: true,
         })
       );
     });

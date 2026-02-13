@@ -39,6 +39,10 @@ describe('Settings Store', () => {
     // Translation helpers are opt-in by default
     expect(settingsStore.state.enableTranslation).toBe(false);
 
+    // Stable lead-in controls are enabled by default
+    expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(true);
+    expect(settingsStore.state.stableVoiceDesignLeadIn).toBe(true);
+
     // Verify onboarding not completed by default
     expect(settingsStore.state.hasCompletedOnboarding).toBe(false);
   }, 15000);
@@ -84,6 +88,8 @@ describe('Settings Store', () => {
       hasCompletedOnboarding: true,
       theme: 'dark',
       defaultSpeaker: 'serena',
+      stableCustomVoiceLeadIn: false,
+      stableVoiceDesignLeadIn: false,
     };
     localStorageMock.getItem.mockReturnValueOnce(JSON.stringify(savedSettings));
 
@@ -93,6 +99,8 @@ describe('Settings Store', () => {
     expect(settingsStore.state.defaultModel).toBe('1.7b');
     expect(settingsStore.state.hasCompletedOnboarding).toBe(true);
     expect(settingsStore.state.defaultSpeaker).toBe('serena');
+    expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(false);
+    expect(settingsStore.state.stableVoiceDesignLeadIn).toBe(false);
   });
 
   it('can reset to defaults', async () => {
@@ -102,6 +110,7 @@ describe('Settings Store', () => {
     // Change some settings
     settingsStore.updateSetting('defaultModel', '1.7b');
     settingsStore.updateSetting('hasCompletedOnboarding', true);
+    settingsStore.updateSetting('stableCustomVoiceLeadIn', false);
 
     // Reset
     settingsStore.resetToDefaults();
@@ -110,5 +119,7 @@ describe('Settings Store', () => {
     expect(settingsStore.state.defaultModel).toBe('0.6b');
     expect(settingsStore.state.hasCompletedOnboarding).toBe(false);
     expect(settingsStore.state.autoLoadModel).toBe(true);
+    expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(true);
+    expect(settingsStore.state.stableVoiceDesignLeadIn).toBe(true);
   });
 });

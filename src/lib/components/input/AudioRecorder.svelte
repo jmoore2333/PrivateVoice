@@ -21,6 +21,326 @@
   let microphoneSupported = $state(true);
   let micPermissionDenied = $state(false);
   let isPlaying = $state(false);
+  let isFallbackRecording = false;
+
+  let fallbackStream: MediaStream | null = null;
+  let fallbackAudioContext: AudioContext | null = null;
+  let fallbackSource: MediaStreamAudioSourceNode | null = null;
+  let fallbackProcessor: ScriptProcessorNode | null = null;
+  let fallbackSilence: GainNode | null = null;
+  let fallbackAnalyser: AnalyserNode | null = null;
+  let fallbackChunks: Float32Array[] = [];
+  let fallbackSampleRate = 44100;
+  let fallbackTimerId: number | null = null;
+  let fallbackStartTime = 0;
+  let fallbackWaveformTimerId: number | null = null;
+  let fallbackWaveformData: Float32Array | null = null;
+  let fallbackWaveformRenderBusy = false;
+  let fallbackWaveformRenderPending = false;
+  let fallbackNoiseFloor = 0.006;
+  let fallbackNoiseCalibratingUntil = 0;
+  let fallbackDisplayLevel = 0;
+
+  const FALLBACK_WAVEFORM_SECONDS = 5;
+  const FALLBACK_WAVEFORM_HZ = 24;
+
+  function isLinuxDesktop(): boolean {
+    const ua = navigator.userAgent.toLowerCase();
+    return ua.includes('linux') && !ua.includes('android');
+  }
+
+  function getAudioContextCtor(): typeof AudioContext | undefined {
+    const g = globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+    return g.AudioContext ?? g.webkitAudioContext;
+  }
+
+  function getSupportedRecordingMimeType(): string | undefined {
+    if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+      return undefined;
+    }
+
+    const candidates = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+    ];
+
+    return candidates.find(type => MediaRecorder.isTypeSupported(type));
+  }
+
+  function hasWebAudioFallbackSupport(): boolean {
+    return typeof getAudioContextCtor() === 'function';
+  }
+
+  function startFallbackTimer() {
+    if (fallbackTimerId !== null) {
+      clearInterval(fallbackTimerId);
+    }
+    fallbackStartTime = performance.now();
+    recordingTime = 0;
+    fallbackTimerId = window.setInterval(() => {
+      recordingTime = (performance.now() - fallbackStartTime) / 1000;
+    }, 100);
+  }
+
+  function stopFallbackTimer() {
+    if (fallbackTimerId !== null) {
+      clearInterval(fallbackTimerId);
+      fallbackTimerId = null;
+    }
+  }
+
+  function stopFallbackWaveformLoop() {
+    if (fallbackWaveformTimerId !== null) {
+      clearInterval(fallbackWaveformTimerId);
+      fallbackWaveformTimerId = null;
+    }
+    fallbackWaveformData = null;
+    fallbackWaveformRenderPending = false;
+    fallbackWaveformRenderBusy = false;
+  }
+
+  async function renderFallbackWaveform() {
+    if (!wavesurfer || !fallbackWaveformData) return;
+
+    if (fallbackWaveformRenderBusy) {
+      fallbackWaveformRenderPending = true;
+      return;
+    }
+
+    fallbackWaveformRenderBusy = true;
+    const snapshot = new Float32Array(fallbackWaveformData);
+
+    try {
+      await wavesurfer.load('', [snapshot], FALLBACK_WAVEFORM_SECONDS);
+    } catch (err) {
+      console.warn('[AudioRecorder] Failed to render fallback waveform:', err);
+    } finally {
+      fallbackWaveformRenderBusy = false;
+      if (fallbackWaveformRenderPending && isFallbackRecording) {
+        fallbackWaveformRenderPending = false;
+        void renderFallbackWaveform();
+      } else {
+        fallbackWaveformRenderPending = false;
+      }
+    }
+  }
+
+  function startFallbackWaveformLoop(analyser: AnalyserNode) {
+    stopFallbackWaveformLoop();
+
+    const points = FALLBACK_WAVEFORM_SECONDS * FALLBACK_WAVEFORM_HZ;
+    fallbackWaveformData = new Float32Array(points);
+    const timeDomain = new Float32Array(analyser.fftSize);
+    const intervalMs = Math.round(1000 / FALLBACK_WAVEFORM_HZ);
+    fallbackNoiseFloor = 0.006;
+    fallbackDisplayLevel = 0;
+    fallbackNoiseCalibratingUntil = performance.now() + 1000;
+
+    fallbackWaveformTimerId = window.setInterval(() => {
+      if (!isFallbackRecording || !fallbackWaveformData) return;
+
+      analyser.getFloatTimeDomainData(timeDomain);
+      let sumSquares = 0;
+      for (let i = 0; i < timeDomain.length; i++) {
+        const v = timeDomain[i];
+        sumSquares += v * v;
+      }
+      const rms = Math.sqrt(sumSquares / timeDomain.length);
+
+      const now = performance.now();
+      if (now < fallbackNoiseCalibratingUntil) {
+        // Quick baseline capture right after mic opens.
+        fallbackNoiseFloor = fallbackNoiseFloor * 0.92 + rms * 0.08;
+      } else if (rms < fallbackNoiseFloor * 1.2) {
+        // Follow quiet-room drift faster.
+        fallbackNoiseFloor = fallbackNoiseFloor * 0.995 + rms * 0.005;
+      } else {
+        // Follow rising ambient noise very slowly.
+        fallbackNoiseFloor = fallbackNoiseFloor * 0.999 + rms * 0.001;
+      }
+
+      const gated = Math.max(0, rms - fallbackNoiseFloor * 1.25);
+      const normalized = Math.min(1, gated * 14);
+
+      if (normalized > fallbackDisplayLevel) {
+        fallbackDisplayLevel = fallbackDisplayLevel * 0.6 + normalized * 0.4;
+      } else {
+        fallbackDisplayLevel = fallbackDisplayLevel * 0.9 + normalized * 0.1;
+      }
+
+      const level = fallbackDisplayLevel < 0.01 ? 0 : fallbackDisplayLevel;
+
+      fallbackWaveformData.copyWithin(0, 1);
+      fallbackWaveformData[fallbackWaveformData.length - 1] = level;
+      void renderFallbackWaveform();
+    }, intervalMs);
+  }
+
+  function buildWavBlob(chunks: Float32Array[], sampleRate: number): Blob {
+    const totalSamples = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+    const pcm = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const chunk of chunks) {
+      pcm.set(chunk, offset);
+      offset += chunk.length;
+    }
+
+    const bytesPerSample = 2; // PCM16
+    const buffer = new ArrayBuffer(44 + totalSamples * bytesPerSample);
+    const view = new DataView(buffer);
+
+    const writeAscii = (at: number, value: string) => {
+      for (let i = 0; i < value.length; i++) {
+        view.setUint8(at + i, value.charCodeAt(i));
+      }
+    };
+
+    writeAscii(0, 'RIFF');
+    view.setUint32(4, 36 + totalSamples * bytesPerSample, true);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    view.setUint32(16, 16, true); // PCM chunk size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * bytesPerSample, true); // byte rate
+    view.setUint16(32, bytesPerSample, true); // block align
+    view.setUint16(34, 16, true); // bits per sample
+    writeAscii(36, 'data');
+    view.setUint32(40, totalSamples * bytesPerSample, true);
+
+    let index = 44;
+    for (let i = 0; i < totalSamples; i++) {
+      const sample = Math.max(-1, Math.min(1, pcm[i]));
+      const int16 = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      view.setInt16(index, int16, true);
+      index += 2;
+    }
+
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  async function cleanupFallbackRecorder() {
+    stopFallbackTimer();
+    stopFallbackWaveformLoop();
+
+    try {
+      fallbackProcessor?.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
+      fallbackSource?.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
+      fallbackSilence?.disconnect();
+    } catch {
+      // ignore
+    }
+    try {
+      fallbackAnalyser?.disconnect();
+    } catch {
+      // ignore
+    }
+
+    fallbackProcessor = null;
+    fallbackSource = null;
+    fallbackSilence = null;
+    fallbackAnalyser = null;
+
+    if (fallbackStream) {
+      for (const track of fallbackStream.getTracks()) {
+        track.stop();
+      }
+      fallbackStream = null;
+    }
+
+    if (fallbackAudioContext) {
+      try {
+        await fallbackAudioContext.close();
+      } catch {
+        // ignore
+      }
+      fallbackAudioContext = null;
+    }
+
+    isFallbackRecording = false;
+  }
+
+  async function startWebAudioFallbackRecording() {
+    const AudioContextCtor = getAudioContextCtor();
+    if (!AudioContextCtor) {
+      throw new Error('Recording is not supported in this environment.');
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const audioContext = new AudioContextCtor();
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
+    const silence = audioContext.createGain();
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    silence.gain.value = 0;
+
+    fallbackChunks = [];
+    fallbackSampleRate = audioContext.sampleRate;
+    processor.onaudioprocess = (event: AudioProcessingEvent) => {
+      if (!isFallbackRecording) return;
+      const input = event.inputBuffer.getChannelData(0);
+      fallbackChunks.push(new Float32Array(input));
+    };
+
+    source.connect(processor);
+    source.connect(analyser);
+    processor.connect(silence);
+    silence.connect(audioContext.destination);
+
+    fallbackStream = stream;
+    fallbackAudioContext = audioContext;
+    fallbackSource = source;
+    fallbackProcessor = processor;
+    fallbackSilence = silence;
+    fallbackAnalyser = analyser;
+
+    isFallbackRecording = true;
+    isRecording = true;
+    startFallbackTimer();
+    if (!isLinuxDesktop()) {
+      startFallbackWaveformLoop(analyser);
+    }
+    console.log('[AudioRecorder] Recording with WebAudio fallback (WAV)');
+  }
+
+  async function stopWebAudioFallbackRecording() {
+    if (!isFallbackRecording) return;
+
+    const chunks = fallbackChunks.map(chunk => new Float32Array(chunk));
+    const sampleRate = fallbackSampleRate;
+    isRecording = false;
+
+    await cleanupFallbackRecorder();
+
+    if (chunks.length === 0) {
+      error = 'No audio captured. Please try again.';
+      return;
+    }
+
+    const blob = buildWavBlob(chunks, sampleRate);
+    const url = URL.createObjectURL(blob);
+    recordedUrl = url;
+    hasRecording = true;
+    wavesurfer?.load(url);
+    onRecordingComplete?.(blob, url);
+  }
 
   onMount(() => {
     // Check if microphone recording is supported
@@ -54,16 +374,24 @@
 
     // Only create RecordPlugin if microphone is supported
     if (microphoneSupported) {
+      const mimeType = getSupportedRecordingMimeType();
+      if (mimeType) {
+        console.log('[AudioRecorder] Using recording mime type:', mimeType);
+      } else {
+        console.warn('[AudioRecorder] No preferred recording mime type reported as supported; using browser default');
+      }
+
       // Create RecordPlugin
       // Note: scrollingWaveform shows live visualization during recording
       recorder = wavesurfer.registerPlugin(RecordPlugin.create({
-        mimeType: 'audio/webm',
+        ...(mimeType ? { mimeType } : {}),
         scrollingWaveform: true,
         renderRecordedAudio: true,
       }));
 
       recorder.on('record-start', () => {
         console.log('[AudioRecorder] Recording started');
+        isRecording = true;
       });
 
       recorder.on('record-progress', (time: number) => {
@@ -73,6 +401,7 @@
 
       recorder.on('record-end', (blob: Blob) => {
         console.log('[AudioRecorder] Recording ended, blob size:', blob.size);
+        isRecording = false;
         const url = URL.createObjectURL(blob);
         recordedUrl = url;
         hasRecording = true;
@@ -84,6 +413,7 @@
 
   onDestroy(() => {
     wavesurfer?.destroy();
+    void cleanupFallbackRecorder();
   });
 
   async function retryMicPermission() {
@@ -123,8 +453,40 @@
     } catch (err) {
       console.error('[AudioRecorder] Failed to start recording:', err);
       isRecording = false;
+
+      // RecordPlugin starts mic monitoring before MediaRecorder construction.
+      // If start fails (e.g., unsupported mime type), force mic cleanup.
+      try {
+        recorder.stopRecording();
+        recorder.stopMic();
+      } catch (cleanupErr) {
+        console.warn('[AudioRecorder] Failed to cleanup recorder after start error:', cleanupErr);
+      }
+
       if (err instanceof Error) {
-        if (err.name === 'NotAllowedError' || err.message.includes('Permission')) {
+        const messageLower = err.message.toLowerCase();
+        const mediaRecorderUnsupported =
+          err.name === 'NotSupportedError' ||
+          messageLower.includes('mediarecorder is unsupported') ||
+          messageLower.includes('mediarecorder unsupported') ||
+          messageLower.includes('mimetype is not supported') ||
+          messageLower.includes('mime type is not supported');
+
+        if (mediaRecorderUnsupported && hasWebAudioFallbackSupport()) {
+          try {
+            await startWebAudioFallbackRecording();
+            error = null;
+            return;
+          } catch (fallbackErr) {
+            console.error('[AudioRecorder] WebAudio fallback failed:', fallbackErr);
+          }
+        }
+
+        if (
+          err.name === 'NotAllowedError' ||
+          messageLower.includes('permission') ||
+          messageLower.includes('not allowed')
+        ) {
           micPermissionDenied = true;
           error = null;
         } else if (err.name === 'NotFoundError') {
@@ -145,8 +507,28 @@
     if (!recorder) return;
 
     console.log('[AudioRecorder] Stopping recording...');
-    isRecording = false;
-    recorder.stopRecording();
+    if (isFallbackRecording) {
+      void stopWebAudioFallbackRecording();
+      return;
+    }
+
+    const wasActive = recorder.isActive();
+    try {
+      if (wasActive) {
+        recorder.stopRecording();
+      } else {
+        recorder.stopMic();
+      }
+    } catch (err) {
+      console.warn('[AudioRecorder] Failed to stop recorder cleanly:', err);
+      try {
+        recorder.stopMic();
+      } catch {
+        // ignore
+      }
+    } finally {
+      isRecording = false;
+    }
   }
 
   function handleFileImport(e: Event) {

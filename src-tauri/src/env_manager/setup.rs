@@ -47,11 +47,21 @@ pub fn run_setup(app: &tauri::AppHandle, gpu: &GpuTarget) -> Result<(), String> 
         .map_err(|e| format!("Failed to create python_env directory: {}", e))?;
 
     // Step 0: Check disk space
-    emit_setup_event(app, "setup-checking-disk", "Checking available disk space...", 1);
+    emit_setup_event(
+        app,
+        "setup-checking-disk",
+        "Checking available disk space...",
+        1,
+    );
     check_disk_space(&env_dir, gpu)?;
 
     // Step 1: Copy source (0-5%)
-    emit_setup_event(app, "setup-copying-source", "Copying Python source files...", 3);
+    emit_setup_event(
+        app,
+        "setup-copying-source",
+        "Copying Python source files...",
+        3,
+    );
     copy_bundled_source(app)?;
 
     // Step 2: Install Python (5-15%)
@@ -135,29 +145,7 @@ fn get_available_disk_space(path: &Path) -> Result<u64, String> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::ffi::OsStrExt;
-        use std::ffi::OsStr;
-
-        // Use GetDiskFreeSpaceExW via command
-        let path_str = path.to_string_lossy();
-        match Command::new("wmic")
-            .args(["logicaldisk", "where", &format!("DeviceID='{}'", &path_str[..2]), "get", "FreeSpace", "/value"])
-            .output()
-        {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if line.starts_with("FreeSpace=") {
-                        if let Ok(bytes) = line.trim_start_matches("FreeSpace=").trim().parse::<u64>() {
-                            return Ok(bytes);
-                        }
-                    }
-                }
-                // Fallback: use PowerShell
-                get_disk_space_powershell(path)
-            }
-            _ => get_disk_space_powershell(path),
-        }
+        get_disk_space_powershell(path)
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -193,10 +181,7 @@ fn get_disk_space_powershell(path: &Path) -> Result<u64, String> {
         .args([
             "-NoProfile",
             "-Command",
-            &format!(
-                "(Get-PSDrive {}).Free",
-                drive.trim_end_matches(':')
-            ),
+            &format!("(Get-PSDrive {}).Free", drive.trim_end_matches(':')),
         ])
         .output()
     {
@@ -253,11 +238,10 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
         std::fs::remove_dir_all(dst)
             .map_err(|e| format!("Failed to clean existing dir {:?}: {}", dst, e))?;
     }
-    std::fs::create_dir_all(dst)
-        .map_err(|e| format!("Failed to create dir {:?}: {}", dst, e))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("Failed to create dir {:?}: {}", dst, e))?;
 
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| format!("Failed to read dir {:?}: {}", src, e))?
+    for entry in
+        std::fs::read_dir(src).map_err(|e| format!("Failed to read dir {:?}: {}", src, e))?
     {
         let entry = entry.map_err(|e| format!("Failed to read dir entry: {}", e))?;
         let src_path = entry.path();
@@ -286,7 +270,8 @@ fn install_python(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .arg(&python_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
+    apply_uv_cache_env(app, &mut cmd)?;
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let mut child = cmd
@@ -306,7 +291,10 @@ fn install_python(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         ));
     }
 
-    println!("[env_manager::setup] Python 3.11 installed to {:?}", python_dir);
+    println!(
+        "[env_manager::setup] Python 3.11 installed to {:?}",
+        python_dir
+    );
     Ok(())
 }
 
@@ -325,7 +313,8 @@ fn create_venv(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         .arg(&python_bin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
+    apply_uv_cache_env(app, &mut cmd)?;
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd
@@ -337,7 +326,10 @@ fn create_venv(app: &tauri::AppHandle, uv: &Path) -> Result<(), String> {
         return Err(format!("uv venv creation failed: {}", stderr));
     }
 
-    println!("[env_manager::setup] Virtual environment created at {:?}", venv_dir);
+    println!(
+        "[env_manager::setup] Virtual environment created at {:?}",
+        venv_dir
+    );
     Ok(())
 }
 
@@ -359,12 +351,7 @@ fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
     let cpython_dir = std::fs::read_dir(python_dir)
         .map_err(|e| format!("Failed to read {:?}: {}", python_dir, e))?
         .filter_map(|e| e.ok())
-        .find(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with("cpython-")
-                && e.path().is_dir()
-        })
+        .find(|e| e.file_name().to_string_lossy().starts_with("cpython-") && e.path().is_dir())
         .map(|e| e.path())
         .ok_or_else(|| {
             format!(
@@ -376,9 +363,7 @@ fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
     // On Windows: python.exe is at the root of the cpython dir
     // On Unix: python3 is in the bin/ subdirectory
     let candidates = if cfg!(target_os = "windows") {
-        vec![
-            cpython_dir.join("python.exe"),
-        ]
+        vec![cpython_dir.join("python.exe")]
     } else {
         vec![
             cpython_dir.join("bin").join("python3"),
@@ -388,10 +373,7 @@ fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
 
     for candidate in &candidates {
         if candidate.is_file() {
-            println!(
-                "[env_manager::setup] Found Python binary: {:?}",
-                candidate
-            );
+            println!("[env_manager::setup] Found Python binary: {:?}", candidate);
             return Ok(candidate.clone());
         }
     }
@@ -402,13 +384,8 @@ fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
     ))
 }
 
-
 /// Install all Python dependencies via uv pip.
-fn install_dependencies(
-    app: &tauri::AppHandle,
-    uv: &Path,
-    gpu: &GpuTarget,
-) -> Result<(), String> {
+fn install_dependencies(app: &tauri::AppHandle, uv: &Path, gpu: &GpuTarget) -> Result<(), String> {
     let venv_python = paths::venv_python(app)?;
     let requirements = paths::requirements_txt(app)?;
 
@@ -430,9 +407,14 @@ fn install_dependencies(
 
     // For Intel XPU, we also need intel-extension-for-pytorch
     if matches!(gpu, GpuTarget::IntelXpu) {
-        cmd.args(["--extra-index-url", "https://pytorch-extension.intel.com/release-whl/stable/xpu/us/"]);
+        cmd.args([
+            "--extra-index-url",
+            "https://pytorch-extension.intel.com/release-whl/stable/xpu/us/",
+        ]);
     }
 
+    apply_uv_cache_env(app, &mut cmd)?;
+    clean_appimage_env(&mut cmd);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     suppress_console_window(&mut cmd);
 
@@ -481,7 +463,7 @@ print('VERIFICATION_OK')
         .env("PYTHONPATH", env_dir.to_string_lossy().to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd
@@ -491,9 +473,15 @@ print('VERIFICATION_OK')
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    println!("[env_manager::setup] Verification stdout: {}", stdout.trim());
+    println!(
+        "[env_manager::setup] Verification stdout: {}",
+        stdout.trim()
+    );
     if !stderr.is_empty() {
-        println!("[env_manager::setup] Verification stderr: {}", stderr.trim());
+        println!(
+            "[env_manager::setup] Verification stderr: {}",
+            stderr.trim()
+        );
     }
 
     if !stdout.contains("VERIFICATION_OK") {
@@ -517,9 +505,7 @@ print('VERIFICATION_OK')
         }
         GpuTarget::Mps => {
             if !stdout.contains("MPS available: True") {
-                println!(
-                    "[env_manager::setup] WARNING: MPS expected but not available in torch."
-                );
+                println!("[env_manager::setup] WARNING: MPS expected but not available in torch.");
             }
         }
         _ => {}
@@ -549,13 +535,16 @@ fn write_setup_marker(app: &tauri::AppHandle, gpu: &GpuTarget) -> Result<(), Str
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
 
-    let json =
-        serde_json::to_string_pretty(&marker).map_err(|e| format!("Failed to serialize marker: {}", e))?;
+    let json = serde_json::to_string_pretty(&marker)
+        .map_err(|e| format!("Failed to serialize marker: {}", e))?;
 
     std::fs::write(&marker_path, json)
         .map_err(|e| format!("Failed to write setup marker: {}", e))?;
 
-    println!("[env_manager::setup] Setup marker written to {:?}", marker_path);
+    println!(
+        "[env_manager::setup] Setup marker written to {:?}",
+        marker_path
+    );
     Ok(())
 }
 
@@ -674,8 +663,8 @@ fn stream_output(
 
                 // Approximate progress based on line count
                 // uv typically outputs ~50-200 lines during install
-                let estimated_progress = progress_start
-                    + ((line_count.min(200) as f32 / 200.0) * range as f32) as u8;
+                let estimated_progress =
+                    progress_start + ((line_count.min(200) as f32 / 200.0) * range as f32) as u8;
 
                 let _ = app_handle.emit(
                     "sidecar-startup",
@@ -721,10 +710,57 @@ fn suppress_console_window(cmd: &mut Command) {
     let _ = cmd;
 }
 
+/// Remove environment variables injected by the Linux AppImage wrapper.
+///
+/// AppImages bundle libraries and set `LD_LIBRARY_PATH`, `PYTHONHOME`,
+/// `PYTHONPATH`, etc. to point at the mounted SquashFS image.  These leak
+/// into every subprocess we spawn and cause two classes of failure:
+///
+///   1. `PYTHONHOME` makes the standalone Python 3.11 look for its stdlib
+///      inside the AppImage instead of its own prefix → immediate crash.
+///   2. `LD_LIBRARY_PATH` can make uv or Python pick up incompatible
+///      bundled copies of glibc/libstdc++ → segfaults or subtle errors.
+///
+/// On macOS and Windows this is a no-op because AppImage is Linux-only.
+fn clean_appimage_env(cmd: &mut Command) {
+    #[cfg(target_os = "linux")]
+    {
+        // Remove variables that break Python/uv when inherited from AppImage.
+        cmd.env_remove("PYTHONHOME");
+        cmd.env_remove("PYTHONDONTWRITEBYTECODE");
+
+        // Only strip LD_LIBRARY_PATH if we're actually inside an AppImage
+        // (APPIMAGE or APPDIR is set by the AppRun wrapper).
+        if std::env::var_os("APPIMAGE").is_some() || std::env::var_os("APPDIR").is_some() {
+            cmd.env_remove("LD_LIBRARY_PATH");
+            // GI_TYPELIB_PATH can also leak and confuse gobject-introspection
+            cmd.env_remove("GI_TYPELIB_PATH");
+        }
+    }
+    let _ = cmd;
+}
+
+/// Keep uv/pip caches inside app-managed storage so uninstall cleanup can
+/// remove all setup artifacts.
+fn apply_uv_cache_env(app: &tauri::AppHandle, cmd: &mut Command) -> Result<(), String> {
+    let uv_cache_dir = paths::uv_cache_dir(app)?;
+    let pip_cache_dir = uv_cache_dir.join("pip");
+
+    std::fs::create_dir_all(&pip_cache_dir)
+        .map_err(|e| format!("Failed to create uv cache directory: {}", e))?;
+
+    cmd.env("UV_CACHE_DIR", &uv_cache_dir)
+        .env("PIP_CACHE_DIR", &pip_cache_dir);
+    Ok(())
+}
+
 /// Check if uv needs an update and report the status.
 pub fn check_uv_version(uv: &Path) -> Result<(String, bool), String> {
     let mut cmd = Command::new(uv);
-    cmd.args(["--version"]).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(["--version"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    clean_appimage_env(&mut cmd);
     suppress_console_window(&mut cmd);
 
     let output = cmd

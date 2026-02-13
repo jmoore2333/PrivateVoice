@@ -647,6 +647,48 @@
           Advanced
         </h3>
         <div class="space-y-3">
+          <!-- Toggle: Stable Custom Voice lead-in -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Stable Custom Voice lead-in</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Reduces short filler speech before the target text</p>
+            </div>
+            <button
+              onclick={handleToggle("stableCustomVoiceLeadIn")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.stableCustomVoiceLeadIn ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.stableCustomVoiceLeadIn}
+              aria-label="Toggle stable Custom Voice lead-in"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.stableCustomVoiceLeadIn ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
+          <!-- Toggle: Stable Voice Design lead-in -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Stable Voice Design lead-in</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Reduces minor front filler for generated designed voices</p>
+            </div>
+            <button
+              onclick={handleToggle("stableVoiceDesignLeadIn")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.stableVoiceDesignLeadIn ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.stableVoiceDesignLeadIn}
+              aria-label="Toggle stable Voice Design lead-in"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.stableVoiceDesignLeadIn ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
           <!-- Toggle: Auto-load model -->
           <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
             <div>
@@ -690,12 +732,12 @@
           </label>
 
           <!-- Model cache location (read-only) -->
-          <div class="flex flex-col gap-1.5">
+          <div class="flex flex-col gap-1.5 min-w-0">
             <div class="text-xs font-medium text-[var(--color-text-secondary)] uppercase tracking-wider">
               Model Cache Location
             </div>
             <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)]">
-              <span class="text-sm text-[var(--color-text-muted)] font-mono">
+              <span class="block break-all text-xs text-[var(--color-text-muted)] font-mono">
                 {cacheDir}
               </span>
             </div>
@@ -795,7 +837,7 @@
           <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)]">
             <div class="flex justify-between items-center mb-2">
               <span class="text-sm font-medium text-[var(--color-text-primary)]">PrivateVoice</span>
-              <span class="text-sm text-[var(--color-text-muted)]">v1.0.0</span>
+              <span class="text-sm text-[var(--color-text-muted)]">v{__APP_VERSION__}</span>
             </div>
             <div class="flex flex-wrap gap-2">
               <a href="https://github.com/jmoore2333/PrivateVoice" target="_blank"
@@ -815,7 +857,7 @@
                 class="inline-block"
               >
                 <img
-                  src="https://cdn.buymeacoffee.com/buttons/v2/default-blue.png"
+                  src="/bmc-button.png"
                   alt="Buy Me A Coffee"
                   class="h-12 w-auto"
                   loading="lazy"
@@ -844,7 +886,7 @@
     <!-- Footer -->
     <div class="sticky bottom-0 p-4 border-t border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
       <p class="text-xs text-[var(--color-text-muted)] text-center">
-        PrivateVoice v1.0.0
+        PrivateVoice v{__APP_VERSION__}
       </p>
     </div>
   </div>

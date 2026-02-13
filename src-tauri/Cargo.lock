@@ -2872,9 +2872,10 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
 name = "privatevoice"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "sha2",
@@ -2884,6 +2885,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-mcp-bridge",
  "tauri-plugin-opener",
+ "webkit2gtk",
  "webview2-com",
 ]
 
@@ -3833,6 +3835,7 @@ dependencies = [
  "gtk",
  "heck 0.5.0",
  "http",
+ "image",
  "jni",
  "libc",
  "log",

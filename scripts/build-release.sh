@@ -64,6 +64,11 @@ else
     exit 1
 fi
 
+# Verify staged dependency manifest hash
+echo "Verifying dependency hash..."
+bash "$SCRIPT_DIR/verify-dependency-hash.sh"
+echo ""
+
 echo ""
 
 # Step 3: Install frontend dependencies
