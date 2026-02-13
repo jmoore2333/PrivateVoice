@@ -851,6 +851,37 @@ fn setup_webview2_permissions(window: &tauri::WebviewWindow) {
     });
 }
 
+/// Configure Linux WebKit mic/camera behavior for Tauri.
+///
+/// WebKitGTK requires media stream support to be enabled, and user-media requests
+/// come through the `permission-request` signal.
+#[cfg(target_os = "linux")]
+fn setup_webkit_permissions(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webkit2gtk::glib::object::Cast;
+        use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
+
+        let inner = webview.inner();
+
+        if let Some(settings) = inner.settings() {
+            settings.set_enable_media_stream(true);
+        }
+
+        inner.connect_permission_request(|_, request| {
+            if request
+                .dynamic_cast_ref::<webkit2gtk::UserMediaPermissionRequest>()
+                .is_some()
+            {
+                request.allow();
+                println!("WebKitGTK: auto-granted user media permission");
+                true
+            } else {
+                false
+            }
+        });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Clear any cached WebView2 permission denials BEFORE the webview initializes.
@@ -884,6 +915,10 @@ pub fn run() {
                 // Auto-grant microphone/camera permissions on Windows
                 #[cfg(target_os = "windows")]
                 setup_webview2_permissions(&window);
+
+                // Enable and auto-approve user-media permissions on Linux WebKitGTK.
+                #[cfg(target_os = "linux")]
+                setup_webkit_permissions(&window);
             }
             Ok(())
         })

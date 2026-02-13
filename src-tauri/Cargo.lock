@@ -2885,6 +2885,7 @@ dependencies = [
  "tauri-plugin-fs",
  "tauri-plugin-mcp-bridge",
  "tauri-plugin-opener",
+ "webkit2gtk",
  "webview2-com",
 ]
 
