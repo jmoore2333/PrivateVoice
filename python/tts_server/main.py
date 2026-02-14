@@ -1,12 +1,18 @@
 """PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
 
 import asyncio
+import base64
+import binascii
 import hmac
+import io
 import logging
 import os
 import platform
+import re
 import signal
 import sys
+import threading
+import zipfile
 
 # Ignore SIGPIPE to prevent broken pipe crashes during stdout writes
 # This must be done early before any libraries print to stdout
@@ -80,6 +86,16 @@ INTERNAL_ERROR_DETAIL = "Internal server error"
 
 
 SUPPORTED_FORMATS = ("wav", "mp3")
+SUPPORTED_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
+SUPPORTED_BIT_DEPTHS = (16, 24, 32)
+SUPPORTED_BATCH_MODES = ("custom-voice", "voice-clone", "voice-design")
+MODEL_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "0.6b": ("custom-voice",),
+    "1.7b": ("custom-voice",),
+    "0.6b-base": ("voice-clone",),
+    "1.7b-base": ("voice-clone",),
+    "1.7b-design": ("voice-design",),
+}
 
 
 class CustomVoiceRequest(BaseModel):
@@ -90,6 +106,9 @@ class CustomVoiceRequest(BaseModel):
     format: str = "wav"
     mp3_bitrate: int = 192
     stable_lead_in: bool = True
+    seed: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bit_depth: int = 16
 
 
 class VoiceDesignRequest(BaseModel):
@@ -99,6 +118,32 @@ class VoiceDesignRequest(BaseModel):
     format: str = "wav"
     mp3_bitrate: int = 192
     stable_lead_in: bool = True
+    seed: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bit_depth: int = 16
+
+
+class BatchItem(BaseModel):
+    text: str
+    output_filename: str
+
+
+class BatchRequest(BaseModel):
+    mode: str
+    language: str = "english"
+    format: str = "wav"
+    mp3_bitrate: int = 192
+    seed: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bit_depth: int = 16
+    speaker: str = "serena"
+    instruction: str = ""
+    voice_description: str = ""
+    stable_lead_in: bool = True
+    reference_text: str = ""
+    reference_audio_base64: Optional[str] = None
+    x_vector_only_mode: bool = False
+    items: List[BatchItem]
 
 
 class StartupStatusResponse(BaseModel):
@@ -114,6 +159,13 @@ class DownloadProgressResponse(BaseModel):
     bytes_total: int
     speed_mbps: float
     eta: float
+
+
+class BatchProgressResponse(BaseModel):
+    total: int
+    completed: int
+    current_item: str
+    status: str
 
 
 class SystemInfoResponse(BaseModel):
@@ -223,6 +275,109 @@ _startup_state = StartupState()
 
 def get_startup_state() -> StartupState:
     return _startup_state
+
+
+class BatchProgressState:
+    """Track the progress of the currently running batch job."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.total = 0
+        self.completed = 0
+        self.current_item = ""
+        self.status = "idle"
+
+    def start(self, total: int) -> None:
+        with self._lock:
+            self.total = total
+            self.completed = 0
+            self.current_item = ""
+            self.status = "running"
+
+    def set_current_item(self, item: str) -> None:
+        with self._lock:
+            self.current_item = item
+
+    def increment_completed(self) -> None:
+        with self._lock:
+            self.completed += 1
+
+    def set_status(self, status: str) -> None:
+        with self._lock:
+            self.status = status
+
+    def snapshot(self) -> BatchProgressResponse:
+        with self._lock:
+            return BatchProgressResponse(
+                total=self.total,
+                completed=self.completed,
+                current_item=self.current_item,
+                status=self.status,
+            )
+
+
+_batch_progress = BatchProgressState()
+
+
+def validate_audio_format_options(sample_rate: Optional[int], bit_depth: int) -> None:
+    if sample_rate is not None and sample_rate not in SUPPORTED_SAMPLE_RATES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported sample_rate: {sample_rate}. "
+                f"Allowed values: {list(SUPPORTED_SAMPLE_RATES)}"
+            ),
+        )
+    if bit_depth not in SUPPORTED_BIT_DEPTHS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported bit_depth: {bit_depth}. "
+                f"Allowed values: {list(SUPPORTED_BIT_DEPTHS)}"
+            ),
+        )
+
+
+def validate_model_supports_mode(model_id: str, mode: str) -> None:
+    supported = MODEL_CAPABILITIES.get(model_id, ())
+    if mode not in supported:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Loaded model '{model_id}' does not support mode '{mode}'",
+        )
+
+
+def sanitize_output_filename(name: str, fallback: str) -> str:
+    candidate = os.path.basename((name or "").strip()) or fallback
+    candidate = re.sub(r"[^A-Za-z0-9._-]", "_", candidate)
+    if candidate in {"", ".", ".."}:
+        return fallback
+    return candidate
+
+
+def ensure_extension(filename: str, fmt: str) -> str:
+    ext = ".mp3" if fmt == "mp3" else ".wav"
+    if filename.lower().endswith(ext):
+        return filename
+    return f"{filename}{ext}"
+
+
+def decode_reference_audio(data: Optional[str]) -> bytes:
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="reference_audio_base64 is required for voice-clone batch mode",
+        )
+    try:
+        decoded = base64.b64decode(data, validate=True)
+    except binascii.Error as e:
+        raise HTTPException(status_code=400, detail=f"Invalid reference_audio_base64: {e}") from e
+    if len(decoded) > MAX_AUDIO_SIZE:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference audio exceeds maximum size of {MAX_AUDIO_SIZE // (1024 * 1024)} MB",
+        )
+    return decoded
 
 
 # ============================================================================
@@ -510,6 +665,7 @@ async def generate_custom_voice(request: CustomVoiceRequest):
 
     fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
     bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
+    validate_audio_format_options(request.sample_rate, request.bit_depth)
 
     try:
         clear_cancel()
@@ -522,6 +678,9 @@ async def generate_custom_voice(request: CustomVoiceRequest):
             output_format=fmt,
             mp3_bitrate=bitrate,
             stable_lead_in=request.stable_lead_in,
+            seed=request.seed,
+            sample_rate=request.sample_rate if fmt == "wav" else None,
+            bit_depth=request.bit_depth,
         )
         if is_cancelled():
             return Response(status_code=499)
@@ -542,6 +701,9 @@ async def generate_voice_clone(
     language: str = Form("english"),
     format: str = Form("wav"),
     mp3_bitrate: int = Form(192),
+    seed: Optional[int] = Form(None),
+    sample_rate: Optional[int] = Form(None),
+    bit_depth: int = Form(16),
 ):
     """Generate speech by cloning a reference voice."""
     model = get_model()
@@ -557,6 +719,7 @@ async def generate_voice_clone(
 
     fmt = format if format in SUPPORTED_FORMATS else "wav"
     bitrate = mp3_bitrate if mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
+    validate_audio_format_options(sample_rate, bit_depth)
 
     try:
         clear_cancel()
@@ -577,6 +740,9 @@ async def generate_voice_clone(
             x_vector_only_mode=x_vector_only_mode,
             output_format=fmt,
             mp3_bitrate=bitrate,
+            seed=seed,
+            sample_rate=sample_rate if fmt == "wav" else None,
+            bit_depth=bit_depth,
         )
         if is_cancelled():
             return Response(status_code=499)
@@ -610,6 +776,7 @@ async def generate_voice_design(request: VoiceDesignRequest):
 
     fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
     bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
+    validate_audio_format_options(request.sample_rate, request.bit_depth)
 
     try:
         clear_cancel()
@@ -621,6 +788,9 @@ async def generate_voice_design(request: VoiceDesignRequest):
             output_format=fmt,
             mp3_bitrate=bitrate,
             stable_lead_in=request.stable_lead_in,
+            seed=request.seed,
+            sample_rate=request.sample_rate if fmt == "wav" else None,
+            bit_depth=request.bit_depth,
         )
         if is_cancelled():
             return Response(status_code=499)
@@ -630,6 +800,147 @@ async def generate_voice_design(request: VoiceDesignRequest):
     except Exception:
         logger.exception("Voice design failed")
         raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+
+
+@app.post("/generate/batch")
+async def generate_batch(request: BatchRequest):
+    """Generate a batch of outputs with shared voice configuration."""
+    model = get_model()
+
+    if not model.is_loaded:
+        raise HTTPException(status_code=400, detail="Model not loaded")
+
+    mode = (request.mode or "").strip().lower()
+    if mode not in SUPPORTED_BATCH_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported mode: {request.mode}. Allowed values: {list(SUPPORTED_BATCH_MODES)}",
+        )
+
+    validate_model_supports_mode(model.model_id, mode)
+
+    if not request.items:
+        raise HTTPException(status_code=400, detail="Batch items cannot be empty")
+
+    fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+    bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
+    validate_audio_format_options(request.sample_rate, request.bit_depth)
+
+    reference_audio_data: Optional[bytes] = None
+    if mode == "voice-clone":
+        reference_audio_data = decode_reference_audio(request.reference_audio_base64)
+        if not request.x_vector_only_mode and not request.reference_text.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="reference_text is required unless x_vector_only_mode is enabled",
+            )
+
+    for index, item in enumerate(request.items, start=1):
+        if not item.text or not item.text.strip():
+            raise HTTPException(status_code=400, detail=f"Batch item {index} has empty text")
+        if len(item.text) > MAX_TEXT_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Batch item {index} exceeds maximum length of {MAX_TEXT_LENGTH} characters",
+            )
+
+    if mode == "voice-design" and not request.voice_description.strip():
+        raise HTTPException(status_code=400, detail="voice_description is required for voice-design mode")
+
+    clear_cancel()
+    _batch_progress.start(len(request.items))
+    logger.info(
+        "Starting batch generation: mode=%s, items=%d, fmt=%s",
+        mode,
+        len(request.items),
+        fmt,
+    )
+
+    zip_buffer = io.BytesIO()
+    try:
+        with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for index, item in enumerate(request.items, start=1):
+                if is_cancelled():
+                    _batch_progress.set_status("cancelled")
+                    logger.info("Batch generation cancelled before item %d", index)
+                    return Response(status_code=499)
+
+                raw_name = sanitize_output_filename(item.output_filename, f"item_{index}")
+                output_filename = ensure_extension(raw_name, fmt)
+                _batch_progress.set_current_item(output_filename)
+
+                if mode == "custom-voice":
+                    audio_bytes, _ = await asyncio.to_thread(
+                        model.generate_custom_voice,
+                        text=item.text,
+                        speaker=request.speaker,
+                        instruction=request.instruction,
+                        language=request.language,
+                        output_format=fmt,
+                        mp3_bitrate=bitrate,
+                        stable_lead_in=request.stable_lead_in,
+                        seed=request.seed,
+                        sample_rate=request.sample_rate if fmt == "wav" else None,
+                        bit_depth=request.bit_depth,
+                    )
+                elif mode == "voice-design":
+                    audio_bytes, _ = await asyncio.to_thread(
+                        model.generate_voice_design,
+                        text=item.text,
+                        voice_description=request.voice_description,
+                        language=request.language,
+                        output_format=fmt,
+                        mp3_bitrate=bitrate,
+                        stable_lead_in=request.stable_lead_in,
+                        seed=request.seed,
+                        sample_rate=request.sample_rate if fmt == "wav" else None,
+                        bit_depth=request.bit_depth,
+                    )
+                else:
+                    audio_bytes, _ = await asyncio.to_thread(
+                        model.generate_voice_clone,
+                        text=item.text,
+                        reference_audio=reference_audio_data,
+                        reference_text=request.reference_text,
+                        language=request.language,
+                        x_vector_only_mode=request.x_vector_only_mode,
+                        output_format=fmt,
+                        mp3_bitrate=bitrate,
+                        seed=request.seed,
+                        sample_rate=request.sample_rate if fmt == "wav" else None,
+                        bit_depth=request.bit_depth,
+                    )
+
+                if is_cancelled():
+                    _batch_progress.set_status("cancelled")
+                    logger.info("Batch generation cancelled at item %d", index)
+                    return Response(status_code=499)
+
+                archive.writestr(output_filename, audio_bytes)
+                _batch_progress.increment_completed()
+
+        _batch_progress.set_current_item("")
+        _batch_progress.set_status("completed")
+        logger.info("Batch generation complete: %d item(s)", len(request.items))
+        zip_buffer.seek(0)
+        return Response(
+            content=zip_buffer.read(),
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="batch_results.zip"'},
+        )
+    except HTTPException:
+        _batch_progress.set_status("error")
+        raise
+    except Exception:
+        _batch_progress.set_status("error")
+        logger.exception("Batch generation failed")
+        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+
+
+@app.get("/batch-progress", response_model=BatchProgressResponse)
+async def batch_progress():
+    """Get progress for the currently running batch job."""
+    return _batch_progress.snapshot()
 
 
 # ============================================================================
@@ -645,6 +956,9 @@ async def cancel_generation():
     checked before/after generation and the result is discarded if set.
     """
     request_cancel()
+    snapshot = _batch_progress.snapshot()
+    if snapshot.status == "running":
+        _batch_progress.set_status("cancelling")
     logger.info("Generation cancellation requested")
     return {"status": "cancelled"}
 

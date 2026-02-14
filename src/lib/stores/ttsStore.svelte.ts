@@ -65,6 +65,7 @@ export interface TTSState {
   speaker: Speaker;
   instruction: string;
   voiceDescription: string;
+  seed: number | null;
 
   // Voice clone
   referenceAudio: File | null;
@@ -93,6 +94,7 @@ function createTTSStore() {
     speaker: "aiden",
     instruction: "",
     voiceDescription: "",
+    seed: null,
     referenceAudio: null,
     referenceText: "",
     cloneLowQualityMode: false,
@@ -168,6 +170,8 @@ function createTTSStore() {
       let blob: Blob;
       const language = state.language.toLowerCase();
       const format = settingsStore.state.exportFormat || "wav";
+      const sampleRate = format === "wav" ? settingsStore.state.wavSampleRate : null;
+      const bitDepth = format === "wav" ? settingsStore.state.wavBitDepth : 16;
 
       switch (state.mode) {
         case "custom-voice":
@@ -182,6 +186,9 @@ function createTTSStore() {
             language,
             format,
             stable_lead_in: settingsStore.state.stableCustomVoiceLeadIn,
+            seed: state.seed,
+            sample_rate: sampleRate,
+            bit_depth: bitDepth,
           });
           break;
 
@@ -196,7 +203,14 @@ function createTTSStore() {
             state.text,
             state.referenceText,
             state.referenceAudio,
-            { xVectorOnly: state.cloneLowQualityMode, language, format }
+            {
+              xVectorOnly: state.cloneLowQualityMode,
+              language,
+              format,
+              seed: state.seed,
+              sample_rate: sampleRate,
+              bit_depth: bitDepth,
+            }
           );
           break;
 
@@ -210,6 +224,9 @@ function createTTSStore() {
             language,
             format,
             stable_lead_in: settingsStore.state.stableVoiceDesignLeadIn,
+            seed: state.seed,
+            sample_rate: sampleRate,
+            bit_depth: bitDepth,
           });
           break;
       }
@@ -264,6 +281,10 @@ function createTTSStore() {
 
   function setVoiceDescription(description: string) {
     state.voiceDescription = description;
+  }
+
+  function setSeed(seed: number | null) {
+    state.seed = seed;
   }
 
   function setReferenceAudio(file: File | null) {
@@ -348,6 +369,7 @@ function createTTSStore() {
     setSpeaker,
     setInstruction,
     setVoiceDescription,
+    setSeed,
     setReferenceAudio,
     setReferenceText,
     setCloneLowQualityMode,

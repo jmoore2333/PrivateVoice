@@ -166,6 +166,14 @@ class TTSModel:
             "Could not decode reference audio. Please upload a WAV file."
         )
 
+    @staticmethod
+    def _set_seed(seed: int) -> None:
+        """Set deterministic RNG state for reproducible sampling."""
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        np.random.seed(seed % (2**32))
+
     def generate_custom_voice(
         self,
         text: str,
@@ -175,6 +183,10 @@ class TTSModel:
         output_format: str = "wav",
         mp3_bitrate: int = 192,
         stable_lead_in: bool = True,
+        seed: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        bit_depth: int = 16,
+        channels: int = 1,
     ) -> tuple[bytes, str]:
         """
         Generate speech using a preset speaker voice.
@@ -207,11 +219,22 @@ class TTSModel:
             generate_kwargs["non_streaming_mode"] = False
             generate_kwargs["subtalker_dosample"] = False
 
+        if seed is not None:
+            self._set_seed(seed)
+
         with torch.no_grad():
             wavs, sr = self.model.generate_custom_voice(**generate_kwargs)
 
         synchronize_device(self.config.device)
-        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
+        return self.audio_to_format(
+            wavs[0],
+            sr,
+            output_format,
+            mp3_bitrate=mp3_bitrate,
+            target_sample_rate=sample_rate,
+            bit_depth=bit_depth,
+            channels=channels,
+        )
 
     def generate_voice_clone(
         self,
@@ -222,6 +245,10 @@ class TTSModel:
         x_vector_only_mode: bool = False,
         output_format: str = "wav",
         mp3_bitrate: int = 192,
+        seed: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        bit_depth: int = 16,
+        channels: int = 1,
     ) -> tuple[bytes, str]:
         """
         Generate speech by cloning a reference voice.
@@ -252,6 +279,8 @@ class TTSModel:
 
         logger.info(f"[vc step 3/5] Starting voice clone inference on {self.config.device}...")
         try:
+            if seed is not None:
+                self._set_seed(seed)
             with torch.no_grad():
                 wavs, sr = self.model.generate_voice_clone(
                     text=text,
@@ -273,7 +302,15 @@ class TTSModel:
         logger.info(f"[vc step 4/5] Inference complete, got {len(wavs)} wav(s), sr={sr}")
         synchronize_device(self.config.device)
         logger.info("[vc step 5/5] Converting output to audio format...")
-        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
+        return self.audio_to_format(
+            wavs[0],
+            sr,
+            output_format,
+            mp3_bitrate=mp3_bitrate,
+            target_sample_rate=sample_rate,
+            bit_depth=bit_depth,
+            channels=channels,
+        )
 
     def generate_voice_design(
         self,
@@ -283,6 +320,10 @@ class TTSModel:
         output_format: str = "wav",
         mp3_bitrate: int = 192,
         stable_lead_in: bool = True,
+        seed: Optional[int] = None,
+        sample_rate: Optional[int] = None,
+        bit_depth: int = 16,
+        channels: int = 1,
     ) -> tuple[bytes, str]:
         """
         Generate speech with a novel voice from natural language description.
@@ -315,11 +356,22 @@ class TTSModel:
             generate_kwargs["non_streaming_mode"] = False
             generate_kwargs["subtalker_dosample"] = False
 
+        if seed is not None:
+            self._set_seed(seed)
+
         with torch.no_grad():
             wavs, sr = self.model.generate_voice_design(**generate_kwargs)
 
         synchronize_device(self.config.device)
-        return self.audio_to_format(wavs[0], sr, output_format, mp3_bitrate=mp3_bitrate)
+        return self.audio_to_format(
+            wavs[0],
+            sr,
+            output_format,
+            mp3_bitrate=mp3_bitrate,
+            target_sample_rate=sample_rate,
+            bit_depth=bit_depth,
+            channels=channels,
+        )
 
     def _prepare_audio(self, audio, sample_rate: int) -> tuple[np.ndarray, int]:
         """Normalize audio tensor/array to float32 numpy."""
@@ -339,11 +391,47 @@ class TTSModel:
 
         return audio_np, sample_rate
 
-    def _audio_to_wav(self, audio, sample_rate: int) -> bytes:
+    def _audio_to_wav(
+        self,
+        audio,
+        sample_rate: int,
+        target_sample_rate: Optional[int] = None,
+        bit_depth: int = 16,
+        channels: int = 1,
+    ) -> bytes:
         """Convert audio tensor/array to WAV bytes."""
         audio_np, sr = self._prepare_audio(audio, sample_rate)
+
+        if audio_np.ndim > 1:
+            audio_np = audio_np.mean(axis=1)
+
+        if target_sample_rate and target_sample_rate != sr:
+            import librosa
+
+            audio_np = librosa.resample(
+                audio_np,
+                orig_sr=sr,
+                target_sr=target_sample_rate,
+                res_type="kaiser_best",
+            )
+            sr = target_sample_rate
+
+        audio_np = np.clip(audio_np, -1.0, 1.0)
+
+        if channels == 2:
+            audio_np = np.column_stack((audio_np, audio_np))
+        else:
+            audio_np = np.squeeze(audio_np)
+
+        subtype_map = {
+            16: "PCM_16",
+            24: "PCM_24",
+            32: "PCM_32",
+        }
+        subtype = subtype_map.get(bit_depth, "PCM_16")
+
         buffer = io.BytesIO()
-        sf.write(buffer, audio_np, sr, format='WAV')
+        sf.write(buffer, audio_np, sr, format='WAV', subtype=subtype)
         buffer.seek(0)
         return buffer.read()
 
@@ -367,12 +455,25 @@ class TTSModel:
         return bytes(mp3_data)
 
     def audio_to_format(
-        self, audio, sample_rate: int, fmt: str = "wav", mp3_bitrate: int = 192
+        self,
+        audio,
+        sample_rate: int,
+        fmt: str = "wav",
+        mp3_bitrate: int = 192,
+        target_sample_rate: Optional[int] = None,
+        bit_depth: int = 16,
+        channels: int = 1,
     ) -> tuple[bytes, str]:
         """Convert audio to requested format. Returns (bytes, media_type)."""
         if fmt == "mp3":
             return self._audio_to_mp3(audio, sample_rate, bitrate=mp3_bitrate), "audio/mpeg"
-        return self._audio_to_wav(audio, sample_rate), "audio/wav"
+        return self._audio_to_wav(
+            audio,
+            sample_rate,
+            target_sample_rate=target_sample_rate,
+            bit_depth=bit_depth,
+            channels=channels,
+        ), "audio/wav"
 
 
 # Global model instance

@@ -38,10 +38,16 @@ describe('Settings Store', () => {
 
     // Translation helpers are opt-in by default
     expect(settingsStore.state.enableTranslation).toBe(false);
+    expect(settingsStore.state.enableBatchMode).toBe(false);
 
     // Stable lead-in controls are enabled by default
     expect(settingsStore.state.stableCustomVoiceLeadIn).toBe(true);
     expect(settingsStore.state.stableVoiceDesignLeadIn).toBe(true);
+
+    // WAV export controls
+    expect(settingsStore.state.wavSampleRate).toBeNull();
+    expect(settingsStore.state.wavBitDepth).toBe(16);
+    expect(settingsStore.state.wavChannels).toBe(1);
 
     // Verify onboarding not completed by default
     expect(settingsStore.state.hasCompletedOnboarding).toBe(false);

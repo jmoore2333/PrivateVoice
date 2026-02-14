@@ -9,7 +9,8 @@
   import { debugStore } from "$lib/stores/debugStore.svelte";
   import { settingsStore } from "$lib/stores/settingsStore.svelte";
   import { libraryStore } from "$lib/stores/libraryStore.svelte";
-  import { ttsClient, type Speaker, type SystemInfo } from "$lib/api/ttsClient";
+  import { batchStore } from "$lib/stores/batchStore.svelte";
+  import { ttsClient, type BatchRequest, type Speaker, type SystemInfo } from "$lib/api/ttsClient";
 
   // Layout components
   import Header from "$lib/components/layout/Header.svelte";
@@ -19,6 +20,7 @@
   import CustomVoicePanel from "$lib/components/input/CustomVoicePanel.svelte";
   import VoiceClonePanel from "$lib/components/input/VoiceClonePanel.svelte";
   import VoiceDesignPanel from "$lib/components/input/VoiceDesignPanel.svelte";
+  import BatchPanel from "$lib/components/input/BatchPanel.svelte";
 
   // Output
   import OutputPanel from "$lib/components/output/OutputPanel.svelte";
@@ -39,6 +41,7 @@
 
   const { state: ttsState } = ttsStore;
   const { state: appState } = appStore;
+  const { state: batchState } = batchStore;
 
   // Local state
   let healthInterval: ReturnType<typeof setInterval> | null = null;
@@ -50,6 +53,7 @@
   let elapsedInterval: ReturnType<typeof setInterval> | null = null;
   let startupStatusAvailable = $state(true);
   let hasFetchedSystemInfo = $state(false);
+  let batchMode = $state(false);
 
   // Component refs
   let outputPanelRef = $state<OutputPanel>();
@@ -77,6 +81,7 @@
   let localInstruction = $state(ttsState.instruction);
   let localReferenceText = $state(ttsState.referenceText);
   let localVoiceDescription = $state(ttsState.voiceDescription);
+  let localSeed = $state<number | null>(ttsState.seed);
 
   // Keyboard shortcuts
   useKeyboardShortcuts({
@@ -168,6 +173,7 @@
   }
 
   const recommendedCloneHint = $derived(buildRecommendedHint(debugStore.state.systemInfo));
+  const batchModeEnabled = $derived(settingsStore.state.enableBatchMode);
 
   // Sync local state from store when store changes
   $effect(() => {
@@ -192,6 +198,16 @@
 
   $effect(() => {
     localVoiceDescription = ttsState.voiceDescription;
+  });
+
+  $effect(() => {
+    localSeed = ttsState.seed;
+  });
+
+  $effect(() => {
+    if (!batchModeEnabled && batchMode) {
+      batchMode = false;
+    }
   });
 
   // Auto-load model when server is ready and onboarding was already completed
@@ -619,6 +635,104 @@
     ttsStore.setVoiceDescription(description);
   }
 
+  function handleSeedChange(seed: number | null) {
+    localSeed = seed;
+    ttsStore.setSeed(seed);
+  }
+
+  async function handleBatchFilesAdded(files: FileList | File[]) {
+    await batchStore.addFiles(files);
+  }
+
+  function handleBatchFileRemove(id: string) {
+    batchStore.removeFile(id);
+  }
+
+  function handleBatchFilenameChange(id: string, value: string) {
+    batchStore.updateOutputFilename(id, value);
+  }
+
+  async function encodeFileToBase64(file: File): Promise<string> {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const chunkSize = 0x8000;
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      const chunk = bytes.subarray(i, i + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  }
+
+  async function handleStartBatch() {
+    batchStore.setError(null);
+
+    if (!modelSupportsMode(ttsState.modelId, ttsState.mode)) {
+      const recommended = getRecommendedModel(ttsState.mode);
+      const label = MODEL_OPTIONS.find((model) => model.id === recommended)?.label ?? recommended;
+      batchStore.setError(`Current model does not support ${ttsState.mode}. Load ${label} first.`);
+      return;
+    }
+
+    if (batchState.files.length === 0) {
+      batchStore.setError("Add at least one text file before processing.");
+      return;
+    }
+
+    const format = settingsStore.state.exportFormat || "wav";
+    const request: BatchRequest = {
+      mode: ttsState.mode,
+      language: localLanguage.toLowerCase(),
+      format,
+      seed: localSeed,
+      sample_rate: format === "wav" ? settingsStore.state.wavSampleRate : null,
+      bit_depth: format === "wav" ? settingsStore.state.wavBitDepth : 16,
+      items: batchState.files.map((file) => ({
+        text: file.text,
+        output_filename: file.outputFilename,
+      })),
+    };
+
+    if (ttsState.mode === "custom-voice") {
+      request.speaker = localSpeaker;
+      request.instruction = localInstruction;
+      request.stable_lead_in = settingsStore.state.stableCustomVoiceLeadIn;
+    } else if (ttsState.mode === "voice-design") {
+      request.voice_description = localVoiceDescription;
+      request.stable_lead_in = settingsStore.state.stableVoiceDesignLeadIn;
+      if (!localVoiceDescription.trim()) {
+        batchStore.setError("Voice description is required for Voice Design batch mode.");
+        return;
+      }
+    } else if (ttsState.mode === "voice-clone") {
+      const referenceAudio = ttsState.referenceAudio;
+      if (!referenceAudio) {
+        batchStore.setError("Reference audio is required for Voice Clone batch mode.");
+        return;
+      }
+      request.reference_audio_base64 = await encodeFileToBase64(referenceAudio);
+      request.reference_text = localReferenceText;
+      request.x_vector_only_mode = ttsState.cloneLowQualityMode;
+      if (!ttsState.cloneLowQualityMode && !localReferenceText.trim()) {
+        batchStore.setError("Reference transcript is required unless low-quality mode is enabled.");
+        return;
+      }
+    }
+
+    await batchStore.startBatch(request);
+  }
+
+  function handleCancelBatch() {
+    batchStore.cancelBatch();
+  }
+
+  function handleBatchModeToggle() {
+    if (!batchModeEnabled) {
+      batchMode = false;
+      return;
+    }
+    batchMode = !batchMode;
+  }
+
   function handleOnboardingComplete(selectedModel: string) {
     // Load the selected model after onboarding
     ttsStore.loadModel(selectedModel);
@@ -677,97 +791,183 @@
   <!-- Workspace -->
   <Workspace>
     {#snippet inputPanel()}
-      {#if ttsState.mode === 'custom-voice'}
-        <CustomVoicePanel
-          bind:text={localText}
-          bind:language={localLanguage}
-          bind:speaker={localSpeaker}
-          bind:instruction={localInstruction}
-          hasTranslation={settingsStore.state.enableTranslation}
-          {isTranslatingText}
-          {textTranslationError}
-          modelSupported={customVoiceModelSupported}
-          modelLoading={ttsState.isLoadingModel}
-          recommendedModelLabel={recommendedCustomModelLabel}
-          currentModelId={ttsState.modelId}
-          isGenerating={ttsState.isGenerating}
-          {elapsedTime}
-          onGenerate={handleGenerate}
-          onTextChange={handleTextChange}
-          onLanguageChange={handleLanguageChange}
-          onSpeakerChange={handleSpeakerChange}
-          onInstructionChange={handleInstructionChange}
-          onTranslateText={handleTranslateInputText}
-          onLoadModel={handleLoadCustomVoiceModel}
-        />
-      {:else if ttsState.mode === 'voice-clone'}
-        <VoiceClonePanel
-          bind:text={localText}
-          bind:language={localLanguage}
-          bind:referenceText={localReferenceText}
-          {referenceAudioUrl}
-          {referenceAudioBlob}
-          modelSupported={voiceCloneModelSupported}
-          modelLoading={ttsState.isLoadingModel}
-          recommendedModelLabel={recommendedCloneModelLabel}
-          recommendedModelHint={recommendedCloneHint}
-          isGenerating={ttsState.isGenerating}
-          {elapsedTime}
-          hasWhisper={settingsStore.state.enableWhisper}
-          hasTranslation={settingsStore.state.enableWhisper}
-          canTranslateText={settingsStore.state.enableTranslation}
-          {isTranscribing}
-          {transcriptionError}
-          {translationText}
-          {translationError}
-          {isTranslatingText}
-          {textTranslationError}
-          onGenerate={handleGenerate}
-          onTextChange={handleTextChange}
-          onLanguageChange={handleLanguageChange}
-          onReferenceTextChange={handleReferenceTextChange}
-          onReferenceAudioChange={handleReferenceAudioChange}
-          onAutoTranscribe={handleAutoTranscribe}
-          onUseTranslation={handleUseTranslationAsText}
-          onTranslateText={handleTranslateInputText}
-          onLowQualityModeChange={handleCloneQualityChange}
-          onLoadModel={handleLoadVoiceCloneModel}
-        />
-      {:else if ttsState.mode === 'voice-design'}
-        <VoiceDesignPanel
-          bind:text={localText}
-          bind:language={localLanguage}
-          bind:voiceDescription={localVoiceDescription}
-          hasTranslation={settingsStore.state.enableTranslation}
-          {isTranslatingText}
-          {textTranslationError}
-          isGenerating={ttsState.isGenerating}
-          {elapsedTime}
-          modelLoaded={voiceDesignModelLoaded}
-          modelLoading={ttsState.isLoadingModel}
-          recommendedModelLabel={recommendedDesignModelLabel}
-          onGenerate={handleGenerate}
-          onLoadModel={handleLoadVoiceDesignModel}
-          onTextChange={handleTextChange}
-          onLanguageChange={handleLanguageChange}
-          onDescriptionChange={handleDescriptionChange}
-          onTranslateText={handleTranslateInputText}
-        />
-      {/if}
+      <div class="space-y-4">
+        {#if batchModeEnabled}
+          <div class="flex items-center justify-between rounded-lg border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] p-3">
+            <div>
+              <p class="text-sm font-medium text-[var(--color-text-primary)]">Batch mode</p>
+              <p class="text-xs text-[var(--color-text-muted)]">Use queued text files with your current voice configuration.</p>
+            </div>
+            <button
+              class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={batchMode}
+              aria-label="Toggle batch mode"
+              onclick={handleBatchModeToggle}
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform {batchMode ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </div>
+        {/if}
+
+        {#if batchModeEnabled && batchMode}
+          <BatchPanel
+            files={batchState.files}
+            isProcessing={batchState.isProcessing}
+            progress={batchState.progress}
+            resultsCount={batchState.results.length}
+            error={batchState.error}
+            onAddFiles={handleBatchFilesAdded}
+            onRemoveFile={handleBatchFileRemove}
+            onOutputFilenameChange={handleBatchFilenameChange}
+            onStart={handleStartBatch}
+            onCancel={handleCancelBatch}
+            onDownload={() => batchStore.downloadResults()}
+          />
+        {:else if ttsState.mode === 'custom-voice'}
+          <CustomVoicePanel
+            bind:text={localText}
+            bind:language={localLanguage}
+            bind:speaker={localSpeaker}
+            bind:instruction={localInstruction}
+            bind:seed={localSeed}
+            hasTranslation={settingsStore.state.enableTranslation}
+            {isTranslatingText}
+            {textTranslationError}
+            modelSupported={customVoiceModelSupported}
+            modelLoading={ttsState.isLoadingModel}
+            recommendedModelLabel={recommendedCustomModelLabel}
+            currentModelId={ttsState.modelId}
+            isGenerating={ttsState.isGenerating}
+            {elapsedTime}
+            onGenerate={handleGenerate}
+            onTextChange={handleTextChange}
+            onLanguageChange={handleLanguageChange}
+            onSpeakerChange={handleSpeakerChange}
+            onInstructionChange={handleInstructionChange}
+            onSeedChange={handleSeedChange}
+            onTranslateText={handleTranslateInputText}
+            onLoadModel={handleLoadCustomVoiceModel}
+          />
+        {:else if ttsState.mode === 'voice-clone'}
+          <VoiceClonePanel
+            bind:text={localText}
+            bind:language={localLanguage}
+            bind:referenceText={localReferenceText}
+            bind:seed={localSeed}
+            {referenceAudioUrl}
+            {referenceAudioBlob}
+            modelSupported={voiceCloneModelSupported}
+            modelLoading={ttsState.isLoadingModel}
+            recommendedModelLabel={recommendedCloneModelLabel}
+            recommendedModelHint={recommendedCloneHint}
+            isGenerating={ttsState.isGenerating}
+            {elapsedTime}
+            hasWhisper={settingsStore.state.enableWhisper}
+            hasTranslation={settingsStore.state.enableWhisper}
+            canTranslateText={settingsStore.state.enableTranslation}
+            {isTranscribing}
+            {transcriptionError}
+            {translationText}
+            {translationError}
+            {isTranslatingText}
+            {textTranslationError}
+            onGenerate={handleGenerate}
+            onTextChange={handleTextChange}
+            onLanguageChange={handleLanguageChange}
+            onReferenceTextChange={handleReferenceTextChange}
+            onReferenceAudioChange={handleReferenceAudioChange}
+            onAutoTranscribe={handleAutoTranscribe}
+            onUseTranslation={handleUseTranslationAsText}
+            onTranslateText={handleTranslateInputText}
+            onLowQualityModeChange={handleCloneQualityChange}
+            onSeedChange={handleSeedChange}
+            onLoadModel={handleLoadVoiceCloneModel}
+          />
+        {:else if ttsState.mode === 'voice-design'}
+          <VoiceDesignPanel
+            bind:text={localText}
+            bind:language={localLanguage}
+            bind:voiceDescription={localVoiceDescription}
+            bind:seed={localSeed}
+            hasTranslation={settingsStore.state.enableTranslation}
+            {isTranslatingText}
+            {textTranslationError}
+            isGenerating={ttsState.isGenerating}
+            {elapsedTime}
+            modelLoaded={voiceDesignModelLoaded}
+            modelLoading={ttsState.isLoadingModel}
+            recommendedModelLabel={recommendedDesignModelLabel}
+            onGenerate={handleGenerate}
+            onLoadModel={handleLoadVoiceDesignModel}
+            onTextChange={handleTextChange}
+            onLanguageChange={handleLanguageChange}
+            onDescriptionChange={handleDescriptionChange}
+            onSeedChange={handleSeedChange}
+            onTranslateText={handleTranslateInputText}
+          />
+        {/if}
+      </div>
     {/snippet}
 
     {#snippet outputPanel()}
-      <OutputPanel
-        bind:this={outputPanelRef}
-        audioUrl={ttsState.audioUrl ?? undefined}
-        isGenerating={ttsState.isGenerating}
-        {elapsedTime}
-        generatingText={ttsState.text}
-        onRegenerate={handleGenerate}
-        onSave={handleSave}
-        onExport={handleExport}
-        onCancel={() => ttsStore.abortGeneration()}
-      />
+      {#if batchModeEnabled && batchMode}
+        <div class="h-full flex flex-col justify-center">
+          <div class="max-w-xl mx-auto w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-6 space-y-4">
+            <div>
+              <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">Batch Progress</h3>
+              <p class="text-sm text-[var(--color-text-muted)] mt-1">
+                {batchState.progress.completed}/{batchState.progress.total} completed
+              </p>
+            </div>
+
+            <div class="h-2 rounded-full bg-[var(--color-bg-surface)] overflow-hidden">
+              <div
+                class="h-full bg-[var(--color-accent)] transition-all duration-300"
+                style={`width: ${
+                  batchState.progress.total > 0
+                    ? Math.round((batchState.progress.completed / batchState.progress.total) * 100)
+                    : 0
+                }%`}
+              ></div>
+            </div>
+
+            {#if batchState.progress.current_item}
+              <p class="text-sm text-[var(--color-text-secondary)] truncate" title={batchState.progress.current_item}>
+                Current: {batchState.progress.current_item}
+              </p>
+            {/if}
+
+            <div class="flex items-center gap-2">
+              <span class="inline-flex px-2 py-1 rounded-full text-xs bg-[var(--color-bg-surface)] text-[var(--color-text-muted)] uppercase">
+                {batchState.progress.status}
+              </span>
+              {#if batchState.results.length > 0}
+                <button
+                  class="px-3 py-2 rounded-lg bg-[var(--color-accent)] text-white text-sm font-medium hover:bg-[var(--color-accent-hover)]"
+                  onclick={() => batchStore.downloadResults()}
+                >
+                  Download ZIP
+                </button>
+              {/if}
+            </div>
+          </div>
+        </div>
+      {:else}
+        <OutputPanel
+          bind:this={outputPanelRef}
+          audioUrl={ttsState.audioUrl ?? undefined}
+          isGenerating={ttsState.isGenerating}
+          {elapsedTime}
+          generatingText={ttsState.text}
+          onRegenerate={handleGenerate}
+          onSave={handleSave}
+          onExport={handleExport}
+          onCancel={() => ttsStore.abortGeneration()}
+        />
+      {/if}
     {/snippet}
   </Workspace>
 

@@ -45,8 +45,10 @@ Describe the voice you want in plain text — *"warm baritone, slight British ac
 - **Runs 100% locally** — inference on Apple Silicon (MPS), NVIDIA CUDA, or CPU. Nothing leaves `localhost`.
 - **Lightweight installer** — ships a small desktop app; downloads Python, dependencies, and models on first launch.
 - **5 model variants** — from fast 0.6B to high-quality 1.7B, with one-click switching between compatible models.
+- **Deterministic seed control** — optional seed input for reproducible generations across Custom Voice, Voice Clone, and Voice Design.
 - **Voice library** — save generated audio, organize with tabs (Recent / Saved Voices / Audio), search and replay.
-- **Export to WAV or MP3** — configurable bitrate, native save dialog.
+- **Export to WAV or MP3** — configurable MP3 bitrate, plus WAV sample rate and bit depth controls.
+- **Batch processing** — queue multiple `.txt` files and generate a ZIP of per-file outputs with progress tracking and cancellation.
 - **Optional Whisper transcription** — auto-fill Voice Clone transcripts from reference audio.
 - **Optional translation** — translate input text locally before generating speech (NLLB 600M).
 - **Keyboard shortcuts** — `Cmd/Ctrl+Enter` to generate, `Cmd/Ctrl+S` to save, `Space` to play/pause, and more.
@@ -133,6 +135,12 @@ The Tauri desktop shell manages a Python sidecar process that runs the TTS model
 </p>
 
 Configure theme, default model/speaker, export format, auto-load behavior, and optional features (Whisper, translation). The **Environment** section shows GPU target, setup state, and disk usage — with **Repair** and **Full Rebuild** buttons if anything goes wrong.
+
+## Advanced Generation Controls
+
+- **Seed (optional):** available in each generation mode under `Advanced`. Use the same seed + same setup for reproducible outputs.
+- **WAV tuning:** when export format is WAV, choose `Native / 8k / 16k / 22.05k / 24k / 44.1k / 48k` sample rates and `16/24/32-bit` depth.
+- **Batch mode:** toggle `Batch mode`, upload multiple `.txt` files, and generate all outputs using the current voice configuration. Results download as a ZIP.
 
 ## Storage & Uninstall
 

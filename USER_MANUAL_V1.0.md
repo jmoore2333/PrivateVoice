@@ -1,7 +1,7 @@
 # PrivateVoice User Manual (v1.0)
 
-Version: 1.0.0  
-Updated: February 12, 2026
+Version: 1.0.1  
+Updated: February 13, 2026
 
 ## 1. What PrivateVoice Does
 
@@ -62,6 +62,10 @@ Lead-in behavior:
 - By default, PrivateVoice uses a stable lead-in path to reduce short filler speech at the start of generated audio.
 - If you want the original model-default expressive behavior, disable `Stable Custom Voice lead-in` in `Settings -> Advanced`.
 
+Seed control:
+- Open the `Advanced` section in the panel and set an optional seed.
+- Reusing the same seed (with the same model/device/runtime) produces reproducible sampling behavior.
+
 ### 5.2 Voice Clone
 
 Clone voice from reference audio.
@@ -79,6 +83,9 @@ Notes:
 - In this branch, backend voice clone uses in-memory audio decoding to avoid Windows temp-file issues.
 - If recording is unavailable in your environment, importing audio still works.
 
+Seed control:
+- Voice Clone also supports the optional `Advanced` seed field for reproducible generation.
+
 ### 5.3 Voice Design
 
 Create a voice from descriptive text.
@@ -94,6 +101,9 @@ Required model: `1.7b-design`
 Lead-in behavior:
 - Voice Design also uses stable lead-in by default to reduce minor front filler.
 - You can switch back to model-default behavior with `Stable Voice Design lead-in` in `Settings -> Advanced`.
+
+Seed control:
+- Voice Design supports the same optional `Advanced` seed input for reproducibility.
 
 ## 6. Model Compatibility Reference
 
@@ -170,6 +180,11 @@ Notes:
 - Formats: WAV or MP3
 - Format is controlled by Settings
 
+WAV format controls:
+- When default format is WAV, you can set sample rate and bit depth:
+  - Sample rate: Native, 8000, 16000, 22050, 24000, 44100, 48000 Hz
+  - Bit depth: 16-bit, 24-bit, 32-bit PCM
+
 ## 11. Settings Overview
 
 Key settings include:
@@ -179,9 +194,27 @@ Key settings include:
 - Stable Custom Voice lead-in
 - Stable Voice Design lead-in
 - Export folder + default format
+- WAV sample rate + WAV bit depth (shown when format is WAV)
 - Whisper auto-transcription controls
 - Translation helper controls (separate toggle, model, load/unload, status)
 - Debug console on startup
+
+## 12. Batch Processing
+
+Batch mode allows processing multiple text files into individual audio outputs.
+
+Use:
+1. Enable `Batch mode` in the input panel
+2. Add one or more `.txt` files (drag/drop or browse)
+3. Review/edit output filenames
+4. Click `Process All`
+5. Monitor batch progress and current item
+6. Download resulting ZIP when complete
+
+Behavior:
+- Batch uses your current mode and voice configuration (speaker/instruction, clone reference, or voice description).
+- Batch runs items sequentially on the loaded model.
+- `Cancel` stops processing between items.
 
 ### Environment Section (New)
 
@@ -199,7 +232,7 @@ Actions:
 
 Use these if first-run setup or environment validation fails.
 
-## 12. Keyboard Shortcuts
+## 13. Keyboard Shortcuts
 
 - `Cmd/Ctrl + Enter`: Generate
 - `Cmd/Ctrl + S`: Save
@@ -209,7 +242,7 @@ Use these if first-run setup or environment validation fails.
 - `Space`: Play/pause (outside text input)
 - `Escape`: Close open panel
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Setup takes too long
 
@@ -243,6 +276,12 @@ If CUDA is unavailable, app falls back to CPU.
 - Ensure `Stable Custom Voice lead-in` (Custom Voice) or `Stable Voice Design lead-in` (Voice Design) is enabled in `Settings -> Advanced`.
 - If you prefer more expressive but less deterministic behavior, you can disable those toggles.
 
+### Reproducibility does not match previous run
+
+- Ensure the same mode/model is loaded.
+- Reuse the same seed value.
+- Keep the same hardware/backend (CPU/MPS/CUDA) and runtime versions.
+
 ### Model download issues
 
 Models are fetched from HuggingFace.
@@ -252,16 +291,20 @@ Check connectivity and available disk.
 
 Use smaller models (`0.6b` / `0.6b-base`) and close other heavy apps.
 
-## 14. Privacy and Network
+## 15. Privacy and Network
 
 - Inference runs locally on your machine
 - Internet is used for setup-time dependency/model downloads and first-time optional model downloads (Whisper/Translation)
 - Server listens on localhost (`127.0.0.1:8765`)
 
-## 15. Advanced API Access
+## 16. Advanced API Access
 
 Local API base URL:
 
 `http://127.0.0.1:8765`
+
+Batch endpoints:
+- `POST /generate/batch`
+- `GET /batch-progress`
 
 See full endpoint details in `docs/API_REFERENCE.md`.

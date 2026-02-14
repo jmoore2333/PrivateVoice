@@ -201,6 +201,22 @@
     { value: "mp3", label: "MP3", description: "Compressed (192kbps)" },
   ];
 
+  const WAV_SAMPLE_RATES = [
+    { value: "native", label: "Native", description: "Use model output sample rate" },
+    { value: "8000", label: "8,000 Hz" },
+    { value: "16000", label: "16,000 Hz" },
+    { value: "22050", label: "22,050 Hz" },
+    { value: "24000", label: "24,000 Hz" },
+    { value: "44100", label: "44,100 Hz" },
+    { value: "48000", label: "48,000 Hz" },
+  ];
+
+  const WAV_BIT_DEPTHS = [
+    { value: "16", label: "16-bit PCM" },
+    { value: "24", label: "24-bit PCM" },
+    { value: "32", label: "32-bit PCM" },
+  ];
+
   const CACHE_SIZES = [
     { value: "5", label: "5 items" },
     { value: "10", label: "10 items" },
@@ -228,6 +244,17 @@
     return (value: string) => {
       settingsStore.updateSetting(key, parseInt(value, 10) as Settings[K]);
     };
+  }
+
+  function handleWavSampleRateChange(value: string) {
+    settingsStore.updateSetting(
+      "wavSampleRate",
+      (value === "native" ? null : parseInt(value, 10)) as Settings["wavSampleRate"],
+    );
+  }
+
+  function handleWavBitDepthChange(value: string) {
+    settingsStore.updateSetting("wavBitDepth", parseInt(value, 10) as Settings["wavBitDepth"]);
   }
 
   function handleToggle(key: keyof Settings) {
@@ -396,6 +423,22 @@
             label="Default Format"
             onchange={handleChange("exportFormat")}
           />
+
+          {#if settingsStore.state.exportFormat === "wav"}
+            <StudioSelect
+              value={settingsStore.state.wavSampleRate === null ? "native" : settingsStore.state.wavSampleRate.toString()}
+              options={WAV_SAMPLE_RATES}
+              label="WAV Sample Rate"
+              onchange={handleWavSampleRateChange}
+            />
+
+            <StudioSelect
+              value={settingsStore.state.wavBitDepth.toString()}
+              options={WAV_BIT_DEPTHS}
+              label="WAV Bit Depth"
+              onchange={handleWavBitDepthChange}
+            />
+          {/if}
         </div>
       </section>
 
@@ -727,6 +770,27 @@
               <span
                 class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
                   {settingsStore.state.showDebugOnStartup ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
+          <!-- Toggle: Enable batch mode -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Enable batch mode</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Show batch processing toggle in the main workspace</p>
+            </div>
+            <button
+              onclick={handleToggle("enableBatchMode")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.enableBatchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.enableBatchMode}
+              aria-label="Toggle batch mode feature"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.enableBatchMode ? 'translate-x-5' : ''}"
               ></span>
             </button>
           </label>
