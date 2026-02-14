@@ -3,6 +3,7 @@
 **Local text-to-speech that never leaves your machine.** Generate natural speech, clone voices, and design new ones — powered by [Qwen3-TTS](https://huggingface.co/Qwen) models running entirely on your hardware.
 
 No cloud APIs. No subscriptions. No data sent anywhere.
+Have ideas or requests? Open an issue or PR, or [support the project](#support).
 
 <p align="center">
   <img src="docs/images/screenshot-custom-voice.png" alt="PrivateVoice — Custom Voice mode" width="720" />
@@ -180,6 +181,17 @@ cd python && pytest tests/      # Python backend tests
 - [Development Guide](docs/DEVELOPMENT.md)
 - [Cross-Platform Notes](docs/crossplatform.md)
 - [Production Test Procedure](docs/PRODUCTION_TEST_PROCEDURE.md)
+
+## Support
+
+If PrivateVoice is useful to you, you can support ongoing development.
+Issues, feature requests, and PRs are always welcome.
+
+<p align="center">
+  <a href="https://www.buymeacoffee.com/jmoore2333" target="_blank" rel="noopener noreferrer">
+    <img src="static/bmc-button.png" alt="Buy me a coffee" width="220" />
+  </a>
+</p>
 
 ## License
 
