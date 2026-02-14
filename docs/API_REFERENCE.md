@@ -2,6 +2,8 @@
 
 Base URL: `http://127.0.0.1:8765`
 
+Authentication: In production, requests require `X-API-Key` (the app injects this automatically). In dev mode (`TTS_SERVER_DEV=true`) auth may be disabled if no token is configured.
+
 ## Health & Status
 
 | Endpoint | Method | Response | Used By |
@@ -40,17 +42,21 @@ Base URL: `http://127.0.0.1:8765`
 
 | Endpoint | Method | Request | Response | Notes |
 |---|---|---|---|---|
-| `/generate/custom-voice` | POST | JSON `{text, speaker, instruction, language, format, mp3_bitrate, stable_lead_in}` | audio bytes | CustomVoice mode |
-| `/generate/voice-clone` | POST | multipart `{text, reference_text, reference_audio, x_vector_only_mode, language, format, mp3_bitrate}` | audio bytes | Base model required |
-| `/generate/voice-design` | POST | JSON `{text, voice_description, language, format, mp3_bitrate, stable_lead_in}` | audio bytes | VoiceDesign model required |
+| `/generate/custom-voice` | POST | JSON `{text, speaker, instruction, language, format, mp3_bitrate, stable_lead_in, seed?, sample_rate?, bit_depth?}` | audio bytes | CustomVoice mode |
+| `/generate/voice-clone` | POST | multipart `{text, reference_text, reference_audio, x_vector_only_mode, language, format, mp3_bitrate, seed?, sample_rate?, bit_depth?}` | audio bytes | Base model required |
+| `/generate/voice-design` | POST | JSON `{text, voice_description, language, format, mp3_bitrate, stable_lead_in, seed?, sample_rate?, bit_depth?}` | audio bytes | VoiceDesign model required |
+| `/generate/batch` | POST | JSON `{mode, language, format, mp3_bitrate, seed?, sample_rate?, bit_depth?, speaker?, instruction?, voice_description?, stable_lead_in?, reference_text?, reference_audio_base64?, x_vector_only_mode?, items[]}` | ZIP bytes | Batch generation across `custom-voice` / `voice-clone` / `voice-design` |
 
 All generation endpoints support `mp3_bitrate` parameter (default 192, validated against [128, 192, 256, 320]).
+All generation endpoints support `format` (`wav` or `mp3`).
+When format is WAV, `sample_rate` is optional (allowed: 8000, 16000, 22050, 24000, 44100, 48000) and `bit_depth` is supported (allowed: 16, 24, 32).
+`seed` is optional and enables reproducible sampling behavior when reusing the same model/runtime context.
 `stable_lead_in` is optional for Custom Voice and Voice Design (default `true`), and reduces front-loaded filler/disfluency by using a more stable generation path.
 
-**Text validation:** All generation endpoints reject empty or whitespace-only text with HTTP 400. Maximum text length is 2000 characters.
+**Text validation:** Generation endpoints reject empty or whitespace-only text with HTTP 400. Maximum text length is 2000 characters (for batch, this is validated per item).
 
 **Error codes:**
-- **400** — Client error: empty text, text exceeds 2000 chars, incompatible model type, invalid model ID
+- **400** — Client error: empty text, text exceeds 2000 chars, unsupported sample rate/bit depth, incompatible model type, invalid mode/model/input
 - **499** — Generation was cancelled via `/cancel-generation`
 - **500** — Server error: inference failure, model not loaded
 
@@ -58,6 +64,7 @@ All generation endpoints support `mp3_bitrate` parameter (default 192, validated
 
 | Endpoint | Method | Response | Notes |
 |---|---|---|---|
+| `/batch-progress` | GET | `{total, completed, current_item, status}` | Current batch job progress state |
 | `/cancel-generation` | POST | `{status: "cancelled"}` | Cooperative cancellation — sets a flag checked between generation steps |
 
 ## Whisper Transcription
@@ -97,6 +104,12 @@ Whisper is used in the UI for auto-transcription in Voice Clone mode. Enable it 
 
 ## Notes
 
-**CORS:** The server is localhost-only and currently allows all origins (`allow_origins=["*"]`) to support Tauri WebView origin differences across platforms.
+**CORS:** The server is localhost-only and allows specific local origins:
+- `tauri://localhost`
+- `https://tauri.localhost`
+- `http://tauri.localhost`
+- `http://localhost`
+- `http://127.0.0.1`
+- plus dev origins (`http://localhost:1420`, `http://127.0.0.1:1420`) when `TTS_SERVER_DEV=true`.
 
 **API documentation:** Interactive Swagger UI (`/docs`) and ReDoc (`/redoc`) are disabled in production. Set the environment variable `TTS_SERVER_DEV=true` to enable them during development.

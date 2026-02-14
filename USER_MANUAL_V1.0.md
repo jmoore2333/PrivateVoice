@@ -1,7 +1,7 @@
 # PrivateVoice User Manual (v1.0)
 
-Version: 1.0.1  
-Updated: February 13, 2026
+Version: 1.0.2  
+Updated: February 14, 2026
 
 ## 1. What PrivateVoice Does
 
@@ -10,6 +10,12 @@ You can:
 - use preset speakers (Custom Voice)
 - clone a voice from reference audio (Voice Clone)
 - create a voice from a description (Voice Design)
+
+### v1.0.2 Notes
+
+- Added explicit WAV output tuning controls in Settings.
+- You can now set WAV sample rate (`Native`, `8000`, `16000`, `22050`, `24000`, `44100`, `48000`) and bit depth (`16/24/32-bit PCM`).
+- WAV settings are applied to both single generation and batch generation when export format is WAV.
 
 ## 2. Platform Status
 
@@ -180,10 +186,11 @@ Notes:
 - Formats: WAV or MP3
 - Format is controlled by Settings
 
-WAV format controls:
+WAV format controls (v1.0.2):
 - When default format is WAV, you can set sample rate and bit depth:
   - Sample rate: Native, 8000, 16000, 22050, 24000, 44100, 48000 Hz
   - Bit depth: 16-bit, 24-bit, 32-bit PCM
+- These controls apply to one-off generation and batch processing when WAV is selected.
 
 ## 11. Settings Overview
 
@@ -197,23 +204,28 @@ Key settings include:
 - WAV sample rate + WAV bit depth (shown when format is WAV)
 - Whisper auto-transcription controls
 - Translation helper controls (separate toggle, model, load/unload, status)
+- Batch mode visibility toggle (Optional Features, off by default)
 - Debug console on startup
 
 ## 12. Batch Processing
 
 Batch mode allows processing multiple text files into individual audio outputs.
+It is hidden by default until enabled in Settings.
 
 Use:
-1. Enable `Batch mode` in the input panel
-2. Add one or more `.txt` files (drag/drop or browse)
-3. Review/edit output filenames
-4. Click `Process All`
-5. Monitor batch progress and current item
-6. Download resulting ZIP when complete
+1. Open `Settings -> Optional Features` and enable `Batch mode`
+2. In the main workspace input panel, toggle `Batch mode` on
+3. Add one or more `.txt` files (drag/drop or browse)
+4. Review/edit output filenames
+5. Click `Process All`
+6. Monitor batch progress and current item
+7. Download resulting ZIP when complete
 
 Behavior:
 - Batch uses your current mode and voice configuration (speaker/instruction, clone reference, or voice description).
+- Batch uses your current export format settings (WAV/MP3, including WAV sample rate/bit depth when applicable).
 - Batch runs items sequentially on the loaded model.
+- In Voice Clone batch mode, reference audio is required, and reference text is required unless low-quality mode is enabled.
 - `Cancel` stops processing between items.
 
 ### Environment Section (New)
