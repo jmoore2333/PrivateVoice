@@ -53,6 +53,7 @@ from .translation import (
     TRANSLATION_MODELS,
     DEFAULT_TRANSLATION_MODEL_KEY,
 )
+from . import __version__ as TTS_SERVER_VERSION
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
 from .providers.base import (
@@ -518,7 +519,7 @@ if not _auth_enabled and not _is_dev:
 app = FastAPI(
     title="PrivateVoice Server",
     description="Local text-to-speech server powered by Qwen3-TTS",
-    version="1.0.0",
+    version=TTS_SERVER_VERSION,
     lifespan=lifespan,
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
@@ -569,7 +570,7 @@ async def validate_api_key(request: Request, call_next):
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check server health."""
-    return HealthResponse(status="ok", version="1.0.0")
+    return HealthResponse(status="ok", version=TTS_SERVER_VERSION)
 
 
 @app.get("/startup-status", response_model=StartupStatusResponse)

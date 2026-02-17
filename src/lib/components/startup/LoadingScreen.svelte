@@ -107,6 +107,9 @@
     <h1 class="text-3xl font-bold text-[var(--color-text-primary)] mb-2 tracking-tight">
       PrivateVoice
     </h1>
+    <p class="text-xs text-[var(--color-text-muted)] font-mono mb-3">
+      v{__APP_VERSION__}
+    </p>
     <p class="text-sm text-[var(--color-text-secondary)] font-mono">
       Create, clone, and transcribe voices — privately, on your own hardware.
     </p>

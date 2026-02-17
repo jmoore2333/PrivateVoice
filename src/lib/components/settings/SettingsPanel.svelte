@@ -402,7 +402,12 @@
   >
     <!-- Header -->
     <div class="sticky top-0 flex items-center justify-between p-4 border-b border-[var(--color-border-subtle)] bg-[var(--color-bg-surface)]">
-      <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">Settings</h2>
+      <div class="flex items-center gap-2">
+        <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">Settings</h2>
+        <span class="text-xs px-2 py-0.5 rounded border border-[var(--color-border-default)] text-[var(--color-text-muted)] font-mono">
+          v{__APP_VERSION__}
+        </span>
+      </div>
       <button
         onclick={() => settingsStore.close()}
         class="p-2 rounded-lg text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
