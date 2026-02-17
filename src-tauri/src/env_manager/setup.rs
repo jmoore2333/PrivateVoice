@@ -949,6 +949,13 @@ pub fn ensure_provider_runtime(
             requirements
         ));
     }
+    let requirements_qwen = paths::requirements_qwen_lock_txt(app)?;
+    if !requirements_qwen.exists() {
+        return Err(format!(
+            "Missing Qwen manifest at {:?}. Rebuild/reinstall the app resources.",
+            requirements_qwen
+        ));
+    }
 
     let target_hash = compute_file_sha256(&requirements)?;
 
@@ -988,6 +995,20 @@ pub fn ensure_provider_runtime(
         true,
         "setup-installing-deps",
         86,
+        92,
+    )?;
+
+    // Chatterbox and Qwen currently require incompatible transformers pins.
+    // Re-apply Qwen's locked runtime so the default provider stays healthy.
+    install_requirements_manifest(
+        app,
+        &uv,
+        &venv_python,
+        &requirements_qwen,
+        gpu,
+        true,
+        "setup-installing-deps",
+        92,
         96,
     )?;
 
@@ -1014,7 +1035,8 @@ pub fn ensure_provider_runtime(
         provider: provider.to_string(),
         installed: true,
         restart_required: true,
-        message: "Provider runtime installed. Backend restart required before use.".to_string(),
+        message: "Provider runtime installed and reconciled. Backend restart required before use."
+            .to_string(),
     })
 }
 

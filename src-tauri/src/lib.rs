@@ -482,7 +482,6 @@ async fn start_tts_server(
             .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
             .env("HF_HOME", &hf_home)
             .env("HF_HUB_CACHE", &hf_hub_cache)
-            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -578,7 +577,6 @@ async fn start_tts_server(
             .env("TTS_ACCESS_TOKEN", &auth_state.access_token)
             .env("HF_HOME", &hf_home)
             .env("HF_HUB_CACHE", &hf_hub_cache)
-            .env("TRANSFORMERS_CACHE", &hf_hub_cache)
             .env("PYTHONPATH", env_dir.to_string_lossy().to_string())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

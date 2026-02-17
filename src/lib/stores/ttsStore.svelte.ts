@@ -201,6 +201,35 @@ async function fileToBase64(file: File): Promise<string> {
 async function ensureProviderRuntime(provider: ProviderId): Promise<void> {
   if (provider !== "chatterbox") return;
 
+  const waitForBackendReady = async (timeoutMs = 120_000): Promise<void> => {
+    const started = Date.now();
+    let lastError = "Backend not reachable";
+
+    while (Date.now() - started < timeoutMs) {
+      try {
+        await ttsClient.health();
+        const startup = await ttsClient.getStartupStatus();
+        if (startup.phase === "error") {
+          throw new Error(startup.message || "Backend failed during restart");
+        }
+        // Any healthy server phase beyond bootstrap is good enough for model load.
+        if (
+          startup.phase === "checking-models" ||
+          startup.phase === "loading-model" ||
+          startup.phase === "downloading-model" ||
+          startup.phase === "ready"
+        ) {
+          return;
+        }
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    throw new Error(`Backend restart timed out. Last error: ${lastError}`);
+  };
+
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     const result = await invoke<{ installed?: boolean; restart_required?: boolean; message?: string }>(
@@ -216,7 +245,9 @@ async function ensureProviderRuntime(provider: ProviderId): Promise<void> {
       if (!shouldRestart) {
         throw new Error("Chatterbox runtime installed. Restart required before loading the model.");
       }
+      await invoke("stop_tts_server");
       await invoke("start_tts_server");
+      await waitForBackendReady();
     }
   } catch (e) {
     // In browser/non-tauri tests this command won't exist — fail open.

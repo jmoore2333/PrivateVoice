@@ -1,5 +1,6 @@
 use super::paths;
 use super::setup;
+use std::path::{Path, PathBuf};
 
 /// Represents the current state of the Python environment.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -33,6 +34,79 @@ struct SetupMarker {
     uv_version: Option<String>,
     #[serde(default)]
     timestamp: Option<String>,
+}
+
+fn normalize_package_name(name: &str) -> String {
+    name.to_ascii_lowercase().replace('_', "-").replace('.', "-")
+}
+
+fn lockfile_package_version(lock_path: &Path, package: &str) -> Option<String> {
+    let content = std::fs::read_to_string(lock_path).ok()?;
+    let prefix = format!("{}==", package);
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            let version = rest.split_whitespace().next()?;
+            if !version.is_empty() {
+                return Some(version.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn site_packages_dirs(venv_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    let windows_path = venv_dir.join("Lib").join("site-packages");
+    if windows_path.exists() {
+        dirs.push(windows_path);
+    }
+
+    let unix_lib_dir = venv_dir.join("lib");
+    if let Ok(entries) = std::fs::read_dir(unix_lib_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path().join("site-packages");
+            if p.exists() {
+                dirs.push(p);
+            }
+        }
+    }
+
+    dirs
+}
+
+fn installed_package_version(venv_dir: &Path, package: &str) -> Option<String> {
+    let normalized_target = normalize_package_name(package);
+
+    for site_packages in site_packages_dirs(venv_dir) {
+        let Ok(entries) = std::fs::read_dir(site_packages) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else {
+                continue;
+            };
+            let Some(stem) = name.strip_suffix(".dist-info") else {
+                continue;
+            };
+            let Some((dist_name, version)) = stem.rsplit_once('-') else {
+                continue;
+            };
+
+            if normalize_package_name(dist_name) == normalized_target && !version.is_empty() {
+                return Some(version.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Quick validation check on every launch (~10ms).
@@ -95,6 +169,7 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
             ),
         });
     }
+    let venv_dir = paths::venv_dir(app)?;
 
     // Check 4: Has requirement manifest set changed? (indicates app update)
     let current_manifest_set = if bundled_requirements_lock.exists()
@@ -206,6 +281,45 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
                 marker.version, current_version
             ),
         });
+    }
+
+    // Check 7: Ensure baseline Qwen runtime package is present.
+    if installed_package_version(&venv_dir, "qwen-tts").is_none() {
+        return Ok(SetupState::NeedsUpdate {
+            reason: "Qwen runtime package is missing. Reinstalling dependencies.".to_string(),
+        });
+    }
+
+    // Check 8: If chatterbox runtime has been installed, ensure shared
+    // dependency versions still match the Qwen lock baseline.
+    let chatterbox_installed = marker
+        .provider_hashes
+        .as_ref()
+        .and_then(|hashes| hashes.get("chatterbox"))
+        .and_then(|v| v.as_str())
+        .is_some();
+    if chatterbox_installed {
+        let qwen_lock_for_check = if requirements_qwen_lock.exists() {
+            requirements_qwen_lock.clone()
+        } else {
+            bundled_requirements_qwen_lock.clone()
+        };
+
+        if qwen_lock_for_check.exists() {
+            if let Some(expected_transformers) =
+                lockfile_package_version(&qwen_lock_for_check, "transformers")
+            {
+                let installed_transformers = installed_package_version(&venv_dir, "transformers");
+                if installed_transformers.as_deref() != Some(expected_transformers.as_str()) {
+                    return Ok(SetupState::NeedsUpdate {
+                        reason: format!(
+                            "Runtime dependency drift detected (transformers {:?} != locked {}). Re-applying dependencies.",
+                            installed_transformers, expected_transformers
+                        ),
+                    });
+                }
+            }
+        }
     }
 
     println!("[env_manager::validate] Environment validation passed");
