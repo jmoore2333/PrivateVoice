@@ -191,16 +191,14 @@
   );
 
   const DEFAULT_MODEL_OPTIONS = $derived(
-    ADVANCED_MODELS
-      .filter((model) => {
-        if (!settingsStore.state.enableAdvancedProviders) return true;
-        return model.provider === settingsStore.state.defaultProvider;
-      })
-      .map((model) => ({
-        value: model.id,
-        label: model.label,
-        description: model.description,
-      }))
+    ADVANCED_MODELS.map((model) => ({
+      value: model.id,
+      label:
+        settingsStore.state.enableAdvancedProviders
+          ? `${model.label} (${model.provider === "qwen3" ? "Qwen3" : "Chatterbox"})`
+          : model.label,
+      description: model.description,
+    }))
   );
 
   const PROVIDERS = [
@@ -213,6 +211,8 @@
     { value: "balanced", label: "Balanced", description: "Default quality/speed tradeoff" },
     { value: "expressive", label: "Expressive", description: "Higher variation and style" },
   ];
+
+  const CHATTERBOX_MODELS = MODEL_OPTIONS.filter((m) => m.provider === "chatterbox");
 
   const THEMES = [
     { value: "dark", label: "Dark" },
@@ -286,6 +286,26 @@
       const current = settingsStore.state[key] as boolean;
       settingsStore.updateSetting(key, !current);
     };
+  }
+
+  function getFirstModelForProvider(provider: Settings["defaultProvider"]): string {
+    const first = MODEL_OPTIONS.find((model) => model.provider === provider);
+    return first?.id ?? "0.6b";
+  }
+
+  function handleDefaultProviderChange(value: string) {
+    const provider = value as Settings["defaultProvider"];
+    settingsStore.updateSetting("defaultProvider", provider);
+
+    const currentModel = MODEL_OPTIONS.find((m) => m.id === settingsStore.state.defaultModel);
+    if (currentModel?.provider === provider) return;
+
+    const modelId = getFirstModelForProvider(provider);
+    settingsStore.updateSetting("defaultModel", modelId as Settings["defaultModel"]);
+    const model = MODEL_OPTIONS.find((m) => m.id === modelId);
+    if (model) {
+      settingsStore.updateSetting("defaultModelKey", model.modelKey);
+    }
   }
 
   const deviceLabel = $derived(debugStore.state.systemInfo?.device_name ?? "Detecting...");
@@ -697,9 +717,7 @@
               value={settingsStore.state.defaultProvider}
               options={PROVIDERS}
               label="Default Provider"
-              onchange={(value) => {
-                settingsStore.updateSetting("defaultProvider", value as Settings["defaultProvider"]);
-              }}
+              onchange={handleDefaultProviderChange}
             />
           {/if}
 
@@ -716,6 +734,13 @@
               }
             }}
           />
+
+          {#if settingsStore.state.enableAdvancedProviders}
+            <p class="text-xs text-[var(--color-text-muted)]">
+              Chatterbox models can be selected here. On first load, PrivateVoice installs the
+              Chatterbox runtime on demand and may restart the backend sidecar once.
+            </p>
+          {/if}
 
           <StudioSelect
             value={settingsStore.state.defaultSpeaker}
@@ -754,6 +779,27 @@
           </label>
 
           {#if settingsStore.state.enableAdvancedProviders}
+            <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] space-y-2">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Provider Setup
+              </p>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                1) Choose <strong>Default Provider</strong> in the Defaults section.
+                2) Pick a provider model in <strong>Default Model</strong>.
+                3) Load that model from the main screen when needed.
+              </p>
+              <p class="text-xs text-[var(--color-text-secondary)]">
+                Available Chatterbox models:
+              </p>
+              <div class="flex flex-wrap gap-2">
+                {#each CHATTERBOX_MODELS as model}
+                  <span class="px-2 py-1 rounded-full text-[11px] bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-[var(--color-text-secondary)]">
+                    {model.label}
+                  </span>
+                {/each}
+              </div>
+            </div>
+
             <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] space-y-3">
               <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
                 Chatterbox Controls
