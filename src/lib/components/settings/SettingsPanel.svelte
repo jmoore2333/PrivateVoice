@@ -184,11 +184,35 @@
     }
   });
 
-  const MODELS = MODEL_OPTIONS.map((model) => ({
-    value: model.id,
-    label: model.label,
-    description: model.description,
-  }));
+  const ADVANCED_MODELS = $derived(
+    settingsStore.state.enableAdvancedProviders
+      ? MODEL_OPTIONS
+      : MODEL_OPTIONS.filter((model) => model.provider === "qwen3")
+  );
+
+  const DEFAULT_MODEL_OPTIONS = $derived(
+    ADVANCED_MODELS
+      .filter((model) => {
+        if (!settingsStore.state.enableAdvancedProviders) return true;
+        return model.provider === settingsStore.state.defaultProvider;
+      })
+      .map((model) => ({
+        value: model.id,
+        label: model.label,
+        description: model.description,
+      }))
+  );
+
+  const PROVIDERS = [
+    { value: "qwen3", label: "Qwen3", description: "Recommended default provider" },
+    { value: "chatterbox", label: "Chatterbox", description: "Advanced provider family" },
+  ];
+
+  const CHATTERBOX_PRESETS = [
+    { value: "stable", label: "Stable", description: "More deterministic output" },
+    { value: "balanced", label: "Balanced", description: "Default quality/speed tradeoff" },
+    { value: "expressive", label: "Expressive", description: "Higher variation and style" },
+  ];
 
   const THEMES = [
     { value: "dark", label: "Dark" },
@@ -668,11 +692,29 @@
           Defaults
         </h3>
         <div class="space-y-4">
+          {#if settingsStore.state.enableAdvancedProviders}
+            <StudioSelect
+              value={settingsStore.state.defaultProvider}
+              options={PROVIDERS}
+              label="Default Provider"
+              onchange={(value) => {
+                settingsStore.updateSetting("defaultProvider", value as Settings["defaultProvider"]);
+              }}
+            />
+          {/if}
+
           <StudioSelect
             value={settingsStore.state.defaultModel}
-            options={MODELS}
+            options={DEFAULT_MODEL_OPTIONS.length > 0 ? DEFAULT_MODEL_OPTIONS : [{ value: "0.6b", label: "Qwen 0.6B Custom" }]}
             label="Default Model"
-            onchange={handleChange("defaultModel")}
+            onchange={(value) => {
+              settingsStore.updateSetting("defaultModel", value as Settings["defaultModel"]);
+              const model = MODEL_OPTIONS.find((m) => m.id === value);
+              if (model) {
+                settingsStore.updateSetting("defaultProvider", model.provider);
+                settingsStore.updateSetting("defaultModelKey", model.modelKey);
+              }
+            }}
           />
 
           <StudioSelect
@@ -690,6 +732,100 @@
           Advanced
         </h3>
         <div class="space-y-3">
+          <!-- Toggle: Advanced providers -->
+          <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
+            <div>
+              <span class="text-sm font-medium text-[var(--color-text-primary)]">Enable advanced providers</span>
+              <p class="text-xs text-[var(--color-text-muted)]">Show Chatterbox provider models and controls</p>
+            </div>
+            <button
+              onclick={handleToggle("enableAdvancedProviders")}
+              class="relative w-11 h-6 rounded-full transition-colors
+                {settingsStore.state.enableAdvancedProviders ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={settingsStore.state.enableAdvancedProviders}
+              aria-label="Toggle advanced providers"
+            >
+              <span
+                class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform
+                  {settingsStore.state.enableAdvancedProviders ? 'translate-x-5' : ''}"
+              ></span>
+            </button>
+          </label>
+
+          {#if settingsStore.state.enableAdvancedProviders}
+            <div class="p-3 rounded-lg bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] space-y-3">
+              <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+                Chatterbox Controls
+              </p>
+              <StudioSelect
+                value={settingsStore.state.chatterboxPreset}
+                options={CHATTERBOX_PRESETS}
+                label="Preset"
+                onchange={(value) => settingsStore.updateSetting("chatterboxPreset", value as Settings["chatterboxPreset"])}
+              />
+              <StudioSelect
+                value={settingsStore.state.chatterboxLanguageId}
+                options={[
+                  { value: "en", label: "English (en)" },
+                  { value: "es", label: "Spanish (es)" },
+                  { value: "fr", label: "French (fr)" },
+                  { value: "de", label: "German (de)" },
+                  { value: "ja", label: "Japanese (ja)" },
+                  { value: "zh", label: "Chinese (zh)" },
+                ]}
+                label="Multilingual language_id"
+                onchange={(value) => settingsStore.updateSetting("chatterboxLanguageId", value as Settings["chatterboxLanguageId"])}
+              />
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Temperature</span>
+                  <input type="number" min="0" step="0.05" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxTemperature} oninput={(e) => settingsStore.updateSetting("chatterboxTemperature", parseFloat((e.currentTarget as HTMLInputElement).value) || 0.8)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Top P</span>
+                  <input type="number" min="0" max="1" step="0.01" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxTopP} oninput={(e) => settingsStore.updateSetting("chatterboxTopP", parseFloat((e.currentTarget as HTMLInputElement).value) || 0.95)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Top K</span>
+                  <input type="number" min="1" step="1" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxTopK} oninput={(e) => settingsStore.updateSetting("chatterboxTopK", parseInt((e.currentTarget as HTMLInputElement).value, 10) || 1000)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Min P</span>
+                  <input type="number" min="0" max="1" step="0.01" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxMinP} oninput={(e) => settingsStore.updateSetting("chatterboxMinP", parseFloat((e.currentTarget as HTMLInputElement).value) || 0.05)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Repetition Penalty</span>
+                  <input type="number" min="0.5" step="0.05" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxRepetitionPenalty} oninput={(e) => settingsStore.updateSetting("chatterboxRepetitionPenalty", parseFloat((e.currentTarget as HTMLInputElement).value) || 1.2)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">CFG Weight</span>
+                  <input type="number" min="0" step="0.05" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxCfgWeight} oninput={(e) => settingsStore.updateSetting("chatterboxCfgWeight", parseFloat((e.currentTarget as HTMLInputElement).value) || 0.5)} />
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="text-xs text-[var(--color-text-muted)]">Exaggeration</span>
+                  <input type="number" min="0" step="0.05" class="px-2 py-1 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] text-sm" value={settingsStore.state.chatterboxExaggeration} oninput={(e) => settingsStore.updateSetting("chatterboxExaggeration", parseFloat((e.currentTarget as HTMLInputElement).value) || 0.5)} />
+                </label>
+              </div>
+              <label class="flex items-center justify-between p-2 rounded bg-[var(--color-bg-surface)] border border-[var(--color-border-default)]">
+                <span class="text-xs text-[var(--color-text-secondary)]">Normalize loudness (Turbo)</span>
+                <button
+                  onclick={handleToggle("chatterboxNormLoudness")}
+                  class="relative w-10 h-5 rounded-full transition-colors
+                    {settingsStore.state.chatterboxNormLoudness ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+                  role="switch"
+                  aria-checked={settingsStore.state.chatterboxNormLoudness}
+                  aria-label="Toggle Chatterbox loudness normalization"
+                >
+                  <span
+                    class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform
+                      {settingsStore.state.chatterboxNormLoudness ? 'translate-x-5' : ''}"
+                  ></span>
+                </button>
+              </label>
+            </div>
+          {/if}
+
           <!-- Toggle: Stable Custom Voice lead-in -->
           <label class="flex items-center justify-between p-3 rounded-lg bg-[var(--color-bg-elevated)] cursor-pointer hover:bg-[var(--color-bg-hover)] transition-colors">
             <div>

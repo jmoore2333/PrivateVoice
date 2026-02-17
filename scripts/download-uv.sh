@@ -9,6 +9,7 @@ UV_VERSION="0.6.6"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RESOURCES_DIR="$PROJECT_ROOT/src-tauri/resources"
+CHECKSUM_MANIFEST="$SCRIPT_DIR/uv-checksums.txt"
 
 mkdir -p "$RESOURCES_DIR"
 
@@ -76,6 +77,38 @@ for attempt in 1 2 3 4; do
     echo "==> Retry $attempt, waiting ${delay}s..."
     sleep "$delay"
 done
+
+# Verify archive checksum before extraction
+if [ ! -f "$CHECKSUM_MANIFEST" ]; then
+    echo "ERROR: Checksum manifest not found: $CHECKSUM_MANIFEST" >&2
+    exit 1
+fi
+
+EXPECTED_SHA256=$(awk -v version="$UV_VERSION" -v archive="$ARCHIVE_NAME" '
+    $1 == version && $2 == archive { print $3; exit }
+' "$CHECKSUM_MANIFEST")
+
+if [ -z "$EXPECTED_SHA256" ]; then
+    echo "ERROR: No checksum entry for uv $UV_VERSION archive $ARCHIVE_NAME in $CHECKSUM_MANIFEST" >&2
+    exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL_SHA256=$(sha256sum "$TEMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+elif command -v shasum >/dev/null 2>&1; then
+    ACTUAL_SHA256=$(shasum -a 256 "$TEMP_DIR/$ARCHIVE_NAME" | awk '{print $1}')
+else
+    echo "ERROR: No SHA-256 tool found (expected sha256sum or shasum)" >&2
+    exit 1
+fi
+
+if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+    echo "ERROR: Checksum mismatch for $ARCHIVE_NAME" >&2
+    echo "Expected: $EXPECTED_SHA256" >&2
+    echo "Actual:   $ACTUAL_SHA256" >&2
+    exit 1
+fi
+echo "==> Checksum verified ($ACTUAL_SHA256)"
 
 # Extract
 echo "==> Extracting..."

@@ -1,10 +1,24 @@
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+const REQUIREMENT_MANIFESTS: &[&str] = &[
+    "requirements.txt",
+    "requirements.lock.txt",
+    "requirements.base.txt",
+    "requirements.base.lock.txt",
+    "requirements.qwen.txt",
+    "requirements.qwen.lock.txt",
+    "requirements.chatterbox.txt",
+    "requirements.chatterbox.lock.txt",
+];
+
 fn main() {
-    println!("cargo:rerun-if-changed=../python/requirements.txt");
+    for name in REQUIREMENT_MANIFESTS {
+        println!("cargo:rerun-if-changed=../python/{name}");
+        println!("cargo:rerun-if-changed=resources/{name}");
+    }
     println!("cargo:rerun-if-changed=../python/requirements.sha256");
-    println!("cargo:rerun-if-changed=resources/requirements.txt");
 
     verify_requirements_integrity();
     tauri_build::build()
@@ -23,68 +37,94 @@ fn verify_requirements_integrity() {
         .parent()
         .expect("Failed to resolve project root from CARGO_MANIFEST_DIR");
 
-    let source_requirements = project_root.join("python").join("requirements.txt");
     let expected_hash_file = project_root.join("python").join("requirements.sha256");
-    let staged_requirements = manifest_dir.join("resources").join("requirements.txt");
-
-    if !source_requirements.exists() {
-        panic!(
-            "Missing {}",
-            source_requirements.display()
-        );
-    }
     if !expected_hash_file.exists() {
         panic!(
             "Missing {}. Run ./scripts/update-requirements-hash.sh after dependency updates.",
             expected_hash_file.display()
         );
     }
-    if !staged_requirements.exists() {
-        panic!(
-            "Missing {}. Stage resources before release builds (./scripts/build-release.sh or .\\scripts\\build-release.ps1).",
-            staged_requirements.display()
-        );
-    }
 
-    let source_hash = file_sha256(&source_requirements);
-    let expected_hash = parse_expected_hash(&expected_hash_file);
-    if source_hash != expected_hash {
-        panic!(
-            "requirements.txt hash mismatch. Expected {}, got {}. Run ./scripts/update-requirements-hash.sh and re-stage resources.",
-            expected_hash, source_hash
-        );
-    }
+    let expected_hashes = parse_expected_hashes(&expected_hash_file);
 
-    let staged_hash = file_sha256(&staged_requirements);
-    if staged_hash != source_hash {
-        panic!(
-            "Staged requirements.txt hash mismatch. Source {}, staged {}. Re-run resource staging.",
-            source_hash, staged_hash
-        );
+    for name in REQUIREMENT_MANIFESTS {
+        let source_manifest = project_root.join("python").join(name);
+        let staged_manifest = manifest_dir.join("resources").join(name);
+
+        if !source_manifest.exists() {
+            panic!("Missing {}", source_manifest.display());
+        }
+        if !staged_manifest.exists() {
+            panic!(
+                "Missing {}. Stage resources before release builds (./scripts/build-release.sh or .\\scripts\\build-release.ps1).",
+                staged_manifest.display()
+            );
+        }
+
+        let expected_hash = expected_hashes.get(*name).unwrap_or_else(|| {
+            panic!(
+                "No expected hash entry for {} in {}",
+                name,
+                expected_hash_file.display()
+            )
+        });
+        let source_hash = file_sha256(&source_manifest);
+        if &source_hash != expected_hash {
+            panic!(
+                "{} hash mismatch. Expected {}, got {}. Run ./scripts/update-requirements-hash.sh and re-stage resources.",
+                name, expected_hash, source_hash
+            );
+        }
+
+        let staged_hash = file_sha256(&staged_manifest);
+        if staged_hash != source_hash {
+            panic!(
+                "Staged {} hash mismatch. Source {}, staged {}. Re-run resource staging.",
+                name, source_hash, staged_hash
+            );
+        }
     }
 }
 
 fn file_sha256(path: &Path) -> String {
-    let bytes = std::fs::read(path)
-        .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
-    // Strip \r so CRLF (Windows) and LF (macOS/Linux) produce the same hash
+    let bytes =
+        std::fs::read(path).unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
+    // Strip \r so CRLF (Windows) and LF (macOS/Linux) produce the same hash.
     let normalized: Vec<u8> = bytes.into_iter().filter(|&b| b != b'\r').collect();
     let mut hasher = Sha256::new();
     hasher.update(&normalized);
     format!("{:x}", hasher.finalize())
 }
 
-fn parse_expected_hash(path: &Path) -> String {
+fn parse_expected_hashes(path: &Path) -> HashMap<String, String> {
     let raw = std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
-    let hash = raw
-        .split_whitespace()
-        .find(|token| token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()))
-        .unwrap_or_else(|| {
+
+    let mut hashes: HashMap<String, String> = HashMap::new();
+    for (line_no, line) in raw.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let mut parts = trimmed.split_whitespace();
+        let name = parts
+            .next()
+            .unwrap_or_else(|| panic!("Invalid hash entry at line {}", line_no + 1));
+        let hash = parts
+            .next()
+            .unwrap_or_else(|| panic!("Invalid hash entry at line {}", line_no + 1));
+
+        if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
             panic!(
-                "Invalid hash format in {} (expected SHA-256 hex digest)",
+                "Invalid hash value for {} at line {} in {}",
+                name,
+                line_no + 1,
                 path.display()
-            )
-        });
-    hash.to_ascii_lowercase()
+            );
+        }
+        hashes.insert(name.to_string(), hash.to_ascii_lowercase());
+    }
+
+    hashes
 }

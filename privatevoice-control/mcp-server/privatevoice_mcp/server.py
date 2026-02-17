@@ -100,6 +100,8 @@ async def app_launch_and_verify(
     binary_path: str = APP_PATH,
     timeout_seconds: int = 120,
     model_id: str | None = None,
+    provider: str | None = None,
+    model_key: str | None = None,
 ) -> str:
     """Launch the PrivateVoice production binary and wait until the TTS backend is ready.
 
@@ -110,6 +112,8 @@ async def app_launch_and_verify(
         binary_path: Path to PrivateVoice.app (default: /Applications/PrivateVoice.app)
         timeout_seconds: Max seconds to wait for ready state (default: 120)
         model_id: Optional model to load after startup (e.g. "0.6b", "1.7b-base", "1.7b-design")
+        provider: Optional provider to load ("qwen3" or "chatterbox")
+        model_key: Optional provider model key (e.g. "turbo", "original", "multilingual")
     """
     global _state
     launcher = _get_launcher()
@@ -134,8 +138,12 @@ async def app_launch_and_verify(
         result["bridge"] = f"unavailable ({exc})"
 
     # Optionally load a model
-    if model_id:
-        load_result = await tts.load_model(model_id)
+    if model_id or provider or model_key:
+        load_result = await tts.load_model(
+            model_id=model_id,
+            provider=provider,
+            model_key=model_key,
+        )
         result["model_load"] = load_result
 
     # Fetch final status
@@ -188,13 +196,15 @@ async def app_trigger_action(
 
     Args:
         action: One of "generate_custom_voice", "generate_voice_clone",
-                "generate_voice_design", "load_model", "unload_model",
-                "get_speakers", "get_system_info"
+                "generate_voice_design", "generate_speech", "load_model",
+                "load_provider_model", "unload_model", "get_speakers",
+                "get_model_status", "get_model_catalog", "get_system_info"
         params: Action-specific parameters as a dict.
                 For generate_custom_voice: {text, speaker?, instruction?, language?, format?}
                 For generate_voice_clone: {text, reference_audio, reference_text?, language?, format?}
                 For generate_voice_design: {text, voice_description, language?, format?}
-                For load_model: {model_id}
+                For generate_speech: {mode, text, provider?, model_key?, reference_audio?, ...}
+                For load_model: {model_id? , provider?, model_key?}
     """
     tts = _get_tts()
     params = params or {}
@@ -203,9 +213,13 @@ async def app_trigger_action(
         "generate_custom_voice",
         "generate_voice_clone",
         "generate_voice_design",
+        "generate_speech",
         "load_model",
+        "load_provider_model",
         "unload_model",
         "get_speakers",
+        "get_model_status",
+        "get_model_catalog",
         "get_system_info",
     }
 
@@ -217,7 +231,29 @@ async def app_trigger_action(
 
 
 # ---------------------------------------------------------------------------
-# Tool 4: app_get_status
+# Tool 4: app_get_model_catalog
+# ---------------------------------------------------------------------------
+@mcp.tool()
+async def app_get_model_catalog() -> str:
+    """Get provider/model catalog from the backend for compatibility validation."""
+    tts = _get_tts()
+    result = await tts.get_model_catalog()
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Tool 5: app_get_model_status
+# ---------------------------------------------------------------------------
+@mcp.tool()
+async def app_get_model_status() -> str:
+    """Get provider-aware model status from the backend."""
+    tts = _get_tts()
+    result = await tts.get_model_status()
+    return json.dumps(result, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Tool 6: app_get_status
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def app_get_status() -> str:
@@ -256,7 +292,7 @@ async def app_get_status() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Tool 5: app_listen_audio
+# Tool 7: app_listen_audio
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def app_listen_audio(
@@ -288,7 +324,7 @@ async def app_listen_audio(
 
 
 # ---------------------------------------------------------------------------
-# Tool 6: verify_speech_accuracy
+# Tool 8: verify_speech_accuracy
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def verify_speech_accuracy(
@@ -320,7 +356,7 @@ async def verify_speech_accuracy(
 
 
 # ---------------------------------------------------------------------------
-# Tool 7: app_shutdown
+# Tool 9: app_shutdown
 # ---------------------------------------------------------------------------
 @mcp.tool()
 async def app_shutdown(force: bool = False) -> str:

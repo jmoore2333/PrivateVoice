@@ -9,17 +9,18 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .download_tracker import get_download_tracker, create_hf_tqdm_class
+from .model_registry import (
+    WHISPER_MODEL_SPECS,
+    ensure_required_files,
+    verify_snapshot_hashes,
+)
 
 logger = logging.getLogger("tts_server")
 
 # CTranslate2-converted model repos on HuggingFace
 WHISPER_MODEL_REPOS = {
-    "tiny": "Systran/faster-whisper-tiny",
-    "base": "Systran/faster-whisper-base",
-    "small": "Systran/faster-whisper-small",
-    "medium": "Systran/faster-whisper-medium",
-    "large-v3": "Systran/faster-whisper-large-v3",
-    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
+    model_size: spec.repo_id
+    for model_size, spec in WHISPER_MODEL_SPECS.items()
 }
 
 # Approximate download sizes in MB for each model
@@ -117,7 +118,8 @@ class WhisperModel:
         if self._loaded:
             self.unload()
 
-        repo_id = WHISPER_MODEL_REPOS[self.model_size]
+        model_spec = WHISPER_MODEL_SPECS[self.model_size]
+        repo_id = model_spec.repo_id
         device = _get_device()
         compute_type = _get_compute_type()
 
@@ -129,8 +131,11 @@ class WhisperModel:
         try:
             local_path = snapshot_download(
                 repo_id=repo_id,
+                revision=model_spec.revision,
                 tqdm_class=create_hf_tqdm_class(),
             )
+            ensure_required_files(local_path, model_spec.required_files)
+            verify_snapshot_hashes(local_path, model_spec.expected_sha256)
             tracker.complete_download()
         except Exception:
             tracker.error(f"Failed to download Whisper model {repo_id}")

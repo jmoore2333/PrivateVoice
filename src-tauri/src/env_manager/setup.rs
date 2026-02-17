@@ -200,8 +200,37 @@ fn get_disk_space_powershell(path: &Path) -> Result<u64, String> {
 fn copy_bundled_source(app: &tauri::AppHandle) -> Result<(), String> {
     let src = paths::bundled_source_dir(app)?;
     let dst = paths::tts_source_dir(app)?;
-    let req_src = paths::bundled_requirements_txt(app)?;
-    let req_dst = paths::requirements_txt(app)?;
+    let manifests = [
+        (paths::bundled_requirements_txt(app)?, paths::requirements_txt(app)?),
+        (
+            paths::bundled_requirements_lock_txt(app)?,
+            paths::requirements_lock_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_base_txt(app)?,
+            paths::requirements_base_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_base_lock_txt(app)?,
+            paths::requirements_base_lock_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_qwen_txt(app)?,
+            paths::requirements_qwen_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_qwen_lock_txt(app)?,
+            paths::requirements_qwen_lock_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_chatterbox_txt(app)?,
+            paths::requirements_chatterbox_txt(app)?,
+        ),
+        (
+            paths::bundled_requirements_chatterbox_lock_txt(app)?,
+            paths::requirements_chatterbox_lock_txt(app)?,
+        ),
+    ];
 
     // Copy tts_server directory
     if src.exists() {
@@ -214,19 +243,18 @@ fn copy_bundled_source(app: &tauri::AppHandle) -> Result<(), String> {
         ));
     }
 
-    // Copy requirements.txt
-    if req_src.exists() {
-        std::fs::copy(&req_src, &req_dst)
-            .map_err(|e| format!("Failed to copy requirements.txt: {}", e))?;
-        println!(
-            "[env_manager::setup] Copied requirements.txt to {:?}",
-            req_dst
-        );
-    } else {
-        return Err(format!(
-            "Bundled requirements.txt not found at {:?}. Build may be incomplete.",
-            req_src
-        ));
+    // Copy requirement manifests
+    for (req_src, req_dst) in manifests {
+        if req_src.exists() {
+            std::fs::copy(&req_src, &req_dst)
+                .map_err(|e| format!("Failed to copy {:?}: {}", req_src, e))?;
+            println!("[env_manager::setup] Copied {:?} to {:?}", req_src, req_dst);
+        } else {
+            return Err(format!(
+                "Bundled requirement manifest not found at {:?}. Build may be incomplete.",
+                req_src
+            ));
+        }
     }
 
     Ok(())
@@ -387,18 +415,69 @@ fn find_python_in_dir(python_dir: &Path) -> Result<std::path::PathBuf, String> {
 /// Install all Python dependencies via uv pip.
 fn install_dependencies(app: &tauri::AppHandle, uv: &Path, gpu: &GpuTarget) -> Result<(), String> {
     let venv_python = paths::venv_python(app)?;
-    let requirements = paths::requirements_txt(app)?;
+    let requirements_base = paths::requirements_base_lock_txt(app)?;
+    let requirements_qwen = paths::requirements_qwen_lock_txt(app)?;
 
-    if !requirements.exists() {
-        return Err("requirements.txt not found in python_env".to_string());
+    if !requirements_base.exists() {
+        return Err(
+            "requirements.base.lock.txt not found in python_env. Rebuild/reinstall app resources."
+                .to_string(),
+        );
+    }
+    if !requirements_qwen.exists() {
+        return Err(
+            "requirements.qwen.lock.txt not found in python_env. Rebuild/reinstall app resources."
+                .to_string(),
+        );
     }
 
-    // Build the uv pip install command
+    // Install base deps first, then qwen provider deps from hash-locked manifests.
+    install_requirements_manifest(
+        app,
+        uv,
+        &venv_python,
+        &requirements_base,
+        gpu,
+        true,
+        "setup-installing-deps",
+        22,
+        55,
+    )?;
+    install_requirements_manifest(
+        app,
+        uv,
+        &venv_python,
+        &requirements_qwen,
+        gpu,
+        true,
+        "setup-installing-deps",
+        55,
+        85,
+    )?;
+
+    println!("[env_manager::setup] Dependencies installed successfully");
+    Ok(())
+}
+
+fn install_requirements_manifest(
+    app: &tauri::AppHandle,
+    uv: &Path,
+    venv_python: &Path,
+    requirements: &Path,
+    gpu: &GpuTarget,
+    require_hashes: bool,
+    phase: &str,
+    progress_start: u8,
+    progress_end: u8,
+) -> Result<(), String> {
     let mut cmd = Command::new(uv);
     cmd.args(["pip", "install", "-r"])
-        .arg(&requirements)
+        .arg(requirements)
         .args(["--python"])
-        .arg(&venv_python);
+        .arg(venv_python);
+    if require_hashes {
+        cmd.arg("--require-hashes");
+    }
 
     // Add the appropriate PyTorch index URL
     if let Some(index_url) = gpu.torch_extra_index_url() {
@@ -420,20 +499,21 @@ fn install_dependencies(app: &tauri::AppHandle, uv: &Path, gpu: &GpuTarget) -> R
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to run uv pip install: {}", e))?;
+        .map_err(|e| format!("Failed to run uv pip install for {:?}: {}", requirements, e))?;
 
-    // Stream output — this is the longest step
-    stream_output(app, &mut child, "setup-installing-deps", 22, 85);
+    stream_output(app, &mut child, phase, progress_start, progress_end);
 
     let status = child
         .wait()
-        .map_err(|e| format!("uv pip install failed to complete: {}", e))?;
+        .map_err(|e| format!("uv pip install failed to complete for {:?}: {}", requirements, e))?;
 
     if !status.success() {
-        return Err("Dependency installation failed. Check the logs for details.".to_string());
+        return Err(format!(
+            "Dependency installation failed for {:?}. Check setup logs for details.",
+            requirements.file_name().unwrap_or_default()
+        ));
     }
 
-    println!("[env_manager::setup] Dependencies installed successfully");
     Ok(())
 }
 
@@ -517,11 +597,24 @@ print('VERIFICATION_OK')
 /// Write the `.setup-complete` JSON marker file.
 fn write_setup_marker(app: &tauri::AppHandle, gpu: &GpuTarget) -> Result<(), String> {
     let marker_path = paths::setup_marker_path(app)?;
-    let requirements = paths::requirements_txt(app)?;
+    let requirements = paths::requirements_lock_txt(app)?;
+    let requirements_base = paths::requirements_base_lock_txt(app)?;
+    let requirements_qwen = paths::requirements_qwen_lock_txt(app)?;
+    let requirements_chatterbox = paths::requirements_chatterbox_lock_txt(app)?;
     let bundled_source = paths::bundled_source_dir(app)?;
 
-    // Compute SHA-256 of requirements.txt
-    let req_hash = compute_file_sha256(&requirements)?;
+    // Compute SHA-256 hash over bootstrap lock manifests.
+    let req_hash = compute_manifest_set_sha256(&[
+        requirements.clone(),
+        requirements_base.clone(),
+        requirements_qwen.clone(),
+    ])?;
+    let qwen_hash = compute_file_sha256(&requirements_qwen)?;
+    let chatterbox_hash = if requirements_chatterbox.exists() {
+        Some(compute_file_sha256(&requirements_chatterbox)?)
+    } else {
+        None
+    };
     // Compute SHA-256 of bundled backend source directory
     let source_hash = compute_dir_sha256(&bundled_source)?;
 
@@ -531,6 +624,14 @@ fn write_setup_marker(app: &tauri::AppHandle, gpu: &GpuTarget) -> Result<(), Str
         "gpu_display": gpu.display_name(),
         "requirements_hash": req_hash,
         "source_hash": source_hash,
+        "provider_hashes": {
+            "qwen3": qwen_hash,
+            "chatterbox": serde_json::Value::Null,
+        },
+        "available_provider_hashes": {
+            "qwen3": qwen_hash,
+            "chatterbox": chatterbox_hash,
+        },
         "uv_version": EXPECTED_UV_VERSION,
         "timestamp": chrono::Utc::now().to_rfc3339(),
     });
@@ -559,6 +660,29 @@ pub fn compute_file_sha256(path: &Path) -> Result<String, String> {
     let result = hasher.finalize();
 
     Ok(format!("{:x}", result))
+}
+
+/// Compute a deterministic hash over multiple manifest files.
+pub fn compute_manifest_set_sha256(paths: &[std::path::PathBuf]) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+
+    let mut normalized = paths.to_vec();
+    normalized.sort_by(|a, b| a.to_string_lossy().cmp(&b.to_string_lossy()));
+
+    let mut hasher = Sha256::new();
+    for path in normalized {
+        let file_name = path
+            .file_name()
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        hasher.update(file_name.as_bytes());
+        hasher.update([0]);
+        let data = std::fs::read(&path)
+            .map_err(|e| format!("Failed to read {:?}: {}", path, e))?;
+        hasher.update(data);
+        hasher.update([0xff]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 /// Compute SHA-256 hash of a directory tree (deterministic order).
@@ -781,6 +905,117 @@ pub fn check_uv_version(uv: &Path) -> Result<(String, bool), String> {
 
     let needs_update = current_version != EXPECTED_UV_VERSION;
     Ok((current_version, needs_update))
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct EnsureProviderRuntimeResult {
+    pub provider: String,
+    pub installed: bool,
+    pub restart_required: bool,
+    pub message: String,
+}
+
+/// Ensure provider-specific runtime dependencies are installed.
+pub fn ensure_provider_runtime(
+    app: &tauri::AppHandle,
+    provider: &str,
+    gpu: &GpuTarget,
+) -> Result<EnsureProviderRuntimeResult, String> {
+    if provider == "qwen3" {
+        return Ok(EnsureProviderRuntimeResult {
+            provider: provider.to_string(),
+            installed: false,
+            restart_required: false,
+            message: "Qwen runtime is installed during initial setup.".to_string(),
+        });
+    }
+
+    if provider != "chatterbox" {
+        return Err(format!("Unsupported provider runtime request: {}", provider));
+    }
+
+    let marker_path = paths::setup_marker_path(app)?;
+    if !marker_path.exists() {
+        return Err(
+            "Python environment is not initialized yet. Complete first-run setup before installing provider runtimes."
+                .to_string(),
+        );
+    }
+
+    let requirements = paths::requirements_chatterbox_lock_txt(app)?;
+    if !requirements.exists() {
+        return Err(format!(
+            "Missing provider manifest at {:?}. Rebuild/reinstall the app resources.",
+            requirements
+        ));
+    }
+
+    let target_hash = compute_file_sha256(&requirements)?;
+
+    let mut marker: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&marker_path)
+            .map_err(|e| format!("Failed to read setup marker: {}", e))?,
+    )
+    .map_err(|e| format!("Failed to parse setup marker: {}", e))?;
+
+    let current_hash = marker
+        .get("provider_hashes")
+        .and_then(|v| v.get(provider))
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string());
+
+    if current_hash.as_deref() == Some(target_hash.as_str()) {
+        return Ok(EnsureProviderRuntimeResult {
+            provider: provider.to_string(),
+            installed: false,
+            restart_required: false,
+            message: "Provider runtime is already installed.".to_string(),
+        });
+    }
+
+    let uv = paths::uv_binary(app)?;
+    let venv_python = paths::venv_python(app)?;
+    if !venv_python.exists() {
+        return Err("Virtual environment is missing. Run Environment repair first.".to_string());
+    }
+
+    install_requirements_manifest(
+        app,
+        &uv,
+        &venv_python,
+        &requirements,
+        gpu,
+        true,
+        "setup-installing-deps",
+        86,
+        96,
+    )?;
+
+    if marker.get("provider_hashes").and_then(|v| v.as_object()).is_none() {
+        marker["provider_hashes"] = serde_json::json!({});
+    }
+    marker["provider_hashes"][provider] = serde_json::Value::String(target_hash.clone());
+
+    if marker
+        .get("available_provider_hashes")
+        .and_then(|v| v.as_object())
+        .is_none()
+    {
+        marker["available_provider_hashes"] = serde_json::json!({});
+    }
+    marker["available_provider_hashes"][provider] = serde_json::Value::String(target_hash);
+
+    let marker_json = serde_json::to_string_pretty(&marker)
+        .map_err(|e| format!("Failed to serialize setup marker: {}", e))?;
+    std::fs::write(&marker_path, marker_json)
+        .map_err(|e| format!("Failed to write setup marker: {}", e))?;
+
+    Ok(EnsureProviderRuntimeResult {
+        provider: provider.to_string(),
+        installed: true,
+        restart_required: true,
+        message: "Provider runtime installed. Backend restart required before use.".to_string(),
+    })
 }
 
 /// Get the total size of a directory in bytes.

@@ -45,13 +45,14 @@ Describe the voice you want in plain text — *"warm baritone, slight British ac
 
 - **Runs 100% locally** — inference on Apple Silicon (MPS), NVIDIA CUDA, or CPU. Nothing leaves `localhost`.
 - **Lightweight installer** — ships a small desktop app; downloads Python, dependencies, and models on first launch.
-- **5 model variants** — from fast 0.6B to high-quality 1.7B, with one-click switching between compatible models.
+- **Provider-based model system** — Qwen3 is default, with optional Chatterbox Turbo / Original / Multilingual providers in advanced settings.
 - **Deterministic seed control** — optional seed input for reproducible generations across Custom Voice, Voice Clone, and Voice Design.
 - **Voice library** — save generated audio, organize with tabs (Recent / Saved Voices / Audio), search and replay.
 - **Export to WAV or MP3** — configurable MP3 bitrate, plus WAV sample rate and bit depth controls.
 - **Batch processing** — queue multiple `.txt` files and generate a ZIP of per-file outputs with progress tracking and cancellation.
 - **Optional Whisper transcription** — auto-fill Voice Clone transcripts from reference audio.
 - **Optional translation** — translate input text locally before generating speech (NLLB 600M).
+- **Pinned model revisions + integrity checks** — shipped model repos are pinned to immutable Hugging Face revisions; critical weight files are hash-verified.
 - **Keyboard shortcuts** — `Cmd/Ctrl+Enter` to generate, `Cmd/Ctrl+S` to save, `Space` to play/pause, and more.
 - **Debug console** — live logs and system info for troubleshooting.
 
@@ -98,15 +99,18 @@ For a release build:
 
 ## Model Reference
 
-| Model | Size | Custom Voice | Voice Clone | Voice Design |
-|---|---|:---:|:---:|:---:|
-| `0.6b` | ~1.2 GB | Yes | — | — |
-| `0.6b-base` | ~1.2 GB | — | Yes | — |
-| `1.7b` | ~3.4 GB | Yes | — | — |
-| `1.7b-base` | ~3.4 GB | — | Yes | — |
-| `1.7b-design` | ~3.4 GB | — | — | Yes |
+| Provider | Model | Size | Custom Voice | Voice Clone | Voice Design |
+|---|---|---|:---:|:---:|:---:|
+| `qwen3` | `0.6b` | ~1.2 GB | Yes | — | — |
+| `qwen3` | `0.6b-base` | ~1.2 GB | — | Yes | — |
+| `qwen3` | `1.7b` | ~3.4 GB | Yes | — | — |
+| `qwen3` | `1.7b-base` | ~3.4 GB | — | Yes | — |
+| `qwen3` | `1.7b-design` | ~3.4 GB | — | — | Yes |
+| `chatterbox` | `turbo` | ~3.8 GB | Yes | Yes | — |
+| `chatterbox` | `original` | ~3.0 GB | Yes | Yes | — |
+| `chatterbox` | `multilingual` | ~3.0 GB | Yes | Yes | — |
 
-The app shows compatibility indicators on mode tabs and offers one-click model loading when you switch to an incompatible mode.
+On first run, onboarding stays Qwen-first for simplicity. Additional providers/models are available in **Settings > Advanced Providers**, and Chatterbox runtime dependencies install on demand with a backend restart prompt.
 
 ## How It Works
 

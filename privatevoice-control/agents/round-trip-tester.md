@@ -35,6 +35,8 @@ tools:
   - mcp__plugin_privatevoice-control_privatevoice__app_capture_view
   - mcp__plugin_privatevoice-control_privatevoice__app_trigger_action
   - mcp__plugin_privatevoice-control_privatevoice__app_get_status
+  - mcp__plugin_privatevoice-control_privatevoice__app_get_model_catalog
+  - mcp__plugin_privatevoice-control_privatevoice__app_get_model_status
   - mcp__plugin_privatevoice-control_privatevoice__app_listen_audio
   - mcp__plugin_privatevoice-control_privatevoice__verify_speech_accuracy
   - mcp__plugin_privatevoice-control_privatevoice__app_shutdown
@@ -72,6 +74,13 @@ If the user doesn't specify what to test, run this standard suite:
 ### Model Switch (1.7b model, if available)
 - Load 1.7b model and repeat the short text test
 - Compare generation quality/speed with 0.6b
+
+### Provider Matrix (Advanced)
+- Validate catalog from `app_get_model_catalog`
+- Run `generate_speech` with `provider=chatterbox, model_key=turbo`
+- Run `generate_speech` with `provider=chatterbox, model_key=original`
+- Run `generate_speech` with `provider=chatterbox, model_key=multilingual` and non-English text
+- Validate unsupported mode behavior (voice-design with chatterbox should return compatibility error)
 
 ## Reporting
 

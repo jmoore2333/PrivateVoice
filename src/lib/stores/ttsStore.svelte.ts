@@ -2,53 +2,230 @@
  * TTS application state store using Svelte 5 runes.
  */
 
-import { ttsClient, type ModelStatus, type Speaker, PRESET_SPEAKERS } from "$lib/api/ttsClient";
+import {
+  ttsClient,
+  type ProviderId,
+  type Speaker,
+  type ModelCatalogEntry,
+  PRESET_SPEAKERS,
+} from "$lib/api/ttsClient";
 import { settingsStore } from "./settingsStore.svelte";
 
 export type TTSMode = "custom-voice" | "voice-clone" | "voice-design";
 
-// Model compatibility matrix
-const MODEL_CAPABILITIES: Record<string, TTSMode[]> = {
-  "0.6b": ["custom-voice"],
-  "1.7b": ["custom-voice"],
-  "0.6b-base": ["voice-clone"],
-  "1.7b-base": ["voice-clone"],
-  "1.7b-design": ["voice-design"],
-};
-
 export interface ModelOption {
   id: string;
+  provider: ProviderId;
+  modelKey: string;
   label: string;
   description: string;
   modes: TTSMode[];
 }
 
 export const MODEL_OPTIONS: ModelOption[] = [
-  { id: "0.6b", label: "0.6B Custom", description: "Fast, Custom Voice", modes: ["custom-voice"] },
-  { id: "1.7b", label: "1.7B Custom", description: "Quality, Custom Voice", modes: ["custom-voice"] },
-  { id: "0.6b-base", label: "0.6B Base", description: "Voice Clone (fast)", modes: ["voice-clone"] },
-  { id: "1.7b-base", label: "1.7B Base", description: "Voice Clone (quality)", modes: ["voice-clone"] },
-  { id: "1.7b-design", label: "1.7B Design", description: "Voice Design", modes: ["voice-design"] },
+  {
+    id: "0.6b",
+    provider: "qwen3",
+    modelKey: "0.6b",
+    label: "Qwen 0.6B Custom",
+    description: "Fast, Custom Voice",
+    modes: ["custom-voice"],
+  },
+  {
+    id: "1.7b",
+    provider: "qwen3",
+    modelKey: "1.7b",
+    label: "Qwen 1.7B Custom",
+    description: "Higher quality, Custom Voice",
+    modes: ["custom-voice"],
+  },
+  {
+    id: "0.6b-base",
+    provider: "qwen3",
+    modelKey: "0.6b-base",
+    label: "Qwen 0.6B Base",
+    description: "Voice Clone (fast)",
+    modes: ["voice-clone"],
+  },
+  {
+    id: "1.7b-base",
+    provider: "qwen3",
+    modelKey: "1.7b-base",
+    label: "Qwen 1.7B Base",
+    description: "Voice Clone (quality)",
+    modes: ["voice-clone"],
+  },
+  {
+    id: "1.7b-design",
+    provider: "qwen3",
+    modelKey: "1.7b-design",
+    label: "Qwen 1.7B Design",
+    description: "Voice Design",
+    modes: ["voice-design"],
+  },
+  {
+    id: "cb-turbo",
+    provider: "chatterbox",
+    modelKey: "turbo",
+    label: "Chatterbox Turbo",
+    description: "English, low-latency, tag-aware",
+    modes: ["custom-voice", "voice-clone"],
+  },
+  {
+    id: "cb-original",
+    provider: "chatterbox",
+    modelKey: "original",
+    label: "Chatterbox Original",
+    description: "English expressive model",
+    modes: ["custom-voice", "voice-clone"],
+  },
+  {
+    id: "cb-multilingual",
+    provider: "chatterbox",
+    modelKey: "multilingual",
+    label: "Chatterbox Multilingual",
+    description: "23+ languages",
+    modes: ["custom-voice", "voice-clone"],
+  },
 ];
 
-// Get the recommended model for a mode
-function getRecommendedModel(mode: TTSMode): string {
-  switch (mode) {
-    case "voice-design":
-      return "1.7b-design";
-    case "voice-clone":
-      return "0.6b-base";
-    case "custom-voice":
-    default:
-      return "0.6b";
+const MODEL_BY_ID = new Map(MODEL_OPTIONS.map((m) => [m.id, m]));
+const MODEL_BY_PROVIDER_KEY = new Map(MODEL_OPTIONS.map((m) => [`${m.provider}:${m.modelKey}`, m]));
+const RUNTIME_MODEL_CAPABILITIES = new Map<string, TTSMode[]>();
+let runtimeCatalogLoaded = false;
+
+function syncCatalogCapabilities(entries: ModelCatalogEntry[]): void {
+  RUNTIME_MODEL_CAPABILITIES.clear();
+  for (const entry of entries) {
+    const model = MODEL_BY_PROVIDER_KEY.get(`${entry.provider}:${entry.model_key}`);
+    if (!model) continue;
+    const modes = entry.capabilities.filter((cap): cap is TTSMode =>
+      cap === "custom-voice" || cap === "voice-clone" || cap === "voice-design"
+    );
+    if (modes.length > 0) {
+      RUNTIME_MODEL_CAPABILITIES.set(model.id, modes);
+    }
   }
+}
+
+// Model compatibility matrix (exported for existing tests/UI usage)
+const MODEL_CAPABILITIES: Record<string, TTSMode[]> = Object.fromEntries(
+  MODEL_OPTIONS.map((m) => [m.id, m.modes])
+);
+
+function getRecommendedModelForProvider(mode: TTSMode, provider: ProviderId): string {
+  const preferredOrder: Record<ProviderId, string[]> = {
+    qwen3: ["0.6b", "1.7b", "0.6b-base", "1.7b-base", "1.7b-design"],
+    chatterbox: ["cb-turbo", "cb-original", "cb-multilingual"],
+  };
+
+  for (const modelId of preferredOrder[provider]) {
+    const model = MODEL_BY_ID.get(modelId);
+    if (model?.modes.includes(mode)) return modelId;
+  }
+
+  // Fallback to a Qwen-safe default
+  return mode === "voice-design" ? "1.7b-design" : mode === "voice-clone" ? "0.6b-base" : "0.6b";
+}
+
+// Get the recommended model for a mode (legacy export remains Qwen-first)
+function getRecommendedModel(mode: TTSMode): string {
+  return getRecommendedModelForProvider(mode, "qwen3");
 }
 
 // Check if a model supports a mode
 function modelSupportsMode(modelId: string | null, mode: TTSMode): boolean {
   if (!modelId) return false;
-  const capabilities = MODEL_CAPABILITIES[modelId];
-  return capabilities?.includes(mode) ?? false;
+  const runtimeModes = RUNTIME_MODEL_CAPABILITIES.get(modelId);
+  if (runtimeModes) return runtimeModes.includes(mode);
+  const model = MODEL_BY_ID.get(modelId);
+  return model?.modes.includes(mode) ?? false;
+}
+
+function isChatterboxModel(modelId: string | null): boolean {
+  if (!modelId) return false;
+  const model = MODEL_BY_ID.get(modelId);
+  return model?.provider === "chatterbox";
+}
+
+function inferProviderFromModelId(modelId: string | null): ProviderId {
+  if (!modelId) return "qwen3";
+  return isChatterboxModel(modelId) ? "chatterbox" : "qwen3";
+}
+
+function inferModelId(provider: ProviderId | null | undefined, modelKey: string | null | undefined, modelId: string | null): string | null {
+  if (modelId) return modelId;
+  if (!provider || !modelKey) return null;
+  return MODEL_BY_PROVIDER_KEY.get(`${provider}:${modelKey}`)?.id ?? null;
+}
+
+function getChatterboxAdvancedPayload() {
+  const state = settingsStore.state as typeof settingsStore.state & {
+    chatterboxPreset?: "stable" | "balanced" | "expressive";
+    chatterboxTemperature?: number;
+    chatterboxTopP?: number;
+    chatterboxTopK?: number;
+    chatterboxMinP?: number;
+    chatterboxRepetitionPenalty?: number;
+    chatterboxCfgWeight?: number;
+    chatterboxExaggeration?: number;
+    chatterboxNormLoudness?: boolean;
+    chatterboxLanguageId?: string;
+  };
+
+  return {
+    preset: state.chatterboxPreset ?? "balanced",
+    temperature: state.chatterboxTemperature ?? 0.8,
+    top_p: state.chatterboxTopP ?? 0.95,
+    top_k: state.chatterboxTopK ?? 1000,
+    min_p: state.chatterboxMinP ?? 0.05,
+    repetition_penalty: state.chatterboxRepetitionPenalty ?? 1.2,
+    cfg_weight: state.chatterboxCfgWeight ?? 0.5,
+    exaggeration: state.chatterboxExaggeration ?? 0.5,
+    norm_loudness: state.chatterboxNormLoudness ?? true,
+    language_id: state.chatterboxLanguageId ?? "en",
+  };
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+async function ensureProviderRuntime(provider: ProviderId): Promise<void> {
+  if (provider !== "chatterbox") return;
+
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    const result = await invoke<{ installed?: boolean; restart_required?: boolean; message?: string }>(
+      "ensure_provider_runtime",
+      { provider }
+    );
+
+    if (result?.restart_required) {
+      const shouldRestart = window.confirm(
+        result.message ??
+          "Chatterbox runtime was installed and PrivateVoice needs to restart the backend sidecar. Restart now?"
+      );
+      if (!shouldRestart) {
+        throw new Error("Chatterbox runtime installed. Restart required before loading the model.");
+      }
+      await invoke("start_tts_server");
+    }
+  } catch (e) {
+    // In browser/non-tauri tests this command won't exist — fail open.
+    const message = e instanceof Error ? e.message : String(e);
+    if (message.includes("not allowed") || message.includes("command") || message.includes("Unknown")) {
+      return;
+    }
+    throw e;
+  }
 }
 
 export interface TTSState {
@@ -56,6 +233,8 @@ export interface TTSState {
   serverConnected: boolean;
   modelLoaded: boolean;
   modelId: string | null;
+  modelProvider: ProviderId | null;
+  modelKey: string | null;
   device: string | null;
 
   // UI state
@@ -87,6 +266,8 @@ function createTTSStore() {
     serverConnected: false,
     modelLoaded: false,
     modelId: null,
+    modelProvider: null,
+    modelKey: null,
     device: null,
     mode: "custom-voice",
     text: "",
@@ -109,6 +290,15 @@ function createTTSStore() {
     try {
       await ttsClient.health();
       state.serverConnected = true;
+      if (!runtimeCatalogLoaded) {
+        try {
+          const catalog = await ttsClient.getModelCatalog();
+          syncCatalogCapabilities(catalog);
+          runtimeCatalogLoaded = true;
+        } catch {
+          // Fallback to static compatibility map.
+        }
+      }
       await refreshModelStatus();
     } catch {
       state.serverConnected = false;
@@ -120,7 +310,9 @@ function createTTSStore() {
     try {
       const status = await ttsClient.getModelStatus();
       state.modelLoaded = status.loaded;
-      state.modelId = status.model_id;
+      state.modelProvider = status.provider ?? inferProviderFromModelId(status.model_id);
+      state.modelKey = status.model_key ?? status.model_id;
+      state.modelId = inferModelId(state.modelProvider, state.modelKey, status.model_id);
       state.device = status.device;
     } catch {
       state.modelLoaded = false;
@@ -131,7 +323,17 @@ function createTTSStore() {
     state.isLoadingModel = true;
     state.error = null;
     try {
-      await ttsClient.loadModel(modelId);
+      const option = MODEL_BY_ID.get(modelId);
+      if (option) {
+        await ensureProviderRuntime(option.provider);
+        if (option.provider === "qwen3") {
+          await ttsClient.loadModel({ model_id: option.modelKey });
+        } else {
+          await ttsClient.loadModel({ provider: option.provider, model_key: option.modelKey });
+        }
+      } else {
+        await ttsClient.loadModel({ model_id: modelId });
+      }
       await refreshModelStatus();
     } catch (e) {
       state.error = e instanceof Error ? e.message : "Failed to load model";
@@ -148,12 +350,13 @@ function createTTSStore() {
 
     // Check model compatibility with current mode
     if (!modelSupportsMode(state.modelId, state.mode)) {
-      const recommended = getRecommendedModel(state.mode);
-      const recommendedLabel =
-        MODEL_OPTIONS.find((model) => model.id === recommended)?.label ??
-        recommended.toUpperCase();
+      const activeProvider = state.modelProvider ?? "qwen3";
+      const fallbackProvider =
+        activeProvider === "chatterbox" && state.mode === "voice-design" ? "qwen3" : activeProvider;
+      const recommended = getRecommendedModelForProvider(state.mode, fallbackProvider);
+      const recommendedLabel = MODEL_BY_ID.get(recommended)?.label ?? recommended.toUpperCase();
       const modeName = state.mode.replace("-", " ");
-      state.error = `Current model doesn't support ${modeName}. Please load the ${recommendedLabel} model.`;
+      state.error = `Current model doesn't support ${modeName}. Please load ${recommendedLabel}.`;
       return;
     }
 
@@ -167,70 +370,80 @@ function createTTSStore() {
     }
 
     try {
-      let blob: Blob;
       const language = state.language.toLowerCase();
       const format = settingsStore.state.exportFormat || "wav";
       const sampleRate = format === "wav" ? settingsStore.state.wavSampleRate : null;
       const bitDepth = format === "wav" ? settingsStore.state.wavBitDepth : 16;
 
-      switch (state.mode) {
-        case "custom-voice":
-          const speakerId = state.speaker.trim().split(/\s+/)[0];
+      const provider = state.modelProvider ?? inferProviderFromModelId(state.modelId);
+      const modelKey = state.modelKey;
+
+      const payload: {
+        mode: TTSMode;
+        provider?: ProviderId;
+        model_key?: string;
+        text: string;
+        language: string;
+        speaker: string;
+        instruction: string;
+        voice_description: string;
+        reference_text: string;
+        x_vector_only_mode: boolean;
+        reference_audio_base64: string | null;
+        format: string;
+        stable_lead_in: boolean;
+        seed: number | null;
+        sample_rate: number | null;
+        bit_depth: number;
+        advanced?: Record<string, unknown>;
+      } = {
+        mode: state.mode,
+        provider,
+        model_key: modelKey ?? undefined,
+        text: state.text,
+        language,
+        speaker: state.speaker.trim().split(/\s+/)[0],
+        instruction: state.instruction,
+        voice_description: state.voiceDescription,
+        reference_text: state.referenceText,
+        x_vector_only_mode: state.cloneLowQualityMode,
+        reference_audio_base64: null,
+        format,
+        stable_lead_in:
+          state.mode === "voice-design"
+            ? settingsStore.state.stableVoiceDesignLeadIn
+            : settingsStore.state.stableCustomVoiceLeadIn,
+        seed: state.seed,
+        sample_rate: sampleRate,
+        bit_depth: bitDepth,
+      };
+
+      if (state.mode === "custom-voice") {
+        if (provider === "qwen3") {
+          const speakerId = payload.speaker;
           if (!PRESET_SPEAKERS.includes(speakerId as Speaker)) {
             throw new Error(`Unknown speaker: ${speakerId}`);
           }
-          blob = await ttsClient.generateCustomVoice({
-            text: state.text,
-            speaker: speakerId,
-            instruction: state.instruction,
-            language,
-            format,
-            stable_lead_in: settingsStore.state.stableCustomVoiceLeadIn,
-            seed: state.seed,
-            sample_rate: sampleRate,
-            bit_depth: bitDepth,
-          });
-          break;
-
-        case "voice-clone":
-          if (!state.referenceAudio) {
-            throw new Error("Please upload a reference audio file");
-          }
-          if (!state.cloneLowQualityMode && !state.referenceText.trim()) {
-            throw new Error("Please enter the reference text");
-          }
-          blob = await ttsClient.generateVoiceClone(
-            state.text,
-            state.referenceText,
-            state.referenceAudio,
-            {
-              xVectorOnly: state.cloneLowQualityMode,
-              language,
-              format,
-              seed: state.seed,
-              sample_rate: sampleRate,
-              bit_depth: bitDepth,
-            }
-          );
-          break;
-
-        case "voice-design":
-          if (!state.voiceDescription.trim()) {
-            throw new Error("Please enter a voice description");
-          }
-          blob = await ttsClient.generateVoiceDesign({
-            text: state.text,
-            voice_description: state.voiceDescription,
-            language,
-            format,
-            stable_lead_in: settingsStore.state.stableVoiceDesignLeadIn,
-            seed: state.seed,
-            sample_rate: sampleRate,
-            bit_depth: bitDepth,
-          });
-          break;
+        }
+      } else if (state.mode === "voice-clone") {
+        if (!state.referenceAudio) {
+          throw new Error("Please upload a reference audio file");
+        }
+        if (provider === "qwen3" && !state.cloneLowQualityMode && !state.referenceText.trim()) {
+          throw new Error("Please enter the reference text");
+        }
+        payload.reference_audio_base64 = await fileToBase64(state.referenceAudio);
+      } else if (state.mode === "voice-design") {
+        if (!state.voiceDescription.trim()) {
+          throw new Error("Please enter a voice description");
+        }
       }
 
+      if (provider === "chatterbox") {
+        payload.advanced = getChatterboxAdvancedPayload();
+      }
+
+      const blob = await ttsClient.generateSpeech(payload);
       state.audioBlob = blob;
       state.audioUrl = URL.createObjectURL(blob);
     } catch (e) {

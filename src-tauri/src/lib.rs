@@ -670,6 +670,31 @@ fn get_environment_status(
     env_manager::validate::get_environment_status(&app)
 }
 
+/// Ensure provider-specific runtime dependencies are installed.
+/// Phase 1 supports on-demand installation for Chatterbox.
+#[tauri::command]
+fn ensure_provider_runtime(
+    app: tauri::AppHandle,
+    provider: String,
+) -> Result<env_manager::setup::EnsureProviderRuntimeResult, String> {
+    #[cfg(debug_assertions)]
+    {
+        let _ = app;
+        return Ok(env_manager::setup::EnsureProviderRuntimeResult {
+            provider,
+            installed: false,
+            restart_required: false,
+            message: "Development mode: provider runtime management is handled by your local Python environment.".to_string(),
+        });
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let gpu = env_manager::gpu::detect_gpu();
+        env_manager::setup::ensure_provider_runtime(&app, &provider, &gpu)
+    }
+}
+
 /// Repair the environment — deletes marker and optionally the venv.
 /// The next launch will trigger a fresh setup.
 #[tauri::command]
@@ -932,6 +957,7 @@ pub fn run() {
             get_tts_access_token,
             get_sidecar_logs,
             get_environment_status,
+            ensure_provider_runtime,
             repair_environment,
             detect_gpu,
             reset_mic_permissions

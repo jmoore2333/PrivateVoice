@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 $ResourcesDir = Join-Path $ProjectRoot "src-tauri" | Join-Path -ChildPath "resources"
+$ChecksumManifest = Join-Path $ScriptDir "uv-checksums.txt"
 
 if (-not (Test-Path $ResourcesDir)) {
     New-Item -ItemType Directory -Path $ResourcesDir -Force | Out-Null
@@ -59,6 +60,39 @@ try {
             Start-Sleep -Seconds $delay
         }
     }
+
+    if (-not (Test-Path $ChecksumManifest)) {
+        Write-Error "Checksum manifest not found: $ChecksumManifest"
+        exit 1
+    }
+
+    $ExpectedHash = $null
+    foreach ($line in Get-Content $ChecksumManifest) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+            continue
+        }
+        $parts = $trimmed -split "\s+"
+        if ($parts.Length -lt 3) {
+            continue
+        }
+        if ($parts[0] -eq $UvVersion -and $parts[1] -eq $ArchiveName) {
+            $ExpectedHash = $parts[2].ToLower()
+            break
+        }
+    }
+
+    if (-not $ExpectedHash) {
+        Write-Error "No checksum entry for uv $UvVersion archive $ArchiveName in $ChecksumManifest"
+        exit 1
+    }
+
+    $ActualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash.ToLower()
+    if ($ActualHash -ne $ExpectedHash) {
+        Write-Error "Checksum mismatch for $ArchiveName. Expected $ExpectedHash, got $ActualHash"
+        exit 1
+    }
+    Write-Host "==> Checksum verified ($ActualHash)"
 
     # Extract
     Write-Host "==> Extracting..."

@@ -2,25 +2,23 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-
-$SourceReq = Join-Path $ProjectRoot "python\requirements.txt"
 $ExpectedHashFile = Join-Path $ProjectRoot "python\requirements.sha256"
-$StagedReq = Join-Path $ProjectRoot "src-tauri\resources\requirements.txt"
 
-if (-not (Test-Path $SourceReq)) {
-    Write-Error "Missing $SourceReq"
-    exit 1
-}
+$Manifests = @(
+    "requirements.txt",
+    "requirements.lock.txt",
+    "requirements.base.txt",
+    "requirements.base.lock.txt",
+    "requirements.qwen.txt",
+    "requirements.qwen.lock.txt",
+    "requirements.chatterbox.txt",
+    "requirements.chatterbox.lock.txt"
+)
+
 if (-not (Test-Path $ExpectedHashFile)) {
-    Write-Error "Missing $ExpectedHashFile. Run .\scripts\update-requirements-hash.sh"
-    exit 1
-}
-if (-not (Test-Path $StagedReq)) {
-    Write-Error "Missing staged requirements at $StagedReq"
-    exit 1
+    throw "Missing $ExpectedHashFile. Run .\scripts\update-requirements-hash.sh"
 }
 
-# Normalize CRLF → LF before hashing so the hash matches macOS/Linux (git stores LF)
 function Get-NormalizedFileHash {
     param([string]$Path)
     $text = [System.IO.File]::ReadAllText($Path)
@@ -32,35 +30,50 @@ function Get-NormalizedFileHash {
     return [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
 }
 
-$SourceHash = Get-NormalizedFileHash $SourceReq
-$StagedHash = Get-NormalizedFileHash $StagedReq
-
-$ExpectedRaw = Get-Content $ExpectedHashFile -Raw
-$Match = [regex]::Match($ExpectedRaw, "\b[0-9a-fA-F]{64}\b")
-if (-not $Match.Success) {
-    Write-Error "$ExpectedHashFile does not contain a valid SHA-256 hash"
-    exit 1
+$hashMap = @{}
+Get-Content $ExpectedHashFile | ForEach-Object {
+    $line = $_.Trim()
+    if (-not $line -or $line.StartsWith("#")) { return }
+    $parts = $line -split "\s+"
+    if ($parts.Length -lt 2) { return }
+    $hashMap[$parts[0]] = $parts[1].ToLowerInvariant()
 }
-$ExpectedHash = $Match.Value.ToLowerInvariant()
 
-if ($SourceHash -ne $ExpectedHash) {
-    Write-Error @"
-python/requirements.txt hash mismatch
-Expected: $ExpectedHash
-Actual:   $SourceHash
+foreach ($manifest in $Manifests) {
+    $sourceFile = Join-Path $ProjectRoot ("python\" + $manifest)
+    $stagedFile = Join-Path $ProjectRoot ("src-tauri\resources\" + $manifest)
+
+    if (-not (Test-Path $sourceFile)) {
+        throw "Missing $sourceFile"
+    }
+    if (-not (Test-Path $stagedFile)) {
+        throw "Missing staged manifest at $stagedFile"
+    }
+    if (-not $hashMap.ContainsKey($manifest)) {
+        throw "No expected hash found for $manifest in $ExpectedHashFile"
+    }
+
+    $expectedHash = $hashMap[$manifest]
+    $sourceHash = Get-NormalizedFileHash $sourceFile
+    $stagedHash = Get-NormalizedFileHash $stagedFile
+
+    if ($sourceHash -ne $expectedHash) {
+        throw @"
+python/$manifest hash mismatch
+Expected: $expectedHash
+Actual:   $sourceHash
 Run: .\scripts\update-requirements-hash.sh
 "@
-    exit 1
-}
+    }
 
-if ($StagedHash -ne $SourceHash) {
-    Write-Error @"
-staged requirements hash mismatch
-Source: $SourceHash
-Staged: $StagedHash
+    if ($stagedHash -ne $sourceHash) {
+        throw @"
+staged $manifest hash mismatch
+Source: $sourceHash
+Staged: $stagedHash
 Re-run staging: .\scripts\build-release.ps1
 "@
-    exit 1
+    }
 }
 
-Write-Host "Dependency hash check passed: $SourceHash"
+Write-Host "Dependency hash check passed for all manifests."

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { MODEL_OPTIONS, modelSupportsMode, getRecommendedModel, type TTSMode } from '$lib/stores/ttsStore.svelte';
+  import { settingsStore } from '$lib/stores/settingsStore.svelte';
 
   type Status = 'ready' | 'generating' | 'downloading' | 'loading' | 'error';
 
@@ -43,7 +44,11 @@
     { id: 'voice-design', label: 'Voice Design' },
   ];
 
-  const models = MODEL_OPTIONS;
+  const models = $derived(
+    settingsStore.state.enableAdvancedProviders
+      ? MODEL_OPTIONS
+      : MODEL_OPTIONS.filter((model) => model.provider === "qwen3")
+  );
 
   function getModelLabel(id: string | null): string {
     if (!id) return "None";

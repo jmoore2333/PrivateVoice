@@ -12,6 +12,11 @@ import logging
 from qwen_tts import Qwen3TTSModel
 
 from .device import DeviceConfig, get_device_config, synchronize_device, clear_cache
+from .model_registry import (
+    QWEN_MODEL_SPECS,
+    ensure_required_files,
+    verify_snapshot_hashes,
+)
 
 # Ignore SIGPIPE to prevent broken pipe crashes during stdout writes
 # (SIGPIPE does not exist on Windows)
@@ -28,13 +33,10 @@ PRESET_SPEAKERS = [
     "serena", "sohee", "uncle_fu", "vivian"
 ]
 
-# Model IDs on HuggingFace
+# Legacy compatibility mapping kept for API and UI references.
 MODEL_IDS = {
-    "0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
-    "0.6b-base": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-    "1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-    "1.7b-design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-    "1.7b-base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    model_key: spec.repo_id
+    for model_key, spec in QWEN_MODEL_SPECS.items()
 }
 
 
@@ -71,7 +73,8 @@ class TTSModel:
             self.unload()
 
         self.config = get_device_config()
-        hf_model_id = MODEL_IDS.get(self.model_id, MODEL_IDS["0.6b"])
+        model_spec = QWEN_MODEL_SPECS.get(self.model_id, QWEN_MODEL_SPECS["0.6b"])
+        hf_model_id = model_spec.repo_id
 
         # Phase 1: Download model files with progress tracking
         tracker = get_download_tracker()
@@ -81,8 +84,11 @@ class TTSModel:
         try:
             local_path = snapshot_download(
                 repo_id=hf_model_id,
+                revision=model_spec.revision,
                 tqdm_class=create_hf_tqdm_class(),
             )
+            ensure_required_files(local_path, model_spec.required_files)
+            verify_snapshot_hashes(local_path, model_spec.expected_sha256)
             tracker.complete_download()
         except Exception:
             tracker.error(f"Failed to download {hf_model_id}")

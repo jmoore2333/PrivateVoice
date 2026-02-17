@@ -6,10 +6,12 @@ vi.mock("$lib/api/ttsClient", () => {
     ttsClient: {
       health: vi.fn(),
       getModelStatus: vi.fn(),
+      getModelCatalog: vi.fn(),
       loadModel: vi.fn(),
       generateCustomVoice: vi.fn(),
       generateVoiceClone: vi.fn(),
       generateVoiceDesign: vi.fn(),
+      generateSpeech: vi.fn(),
       abortGeneration: vi.fn(),
     },
     PRESET_SPEAKERS: [
@@ -270,7 +272,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
 
       ttsStore.setText("Hello world");
       ttsStore.setSpeaker("aiden");
@@ -280,8 +282,9 @@ describe("ttsStore", () => {
       expect(ttsStore.state.isGenerating).toBe(false);
       expect(ttsStore.state.audioBlob).toBe(mockBlob);
       expect(ttsStore.state.audioUrl).toBe("blob:mock-url");
-      expect(ttsClient.generateCustomVoice).toHaveBeenCalledWith(
+      expect(ttsClient.generateSpeech).toHaveBeenCalledWith(
         expect.objectContaining({
+          mode: "custom-voice",
           text: "Hello world",
           speaker: "aiden",
           language: "english",
@@ -292,7 +295,9 @@ describe("ttsStore", () => {
 
     it("generates voice clone audio successfully (low quality mode bypasses reference text)", async () => {
       const mockBlob = new Blob(["cloned-audio"], { type: "audio/wav" });
-      const refFile = new File(["ref-audio"], "reference.wav", { type: "audio/wav" });
+      const refFile = {
+        arrayBuffer: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
+      } as unknown as File;
 
       vi.mocked(ttsClient.getModelStatus).mockResolvedValue({
         loaded: true,
@@ -303,7 +308,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateVoiceClone).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
 
       ttsStore.setMode("voice-clone");
       ttsStore.setText("Clone this");
@@ -315,11 +320,12 @@ describe("ttsStore", () => {
 
       expect(ttsStore.state.error).toBeNull();
       expect(ttsStore.state.audioBlob).toBe(mockBlob);
-      expect(ttsClient.generateVoiceClone).toHaveBeenCalledWith(
-        "Clone this",
-        "",
-        refFile,
-        expect.objectContaining({ xVectorOnly: true })
+      expect(ttsClient.generateSpeech).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "voice-clone",
+          x_vector_only_mode: true,
+          reference_audio_base64: expect.any(String),
+        })
       );
     });
 
@@ -335,7 +341,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateVoiceDesign).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
 
       ttsStore.setMode("voice-design");
       ttsStore.setText("Designed speech");
@@ -345,8 +351,9 @@ describe("ttsStore", () => {
 
       expect(ttsStore.state.error).toBeNull();
       expect(ttsStore.state.audioBlob).toBe(mockBlob);
-      expect(ttsClient.generateVoiceDesign).toHaveBeenCalledWith(
+      expect(ttsClient.generateSpeech).toHaveBeenCalledWith(
         expect.objectContaining({
+          mode: "voice-design",
           text: "Designed speech",
           voice_description: "A warm, deep male voice",
           language: "english",
@@ -368,12 +375,12 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(blob1);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(blob1);
       ttsStore.setText("First");
       await ttsStore.generate();
 
       // Now generate again
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(blob2);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(blob2);
       ttsStore.setText("Second");
       await ttsStore.generate();
 
@@ -392,7 +399,7 @@ describe("ttsStore", () => {
       await ttsStore.checkServerHealth();
 
       const abortError = new DOMException("Aborted", "AbortError");
-      vi.mocked(ttsClient.generateCustomVoice).mockRejectedValue(abortError);
+      vi.mocked(ttsClient.generateSpeech).mockRejectedValue(abortError);
 
       ttsStore.setText("Hello");
       await ttsStore.generate();
@@ -423,7 +430,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
       ttsStore.setText("Hello");
       await ttsStore.generate();
       expect(ttsStore.state.audioUrl).not.toBeNull();
@@ -443,7 +450,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
       ttsStore.setText("Hello");
       await ttsStore.generate();
       expect(ttsStore.state.audioBlob).not.toBeNull();
@@ -473,7 +480,7 @@ describe("ttsStore", () => {
       vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
       await ttsStore.checkServerHealth();
 
-      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(mockBlob);
+      vi.mocked(ttsClient.generateSpeech).mockResolvedValue(mockBlob);
       ttsStore.setText("Hello");
       await ttsStore.generate();
 

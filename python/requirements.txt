@@ -1,27 +1,2 @@
-# Core ML/AI
-torch>=2.1.0
-transformers>=4.40.0
-accelerate>=0.26.0
-safetensors>=0.4.0
-sentencepiece>=0.2.0
-
-# Qwen3-TTS
-qwen-tts>=0.0.5
-
-# Audio processing
-soundfile>=0.12.0
-librosa>=0.10.0
-numpy>=1.24.0
-lameenc>=1.7.0
-
-# Server
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.6
-
-# Transcription
-faster-whisper>=1.0.0
-
-# Utilities
-huggingface-hub>=0.20.0
-pydantic>=2.0.0
+-r requirements.base.txt
+-r requirements.qwen.txt

@@ -1,4 +1,4 @@
-"""PrivateVoice TTS server (FastAPI + Qwen3-TTS)."""
+"""PrivateVoice TTS server (FastAPI + modular provider backends)."""
 
 import asyncio
 import base64
@@ -32,7 +32,7 @@ os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 import torch
 from contextlib import asynccontextmanager
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,7 +44,7 @@ from .device import (
     get_device_config, get_memory_info, check_memory_for_model,
     MODEL_MEMORY_REQUIREMENTS, SUPPORTED_MP3_BITRATES,
 )
-from .download_tracker import get_download_tracker, DownloadProgress
+from .download_tracker import get_download_tracker
 from .transcription import (
     get_whisper_model, WHISPER_MODEL_REPOS, WHISPER_MODEL_SIZES,
 )
@@ -55,6 +55,20 @@ from .translation import (
 )
 from .speaker_data import get_speakers_dict, SUPPORTED_LANGUAGES
 from .log_handler import setup_logging, get_log_buffer, get_logger
+from .providers.base import (
+    ProviderError,
+    TTS_MODE_CUSTOM,
+    TTS_MODE_CLONE,
+    TTS_MODE_DESIGN,
+    SUPPORTED_TTS_MODES,
+)
+from .providers.catalog import (
+    list_catalog,
+    resolve_selection,
+    get_entry,
+    model_supports_mode as provider_model_supports_mode,
+)
+from .providers.registry import get_provider_registry
 
 # Setup structured logging
 logger = setup_logging()
@@ -74,10 +88,17 @@ class ModelStatusResponse(BaseModel):
     model_id: Optional[str]
     device: Optional[str]
     memory: dict
+    provider: Optional[str] = None
+    model_key: Optional[str] = None
+    capabilities: list[str] = []
+    languages: list[str] = []
+    display_name: Optional[str] = None
 
 
 class LoadModelRequest(BaseModel):
-    model_id: str = "0.6b"
+    model_id: Optional[str] = None
+    provider: Optional[str] = None
+    model_key: Optional[str] = None
 
 
 MAX_TEXT_LENGTH = 2000
@@ -89,13 +110,10 @@ SUPPORTED_FORMATS = ("wav", "mp3")
 SUPPORTED_SAMPLE_RATES = (8000, 16000, 22050, 24000, 44100, 48000)
 SUPPORTED_BIT_DEPTHS = (16, 24, 32)
 SUPPORTED_BATCH_MODES = ("custom-voice", "voice-clone", "voice-design")
-MODEL_CAPABILITIES: dict[str, tuple[str, ...]] = {
-    "0.6b": ("custom-voice",),
-    "1.7b": ("custom-voice",),
-    "0.6b-base": ("voice-clone",),
-    "1.7b-base": ("voice-clone",),
-    "1.7b-design": ("voice-design",),
-}
+
+# Keep active provider selection for provider-aware routing.
+_active_provider: str = "qwen3"
+_active_model_key: Optional[str] = None
 
 
 class CustomVoiceRequest(BaseModel):
@@ -121,6 +139,27 @@ class VoiceDesignRequest(BaseModel):
     seed: Optional[int] = None
     sample_rate: Optional[int] = None
     bit_depth: int = 16
+
+
+class GenerateSpeechRequest(BaseModel):
+    mode: str
+    provider: Optional[str] = None
+    model_key: Optional[str] = None
+    text: str
+    language: str = "english"
+    speaker: str = "serena"
+    instruction: str = ""
+    voice_description: str = ""
+    reference_text: str = ""
+    x_vector_only_mode: bool = False
+    reference_audio_base64: Optional[str] = None
+    format: str = "wav"
+    mp3_bitrate: int = 192
+    stable_lead_in: bool = True
+    seed: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bit_depth: int = 16
+    advanced: dict[str, Any] = {}
 
 
 class BatchItem(BaseModel):
@@ -338,12 +377,11 @@ def validate_audio_format_options(sample_rate: Optional[int], bit_depth: int) ->
         )
 
 
-def validate_model_supports_mode(model_id: str, mode: str) -> None:
-    supported = MODEL_CAPABILITIES.get(model_id, ())
-    if mode not in supported:
+def validate_model_supports_mode(provider: str, model_key: str, mode: str) -> None:
+    if not provider_model_supports_mode(provider, model_key, mode):
         raise HTTPException(
             status_code=400,
-            detail=f"Loaded model '{model_id}' does not support mode '{mode}'",
+            detail=f"Loaded model '{model_key}' does not support mode '{mode}'",
         )
 
 
@@ -380,6 +418,66 @@ def decode_reference_audio(data: Optional[str]) -> bytes:
     return decoded
 
 
+def _set_active_model(provider: str, model_key: Optional[str]) -> None:
+    global _active_provider, _active_model_key
+    _active_provider = provider
+    _active_model_key = model_key
+
+
+def _provider_error_detail(error: ProviderError) -> dict[str, Any]:
+    return error.to_dict()
+
+
+def _provider_error_http(error: ProviderError, *, structured: bool = False) -> HTTPException:
+    if structured:
+        return HTTPException(status_code=error.status_code, detail=_provider_error_detail(error))
+    return HTTPException(status_code=error.status_code, detail=error.message)
+
+
+def _loaded_provider_status() -> tuple[Any, Any]:
+    """Return the loaded provider adapter and status.
+
+    Prefers the active provider. Falls back to any loaded provider if active
+    provider is unloaded.
+    """
+    registry = get_provider_registry()
+
+    provider = registry.get(_active_provider)
+    if provider is not None:
+        status = provider.status()
+        if status.loaded:
+            return provider, status
+
+    for provider_id, candidate in registry.all().items():
+        status = candidate.status()
+        if status.loaded:
+            _set_active_model(provider_id, status.model_key)
+            return candidate, status
+
+    if provider is None:
+        provider = registry.get("qwen3")
+        if provider is None:
+            raise ProviderError(
+                "invalid_provider_params",
+                "No providers are registered",
+                status_code=500,
+            )
+    return provider, provider.status()
+
+
+def _generate_with_provider(
+    mode: str,
+    params: dict[str, Any],
+    *,
+    reference_audio: bytes | None = None,
+) -> tuple[bytes, str]:
+    provider, status = _loaded_provider_status()
+    if not status.loaded:
+        raise ProviderError("invalid_provider_params", "Model not loaded")
+
+    return provider.generate(mode, params, reference_audio=reference_audio)
+
+
 # ============================================================================
 # FastAPI App
 # ============================================================================
@@ -397,9 +495,11 @@ async def lifespan(app: FastAPI):
 
     # Cleanup on shutdown
     logger.info("TTS Server shutting down...")
-    model = get_model()
-    if model.is_loaded:
-        model.unload()
+    for provider in get_provider_registry().all().values():
+        try:
+            provider.unload_model()
+        except Exception:
+            logger.exception("Provider unload failed on shutdown")
     whisper = get_whisper_model()
     if whisper.is_loaded:
         whisper.unload()
@@ -501,14 +601,20 @@ async def download_progress():
 @app.get("/model-status", response_model=ModelStatusResponse)
 async def model_status():
     """Get current model status."""
-    model = get_model()
     config = get_device_config()
+    provider, status = _loaded_provider_status()
 
+    # Keep legacy fields while exposing provider-aware metadata.
     return ModelStatusResponse(
-        loaded=model.is_loaded,
-        model_id=model.model_id if model.is_loaded else None,
-        device=config.device if model.is_loaded else None,
+        loaded=status.loaded,
+        model_id=status.model_id if status.loaded else None,
+        device=config.device if status.loaded else None,
         memory=get_memory_info(),
+        provider=status.provider if status.loaded else None,
+        model_key=status.model_key if status.loaded else None,
+        capabilities=status.capabilities if status.loaded else [],
+        languages=status.languages if status.loaded else [],
+        display_name=status.display_name if status.loaded else None,
     )
 
 
@@ -571,8 +677,14 @@ async def get_logs(count: int = 100, level: Optional[str] = None):
 
 @app.get("/speakers")
 async def list_speakers():
-    """List available preset speakers (simple list)."""
-    return {"speakers": PRESET_SPEAKERS}
+    """List available preset speakers for the active provider."""
+    try:
+        provider, status = _loaded_provider_status()
+        if status.provider == "qwen3":
+            return {"speakers": provider.list_speakers()}
+        return {"speakers": provider.list_speakers()}
+    except Exception:
+        return {"speakers": PRESET_SPEAKERS}
 
 
 @app.get("/speakers-info", response_model=List[SpeakerInfoResponse])
@@ -584,7 +696,16 @@ async def speakers_info():
 @app.get("/languages")
 async def list_languages():
     """List supported languages for TTS generation."""
+    _, status = _loaded_provider_status()
+    if status.loaded and status.languages:
+        return {"languages": status.languages}
     return {"languages": SUPPORTED_LANGUAGES}
+
+
+@app.get("/model-catalog")
+async def model_catalog():
+    """List available providers/models and their capabilities."""
+    return {"models": list_catalog()}
 
 
 # ============================================================================
@@ -597,13 +718,28 @@ async def memory_check(model_id: str):
 
     Returns required RAM, available RAM, and a warning if insufficient.
     """
-    if model_id not in MODEL_IDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown model ID: {model_id}. "
-            f"Available: {list(MODEL_IDS.keys())}",
-        )
-    return check_memory_for_model(model_id)
+    if model_id in MODEL_IDS:
+        return check_memory_for_model(model_id)
+
+    chatterbox_entry = get_entry("chatterbox", model_id)
+    if chatterbox_entry is not None:
+        memory = get_memory_info()
+        required_gb = 12
+        available_gb = memory.get("available_gb", 0)
+        sufficient = available_gb >= required_gb
+        return {
+            "required_gb": required_gb,
+            "available_gb": available_gb,
+            "sufficient": sufficient,
+            "warning": None
+            if sufficient
+            else f"Model requires ~{required_gb}GB RAM, only {available_gb:.1f}GB available",
+        }
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Unknown model ID: {model_id}. Available: {list(MODEL_IDS.keys()) + ['turbo', 'original', 'multilingual']}",
+    )
 
 
 @app.post("/load-model")
@@ -613,21 +749,47 @@ async def load_model(request: LoadModelRequest):
     Runs model download + loading in a background thread so the event loop
     remains free to serve /download-progress polling requests.
     """
-    if request.model_id not in MODEL_IDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown model ID: {request.model_id}. "
-            f"Available: {list(MODEL_IDS.keys())}",
-        )
-
-    model = get_model()
+    registry = get_provider_registry()
     state = get_startup_state()
 
     try:
-        state.set_phase("downloading-model", f"Downloading {request.model_id} model...", 40)
-        await asyncio.to_thread(model.load, request.model_id)
+        provider_id, model_key, legacy_model_id = resolve_selection(
+            provider=request.provider,
+            model_key=request.model_key,
+            model_id=request.model_id,
+        )
+        provider = registry.get(provider_id)
+        if provider is None:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "invalid_provider_params",
+                    "message": f"Unknown provider: {provider_id}",
+                    "provider": provider_id,
+                },
+            )
+
+        # Free memory from previously loaded provider when switching.
+        active_provider = registry.get(_active_provider)
+        if active_provider is not None and _active_provider != provider_id:
+            active_status = active_provider.status()
+            if active_status.loaded:
+                await asyncio.to_thread(active_provider.unload_model)
+
+        state.set_phase("downloading-model", f"Loading {provider_id}:{model_key}...", 40)
+        result = await asyncio.to_thread(provider.load_model, model_key)
+        _set_active_model(provider_id, model_key)
         state.set_phase("ready", "Model loaded and ready", 100)
-        return {"status": "loaded", "model_id": request.model_id}
+        if legacy_model_id and not result.get("model_id"):
+            result["model_id"] = legacy_model_id
+        return result
+    except ProviderError as e:
+        state.set_phase("error", "Model load failed", 0)
+        logger.exception("Provider load failed")
+        raise HTTPException(status_code=e.status_code, detail=e.to_dict())
+    except ValueError as e:
+        state.set_phase("error", "Model load failed", 0)
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
         state.set_phase("error", "Model load failed", 0)
         logger.exception("Failed to load model")
@@ -637,10 +799,16 @@ async def load_model(request: LoadModelRequest):
 @app.post("/unload-model")
 async def unload_model():
     """Unload the current model to free memory."""
-    model = get_model()
+    registry = get_provider_registry()
     state = get_startup_state()
 
-    model.unload()
+    for provider in registry.all().values():
+        try:
+            await asyncio.to_thread(provider.unload_model)
+        except Exception:
+            logger.exception("Provider unload failed")
+
+    _set_active_model("qwen3", None)
     state.set_phase("checking-models", "Model unloaded, ready to load", 20)
     return {"status": "unloaded"}
 
@@ -652,11 +820,6 @@ async def unload_model():
 @app.post("/generate/custom-voice")
 async def generate_custom_voice(request: CustomVoiceRequest):
     """Generate speech using a preset speaker voice."""
-    model = get_model()
-
-    if not model.is_loaded:
-        raise HTTPException(status_code=400, detail="Model not loaded")
-
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
@@ -670,23 +833,26 @@ async def generate_custom_voice(request: CustomVoiceRequest):
     try:
         clear_cancel()
         logger.info(f"Generating custom voice: speaker={request.speaker}, lang={request.language}, fmt={fmt}, text={request.text[:50]}...")
-        audio_bytes, media_type = model.generate_custom_voice(
-            text=request.text,
-            speaker=request.speaker,
-            instruction=request.instruction,
-            language=request.language,
-            output_format=fmt,
-            mp3_bitrate=bitrate,
-            stable_lead_in=request.stable_lead_in,
-            seed=request.seed,
-            sample_rate=request.sample_rate if fmt == "wav" else None,
-            bit_depth=request.bit_depth,
+        audio_bytes, media_type = _generate_with_provider(
+            TTS_MODE_CUSTOM,
+            {
+                "text": request.text,
+                "speaker": request.speaker,
+                "instruction": request.instruction,
+                "language": request.language,
+                "format": fmt,
+                "mp3_bitrate": bitrate,
+                "stable_lead_in": request.stable_lead_in,
+                "seed": request.seed,
+                "sample_rate": request.sample_rate if fmt == "wav" else None,
+                "bit_depth": request.bit_depth,
+            },
         )
         if is_cancelled():
             return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ProviderError as e:
+        raise _provider_error_http(e, structured=False)
     except Exception:
         logger.exception("Generation failed")
         raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
@@ -706,11 +872,6 @@ async def generate_voice_clone(
     bit_depth: int = Form(16),
 ):
     """Generate speech by cloning a reference voice."""
-    model = get_model()
-
-    if not model.is_loaded:
-        raise HTTPException(status_code=400, detail="Model not loaded")
-
     if not text or not text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
@@ -730,31 +891,28 @@ async def generate_voice_clone(
         if not x_vector_only_mode and not reference_text:
             raise HTTPException(status_code=400, detail="Reference text is required unless low-quality mode is enabled.")
 
-        # Run inference in a thread so the event loop stays free for /logs polling
-        audio_bytes, media_type = await asyncio.to_thread(
-            model.generate_voice_clone,
-            text=text,
+        audio_bytes, media_type = _generate_with_provider(
+            TTS_MODE_CLONE,
+            {
+                "text": text,
+                "reference_text": reference_text,
+                "x_vector_only_mode": x_vector_only_mode,
+                "language": language,
+                "format": fmt,
+                "mp3_bitrate": bitrate,
+                "seed": seed,
+                "sample_rate": sample_rate if fmt == "wav" else None,
+                "bit_depth": bit_depth,
+            },
             reference_audio=audio_data,
-            reference_text=reference_text,
-            language=language,
-            x_vector_only_mode=x_vector_only_mode,
-            output_format=fmt,
-            mp3_bitrate=bitrate,
-            seed=seed,
-            sample_rate=sample_rate if fmt == "wav" else None,
-            bit_depth=bit_depth,
         )
         if is_cancelled():
             return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
     except HTTPException:
         raise
-    except RuntimeError as e:
-        error_msg = str(e)
-        logger.exception("Voice clone runtime error")
-        if "model" in error_msg.lower() or "compatibility" in error_msg.lower():
-            raise HTTPException(status_code=400, detail="Voice Clone requires a Base model (0.6B-base or 1.7B-base)")
-        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+    except ProviderError as e:
+        raise _provider_error_http(e, structured=False)
     except Exception:
         logger.exception("Voice clone failed")
         raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
@@ -763,11 +921,6 @@ async def generate_voice_clone(
 @app.post("/generate/voice-design")
 async def generate_voice_design(request: VoiceDesignRequest):
     """Generate speech with a novel voice from description."""
-    model = get_model()
-
-    if not model.is_loaded:
-        raise HTTPException(status_code=400, detail="Model not loaded")
-
     if not request.text or not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty")
 
@@ -781,30 +934,142 @@ async def generate_voice_design(request: VoiceDesignRequest):
     try:
         clear_cancel()
         logger.info(f"Generating voice design: lang={request.language}, fmt={fmt}, desc={request.voice_description[:50]}...")
-        audio_bytes, media_type = model.generate_voice_design(
-            text=request.text,
-            voice_description=request.voice_description,
-            language=request.language,
-            output_format=fmt,
-            mp3_bitrate=bitrate,
-            stable_lead_in=request.stable_lead_in,
-            seed=request.seed,
-            sample_rate=request.sample_rate if fmt == "wav" else None,
-            bit_depth=request.bit_depth,
+        audio_bytes, media_type = _generate_with_provider(
+            TTS_MODE_DESIGN,
+            {
+                "text": request.text,
+                "voice_description": request.voice_description,
+                "language": request.language,
+                "format": fmt,
+                "mp3_bitrate": bitrate,
+                "stable_lead_in": request.stable_lead_in,
+                "seed": request.seed,
+                "sample_rate": request.sample_rate if fmt == "wav" else None,
+                "bit_depth": request.bit_depth,
+            },
         )
         if is_cancelled():
             return Response(status_code=499)
         return Response(content=audio_bytes, media_type=media_type)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ProviderError as e:
+        raise _provider_error_http(e, structured=False)
     except Exception:
         logger.exception("Voice design failed")
         raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
 
 
+@app.post("/generate/speech")
+async def generate_speech(request: GenerateSpeechRequest):
+    """Provider-aware normalized generation endpoint."""
+    mode = (request.mode or "").strip().lower()
+    if mode not in SUPPORTED_TTS_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_provider_params",
+                "message": f"Unsupported mode: {request.mode}",
+                "mode": request.mode,
+            },
+        )
+
+    if not request.text or not request.text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "invalid_provider_params", "message": "Text cannot be empty"},
+        )
+    if len(request.text) > MAX_TEXT_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "invalid_provider_params",
+                "message": f"Text exceeds maximum length of {MAX_TEXT_LENGTH} characters",
+            },
+        )
+
+    fmt = request.format if request.format in SUPPORTED_FORMATS else "wav"
+    bitrate = request.mp3_bitrate if request.mp3_bitrate in SUPPORTED_MP3_BITRATES else 192
+    validate_audio_format_options(request.sample_rate, request.bit_depth)
+
+    reference_audio_data: Optional[bytes] = None
+    if mode == TTS_MODE_CLONE and request.reference_audio_base64:
+        reference_audio_data = decode_reference_audio(request.reference_audio_base64)
+
+    try:
+        clear_cancel()
+        provider, status = _loaded_provider_status()
+        if request.provider and request.provider != status.provider:
+            raise ProviderError(
+                "incompatible_model_mode",
+                (
+                    f"Active provider is '{status.provider}'. "
+                    f"Load provider '{request.provider}' before generating."
+                ),
+                extra={
+                    "active_provider": status.provider,
+                    "requested_provider": request.provider,
+                },
+            )
+        if request.model_key and request.model_key != status.model_key:
+            raise ProviderError(
+                "incompatible_model_mode",
+                (
+                    f"Active model is '{status.model_key}'. "
+                    f"Load model '{request.model_key}' before generating."
+                ),
+                extra={
+                    "active_model_key": status.model_key,
+                    "requested_model_key": request.model_key,
+                },
+            )
+
+        payload = {
+            "text": request.text,
+            "language": request.language,
+            "speaker": request.speaker,
+            "instruction": request.instruction,
+            "voice_description": request.voice_description,
+            "reference_text": request.reference_text,
+            "x_vector_only_mode": request.x_vector_only_mode,
+            "format": fmt,
+            "mp3_bitrate": bitrate,
+            "stable_lead_in": request.stable_lead_in,
+            "seed": request.seed,
+            "sample_rate": request.sample_rate if fmt == "wav" else None,
+            "bit_depth": request.bit_depth,
+            "advanced": request.advanced or {},
+        }
+        audio_bytes, media_type = provider.generate(
+            mode,
+            payload,
+            reference_audio=reference_audio_data,
+        )
+        if is_cancelled():
+            return Response(status_code=499)
+        return Response(content=audio_bytes, media_type=media_type)
+    except ProviderError as e:
+        raise _provider_error_http(e, structured=True)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Normalized generation failed")
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "invalid_provider_params", "message": INTERNAL_ERROR_DETAIL},
+        )
+
+
 @app.post("/generate/batch")
 async def generate_batch(request: BatchRequest):
     """Generate a batch of outputs with shared voice configuration."""
+    provider, status = _loaded_provider_status()
+    if not status.loaded:
+        raise HTTPException(status_code=400, detail="Model not loaded")
+    if status.provider != "qwen3":
+        raise HTTPException(
+            status_code=400,
+            detail="Batch generation currently supports Qwen models only",
+        )
+
     model = get_model()
 
     if not model.is_loaded:
@@ -817,7 +1082,7 @@ async def generate_batch(request: BatchRequest):
             detail=f"Unsupported mode: {request.mode}. Allowed values: {list(SUPPORTED_BATCH_MODES)}",
         )
 
-    validate_model_supports_mode(model.model_id, mode)
+    validate_model_supports_mode("qwen3", model.model_id, mode)
 
     if not request.items:
         raise HTTPException(status_code=400, detail="Batch items cannot be empty")

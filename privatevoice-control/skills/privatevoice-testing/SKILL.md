@@ -11,7 +11,7 @@ Guide for using the PrivateVoice MCP tools to perform AI-driven round-trip testi
 PrivateVoice is a Tauri 2 desktop app with three layers:
 
 ```
-Svelte 5 Frontend → HTTP :8765 → Python FastAPI (Qwen3-TTS) → Tauri Rust (sidecar manager)
+Svelte 5 Frontend → HTTP :8765 → Python FastAPI (provider adapters: Qwen3 + Chatterbox) → Tauri Rust (sidecar manager)
 ```
 
 The MCP server communicates via two channels:
@@ -23,12 +23,14 @@ The MCP server communicates via two channels:
 ### Lifecycle Tools
 
 - **`app_launch_and_verify`** — Launch PrivateVoice and wait for backend ready state. Optionally pre-load a model.
+- **`app_get_model_catalog`** — Retrieve provider/model metadata and compatibility from `/model-catalog`.
+- **`app_get_model_status`** — Retrieve provider-aware loaded model state from `/model-status`.
 - **`app_get_status`** — Check backend health, loaded model, startup phase, system info, and bridge connection.
 - **`app_shutdown`** — Graceful shutdown with optional force kill.
 
 ### Action Tools
 
-- **`app_trigger_action`** — Trigger TTS generation or backend actions via HTTP API. Actions: `generate_custom_voice`, `generate_voice_clone`, `generate_voice_design`, `load_model`, `unload_model`, `get_speakers`, `get_system_info`.
+- **`app_trigger_action`** — Trigger TTS generation or backend actions via HTTP API. Legacy actions: `generate_custom_voice`, `generate_voice_clone`, `generate_voice_design`, `load_model`, `unload_model`, `get_speakers`, `get_system_info`. Provider-aware actions: `generate_speech`, `load_provider_model`, `get_model_catalog`, `get_model_status`.
 - **`app_capture_view`** — Take a native screenshot of the PrivateVoice window.
 
 ### Verification Tools
@@ -60,15 +62,15 @@ app_shutdown()
 
 ## Model Compatibility
 
-Each TTS mode requires a specific model variant:
+Each TTS mode requires a compatible provider/model combination from the backend catalog:
 
 | Mode | Compatible Models |
 |------|-------------------|
-| Custom Voice | `0.6b`, `1.7b` |
-| Voice Clone | `0.6b-base`, `1.7b-base` |
-| Voice Design | `1.7b-design` |
+| Custom Voice | Qwen custom models, Chatterbox Turbo/Original/Multilingual |
+| Voice Clone | Qwen base models, Chatterbox Turbo/Original/Multilingual |
+| Voice Design | Qwen `1.7b-design` (Chatterbox unsupported in phase 1) |
 
-Always load the correct model before triggering a generation action. If the wrong model is loaded, `app_trigger_action` returns an error with the compatible model suggestion.
+Always load the correct model before triggering a generation action. Use `app_get_model_catalog` + `app_get_model_status` for deterministic compatibility checks in test agents.
 
 ## Troubleshooting
 

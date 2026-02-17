@@ -1,0 +1,2 @@
+# Chatterbox provider runtime (installed on-demand)
+chatterbox-tts>=0.1.6

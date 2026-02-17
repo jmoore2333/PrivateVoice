@@ -34,6 +34,8 @@
   function handleGetStarted() {
     // Save the selected model as the user's default for future launches
     settingsStore.updateSetting('defaultModel', selectedModel);
+    settingsStore.updateSetting('defaultProvider', 'qwen3');
+    settingsStore.updateSetting('defaultModelKey', selectedModel);
     // Enable auto-load so the model loads automatically on next launch
     settingsStore.updateSetting('autoLoadModel', true);
     settingsStore.updateSetting('hasCompletedOnboarding', true);
@@ -121,6 +123,9 @@
       </button>
       <p class="text-xs text-[var(--color-text-muted)] text-center mt-3">
         The model will begin downloading when you click Get Started.
+      </p>
+      <p class="text-xs text-[var(--color-text-muted)] text-center mt-1">
+        Additional models (including Chatterbox, Whisper, and translation) are available in Settings.
       </p>
     </div>
   </div>

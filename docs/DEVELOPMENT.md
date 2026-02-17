@@ -54,9 +54,35 @@ pnpm install
 cd python
 python3.11 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.base.txt
+pip install -r requirements.qwen.txt
 cd ..
 ```
+
+### Dependency and Model Integrity
+
+- Runtime Python installs are lock-based and hash-enforced (`requirements.*.lock.txt` + `--require-hashes`).
+- `python/requirements.sha256` validates committed dependency manifests used by release staging and startup validation.
+- Build scripts verify the downloaded `uv` archive against `scripts/uv-checksums.txt` before extraction/execution.
+- Hugging Face model sources are pinned to immutable revisions in `python/tts_server/model_registry.py`.
+- Critical model artifacts are SHA-256 verified once per snapshot (cached in `.privatevoice-integrity.json` inside the model snapshot).
+
+When updating dependencies:
+
+```bash
+# Re-generate lock files after editing requirements.*.txt
+uv pip compile python/requirements.base.txt --python-version 3.11 --generate-hashes -o python/requirements.base.lock.txt
+uv pip compile python/requirements.qwen.txt --python-version 3.11 --generate-hashes -o python/requirements.qwen.lock.txt
+uv pip compile python/requirements.chatterbox.txt --python-version 3.11 --generate-hashes -o python/requirements.chatterbox.lock.txt
+cat python/requirements.base.lock.txt python/requirements.qwen.lock.txt > python/requirements.lock.txt
+./scripts/update-requirements-hash.sh
+```
+
+When upgrading `uv`:
+
+1. Update `UV_VERSION` in `scripts/download-uv.sh` and default `UvVersion` in `scripts/download-uv.ps1`.
+2. Add checksums for required archives to `scripts/uv-checksums.txt`.
+3. Keep `EXPECTED_UV_VERSION` in `src-tauri/src/env_manager/setup.rs` in sync.
 
 ---
 
@@ -229,23 +255,27 @@ The easiest way to build a distributable app:
 ```
 
 This script:
-1. Builds the Python sidecar using PyInstaller (~266MB binary)
-2. Installs frontend dependencies
-3. Builds the Tauri application
-4. Creates both `.app` bundle and `.dmg` installer
+1. Downloads a pinned, checksum-verified `uv` binary
+2. Stages `python/tts_server` source + requirements manifests into Tauri resources
+3. Verifies staged dependency manifest hashes
+4. Builds the Tauri application bundle
 
 ### Step-by-Step Build
 
 If you need more control:
 
 ```bash
-# Step 1: Build Python sidecar
-./python/build_sidecar.sh
+# Step 1: Download uv for your platform
+./scripts/download-uv.sh
 
-# Step 2: Verify sidecar exists
-ls -la src-tauri/binaries/tts-server-*
+# Step 2: Stage python resources
+cp -R python/tts_server src-tauri/resources/tts_server
+cp python/requirements*.txt src-tauri/resources/
 
-# Step 3: Build Tauri app
+# Step 3: Verify dependency manifest hashes
+./scripts/verify-dependency-hash.sh
+
+# Step 4: Build Tauri app
 pnpm tauri build
 ```
 

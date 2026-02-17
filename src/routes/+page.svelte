@@ -4,7 +4,7 @@
   import { listen } from "@tauri-apps/api/event";
 
   // Stores
-  import { ttsStore, type TTSMode, MODEL_CAPABILITIES, MODEL_OPTIONS, getRecommendedModel, modelSupportsMode } from "$lib/stores/ttsStore.svelte";
+  import { ttsStore, type TTSMode, MODEL_OPTIONS, getRecommendedModel, modelSupportsMode } from "$lib/stores/ttsStore.svelte";
   import { appStore, type StartupPhase } from "$lib/stores/appStore.svelte";
   import { debugStore } from "$lib/stores/debugStore.svelte";
   import { settingsStore } from "$lib/stores/settingsStore.svelte";
@@ -140,6 +140,16 @@
     return match ? match.label : modelId;
   }
 
+  function resolveDefaultModelId(): string {
+    const defaultProvider = settingsStore.state.defaultProvider || "qwen3";
+    const defaultModelKey = settingsStore.state.defaultModelKey || settingsStore.state.defaultModel || "0.6b";
+    const match = MODEL_OPTIONS.find((model) =>
+      model.provider === defaultProvider && model.modelKey === defaultModelKey
+    );
+    if (match) return match.id;
+    return settingsStore.state.defaultModel || "0.6b";
+  }
+
   function pickRecommendedModel(mode: TTSMode, info: SystemInfo | null): string {
     const isCpu = info?.device === "cpu";
     const memoryAvailable = info?.memory_available_gb ?? info?.memory_total_gb ?? 0;
@@ -227,7 +237,7 @@
       // Clear any stale errors from previous sessions
       ttsStore.clearError();
       // Load the user's preferred default model
-      const defaultModel = settingsStore.state.defaultModel || "0.6b";
+      const defaultModel = resolveDefaultModelId();
       ttsStore.loadModel(defaultModel);
     }
   });

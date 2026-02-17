@@ -111,7 +111,7 @@ class TestHealthEndpoint:
 class TestModelStatusEndpoint:
     """GET /model-status."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     @patch("tts_server.main.get_device_config")
     @patch("tts_server.main.get_memory_info")
     def test_model_status_no_model(self, mock_mem, mock_cfg, mock_get_model):
@@ -228,7 +228,7 @@ class TestLanguagesEndpoint:
 class TestGenerateCustomVoice:
     """POST /generate/custom-voice."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_success_wav(self, mock_get_model):
         """Successful WAV generation returns audio bytes."""
         mock_model = _make_mock_model(loaded=True)
@@ -249,7 +249,7 @@ class TestGenerateCustomVoice:
         assert resp.content == b"fake-wav-data"
         mock_model.generate_custom_voice.assert_called_once()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_success_mp3(self, mock_get_model):
         """MP3 format request returns audio/mpeg media type."""
         mock_model = _make_mock_model(loaded=True)
@@ -270,7 +270,7 @@ class TestGenerateCustomVoice:
         assert resp.headers["content-type"] == "audio/mpeg"
         assert resp.content == b"fake-mp3-data"
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_text_too_long(self, mock_get_model):
         """Text exceeding MAX_TEXT_LENGTH returns 400."""
         mock_model = _make_mock_model(loaded=True)
@@ -288,7 +288,7 @@ class TestGenerateCustomVoice:
         assert resp.status_code == 400
         assert "maximum length" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_model_not_loaded(self, mock_get_model):
         """Request when model is not loaded returns 400."""
         mock_model = _make_mock_model(loaded=False)
@@ -302,7 +302,7 @@ class TestGenerateCustomVoice:
         assert resp.status_code == 400
         assert "not loaded" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_value_error_returns_400(self, mock_get_model):
         """A ValueError from the model (e.g. unknown speaker) yields 400."""
         mock_model = _make_mock_model(loaded=True)
@@ -316,7 +316,7 @@ class TestGenerateCustomVoice:
         )
         assert resp.status_code == 400
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_internal_error_returns_500(self, mock_get_model):
         """An unexpected exception from the model yields 500."""
         mock_model = _make_mock_model(loaded=True)
@@ -338,7 +338,7 @@ class TestGenerateCustomVoice:
 class TestGenerateVoiceClone:
     """POST /generate/voice-clone (multipart form)."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_model_not_loaded(self, mock_get_model):
         """Returns 400 when model is not loaded."""
         mock_model = _make_mock_model(loaded=False)
@@ -359,7 +359,7 @@ class TestGenerateVoiceClone:
         assert resp.status_code == 400
         assert "not loaded" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_text_too_long(self, mock_get_model):
         """Returns 400 when text exceeds max length."""
         mock_model = _make_mock_model(loaded=True)
@@ -379,7 +379,7 @@ class TestGenerateVoiceClone:
         )
         assert resp.status_code == 400
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_missing_reference_text_without_x_vector(self, mock_get_model):
         """Returns 400 when reference_text is empty and x_vector_only_mode is off."""
         mock_model = _make_mock_model(loaded=True)
@@ -407,7 +407,7 @@ class TestGenerateVoiceClone:
 class TestGenerateVoiceDesign:
     """POST /generate/voice-design."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_model_not_loaded(self, mock_get_model):
         """Returns 400 when model is not loaded."""
         mock_model = _make_mock_model(loaded=False)
@@ -423,10 +423,11 @@ class TestGenerateVoiceDesign:
         )
         assert resp.status_code == 400
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_success(self, mock_get_model):
         """Successful voice design generation returns audio."""
         mock_model = _make_mock_model(loaded=True)
+        mock_model.model_id = "1.7b-design"
         mock_get_model.return_value = mock_model
 
         client = _get_client()
@@ -450,7 +451,7 @@ class TestGenerateVoiceDesign:
 class TestLoadModel:
     """POST /load-model."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_load_model_success(self, mock_get_model, reset_startup_state):
         """Successful model load returns status=loaded."""
         mock_model = _make_mock_model(loaded=False)
@@ -464,7 +465,7 @@ class TestLoadModel:
         assert data["model_id"] == "0.6b"
         mock_model.load.assert_called_once_with("0.6b")
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_load_model_failure(self, mock_get_model, reset_startup_state):
         """Failed model load returns 500."""
         mock_model = _make_mock_model(loaded=False)
@@ -474,13 +475,13 @@ class TestLoadModel:
         client = _get_client()
         resp = client.post("/load-model", json={"model_id": "1.7b"})
         assert resp.status_code == 500
-        assert "Out of memory" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Internal server error"
 
 
 class TestUnloadModel:
     """POST /unload-model."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_unload_model(self, mock_get_model, reset_startup_state):
         """Unloading a model returns status=unloaded."""
         mock_model = _make_mock_model(loaded=True)
@@ -572,7 +573,7 @@ class TestMemoryCheck:
 class TestMP3Bitrate:
     """Verify mp3_bitrate is passed through to the model."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_custom_voice_bitrate(self, mock_get_model):
         """Custom voice passes mp3_bitrate to model."""
         mock_model = _make_mock_model(loaded=True)
@@ -592,7 +593,7 @@ class TestMP3Bitrate:
         call_kwargs = mock_model.generate_custom_voice.call_args[1]
         assert call_kwargs["mp3_bitrate"] == 320
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_custom_voice_invalid_bitrate_defaults(self, mock_get_model):
         """Invalid bitrate falls back to 192."""
         mock_model = _make_mock_model(loaded=True)
@@ -612,10 +613,11 @@ class TestMP3Bitrate:
         call_kwargs = mock_model.generate_custom_voice.call_args[1]
         assert call_kwargs["mp3_bitrate"] == 192
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_voice_design_bitrate(self, mock_get_model):
         """Voice design passes mp3_bitrate to model."""
         mock_model = _make_mock_model(loaded=True)
+        mock_model.model_id = "1.7b-design"
         mock_get_model.return_value = mock_model
 
         client = _get_client()
@@ -632,7 +634,7 @@ class TestMP3Bitrate:
         call_kwargs = mock_model.generate_voice_design.call_args[1]
         assert call_kwargs["mp3_bitrate"] == 256
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_custom_voice_stable_lead_in_toggle(self, mock_get_model):
         """Custom voice stable_lead_in is passed through to model."""
         mock_model = _make_mock_model(loaded=True)
@@ -651,10 +653,11 @@ class TestMP3Bitrate:
         call_kwargs = mock_model.generate_custom_voice.call_args[1]
         assert call_kwargs["stable_lead_in"] is False
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_voice_design_stable_lead_in_toggle(self, mock_get_model):
         """Voice design stable_lead_in is passed through to model."""
         mock_model = _make_mock_model(loaded=True)
+        mock_model.model_id = "1.7b-design"
         mock_get_model.return_value = mock_model
 
         client = _get_client()
@@ -678,7 +681,7 @@ class TestMP3Bitrate:
 class TestEmptyTextValidation:
     """All generation endpoints reject empty or whitespace-only text."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_custom_voice_empty_text(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
         mock_get_model.return_value = mock_model
@@ -691,7 +694,7 @@ class TestEmptyTextValidation:
         assert resp.status_code == 400
         assert "empty" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_custom_voice_whitespace_text(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
         mock_get_model.return_value = mock_model
@@ -704,7 +707,7 @@ class TestEmptyTextValidation:
         assert resp.status_code == 400
         assert "empty" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_voice_clone_whitespace_text(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
         mock_get_model.return_value = mock_model
@@ -724,7 +727,7 @@ class TestEmptyTextValidation:
         assert resp.status_code == 400
         assert "empty" in resp.json()["detail"].lower()
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_voice_design_empty_text(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
         mock_get_model.return_value = mock_model
@@ -745,12 +748,10 @@ class TestEmptyTextValidation:
 class TestVoiceCloneErrorCodes:
     """Voice clone returns 400 for model compatibility, 500 for real errors."""
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_runtime_error_model_compat_returns_400(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
-        mock_model.generate_voice_clone.side_effect = RuntimeError(
-            "Model compatibility error: expected Base model"
-        )
+        mock_model.model_id = "0.6b"
         mock_get_model.return_value = mock_model
 
         client = _get_client()
@@ -766,11 +767,12 @@ class TestVoiceCloneErrorCodes:
             files={"reference_audio": ("ref.wav", b"fake-audio", "audio/wav")},
         )
         assert resp.status_code == 400
-        assert "Base model" in resp.json()["detail"]
+        assert "does not support mode" in resp.json()["detail"]
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_runtime_error_non_compat_returns_500(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
+        mock_model.model_id = "0.6b-base"
         mock_model.generate_voice_clone.side_effect = RuntimeError("CUDA out of memory")
         mock_get_model.return_value = mock_model
 
@@ -788,9 +790,10 @@ class TestVoiceCloneErrorCodes:
         )
         assert resp.status_code == 500
 
-    @patch("tts_server.main.get_model")
+    @patch("tts_server.providers.qwen_provider.get_model")
     def test_generic_exception_returns_500(self, mock_get_model):
         mock_model = _make_mock_model(loaded=True)
+        mock_model.model_id = "0.6b-base"
         mock_model.generate_voice_clone.side_effect = Exception("Something went wrong")
         mock_get_model.return_value = mock_model
 
@@ -1068,10 +1071,10 @@ class TestCORSOrigins:
         client = _get_client()
         resp = client.get(
             "/health",
-            headers={"Origin": "http://localhost:1420"},
+            headers={"Origin": "http://localhost"},
         )
         assert resp.status_code == 200
-        assert resp.headers.get("access-control-allow-origin") == "http://localhost:1420"
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost"
 
     def test_disallowed_origin(self):
         client = _get_client()

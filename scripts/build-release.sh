@@ -4,7 +4,7 @@
 # No longer builds a PyInstaller sidecar. Instead, bundles:
 #   - uv binary (Python package manager)
 #   - tts_server/ Python source
-#   - requirements.txt
+#   - requirements manifests (base/qwen/chatterbox)
 #
 # On first launch, the app uses uv to install Python + dependencies
 # into the user's app data directory (no admin required).
@@ -43,6 +43,16 @@ echo ""
 
 RESOURCES_DIR="src-tauri/resources"
 mkdir -p "$RESOURCES_DIR"
+MANIFESTS=(
+  "requirements.txt"
+  "requirements.lock.txt"
+  "requirements.base.txt"
+  "requirements.base.lock.txt"
+  "requirements.qwen.txt"
+  "requirements.qwen.lock.txt"
+  "requirements.chatterbox.txt"
+  "requirements.chatterbox.lock.txt"
+)
 
 # Copy tts_server source
 if [ -d "python/tts_server" ]; then
@@ -56,13 +66,15 @@ else
 fi
 
 # Copy requirements.txt
-if [ -f "python/requirements.txt" ]; then
-    cp "python/requirements.txt" "$RESOURCES_DIR/requirements.txt"
-    echo "Copied requirements.txt"
-else
-    echo "ERROR: python/requirements.txt not found"
-    exit 1
-fi
+for manifest in "${MANIFESTS[@]}"; do
+    if [ -f "python/$manifest" ]; then
+        cp "python/$manifest" "$RESOURCES_DIR/$manifest"
+        echo "Copied $manifest"
+    else
+        echo "ERROR: python/$manifest not found"
+        exit 1
+    fi
+done
 
 # Verify staged dependency manifest hash
 echo "Verifying dependency hash..."
@@ -106,7 +118,9 @@ SRC_SIZE=$(du -sh "$RESOURCES_DIR/tts_server" 2>/dev/null | cut -f1 || echo "?")
 echo "Bundled resources:"
 echo "  uv binary:     $UV_SIZE"
 echo "  tts_server/:   $SRC_SIZE"
-echo "  requirements:  $(wc -l < "$RESOURCES_DIR/requirements.txt") lines"
+for manifest in "${MANIFESTS[@]}"; do
+  echo "  $manifest: $(wc -l < "$RESOURCES_DIR/$manifest") lines"
+done
 echo ""
 
 # Find and display the built artifacts

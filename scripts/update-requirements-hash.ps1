@@ -2,16 +2,19 @@ $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
-
-$ReqFile = Join-Path $ProjectRoot "python\requirements.txt"
 $HashFile = Join-Path $ProjectRoot "python\requirements.sha256"
 
-if (-not (Test-Path $ReqFile)) {
-    Write-Error "Missing $ReqFile"
-    exit 1
-}
+$Manifests = @(
+    "requirements.txt",
+    "requirements.lock.txt",
+    "requirements.base.txt",
+    "requirements.base.lock.txt",
+    "requirements.qwen.txt",
+    "requirements.qwen.lock.txt",
+    "requirements.chatterbox.txt",
+    "requirements.chatterbox.lock.txt"
+)
 
-# Normalize CRLF → LF before hashing so the hash matches macOS/Linux (git stores LF)
 function Get-NormalizedFileHash {
     param([string]$Path)
     $text = [System.IO.File]::ReadAllText($Path)
@@ -23,8 +26,19 @@ function Get-NormalizedFileHash {
     return [BitConverter]::ToString($hashBytes).Replace("-", "").ToLowerInvariant()
 }
 
-$Hash = Get-NormalizedFileHash $ReqFile
-Set-Content -Path $HashFile -Value $Hash -NoNewline
+$lines = @("# filename sha256 (CRLF-normalized)")
+
+foreach ($manifest in $Manifests) {
+    $path = Join-Path $ProjectRoot ("python\" + $manifest)
+    if (-not (Test-Path $path)) {
+        throw "Missing $path"
+    }
+    $hash = Get-NormalizedFileHash $path
+    $lines += "$manifest $hash"
+}
+
+[System.IO.File]::WriteAllLines($HashFile, $lines)
 
 Write-Host "Updated $HashFile"
-Write-Host "requirements.txt sha256: $Hash"
+Write-Host "Manifest hashes:"
+Get-Content $HashFile | ForEach-Object { Write-Host $_ }

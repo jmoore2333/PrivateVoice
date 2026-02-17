@@ -82,9 +82,67 @@ pub fn requirements_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(python_env_dir(app)?.join("requirements.txt"))
 }
 
+pub fn requirements_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.lock.txt"))
+}
+
+pub fn requirements_base_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.base.txt"))
+}
+
+pub fn requirements_base_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.base.lock.txt"))
+}
+
+pub fn requirements_qwen_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.qwen.txt"))
+}
+
+pub fn requirements_qwen_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.qwen.lock.txt"))
+}
+
+pub fn requirements_chatterbox_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.chatterbox.txt"))
+}
+
+pub fn requirements_chatterbox_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(python_env_dir(app)?.join("requirements.chatterbox.lock.txt"))
+}
+
 /// Path to the bundled requirements.txt in resources.
 pub fn bundled_requirements_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(bundled_resources_dir(app)?.join("requirements.txt"))
+}
+
+pub fn bundled_requirements_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.lock.txt"))
+}
+
+pub fn bundled_requirements_base_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.base.txt"))
+}
+
+pub fn bundled_requirements_base_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.base.lock.txt"))
+}
+
+pub fn bundled_requirements_qwen_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.qwen.txt"))
+}
+
+pub fn bundled_requirements_qwen_lock_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.qwen.lock.txt"))
+}
+
+pub fn bundled_requirements_chatterbox_txt(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.chatterbox.txt"))
+}
+
+pub fn bundled_requirements_chatterbox_lock_txt(
+    app: &tauri::AppHandle,
+) -> Result<PathBuf, String> {
+    Ok(bundled_resources_dir(app)?.join("requirements.chatterbox.lock.txt"))
 }
 
 /// Path to the uv-managed standalone Python installation.

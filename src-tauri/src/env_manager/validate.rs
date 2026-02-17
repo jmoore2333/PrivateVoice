@@ -26,6 +26,8 @@ struct SetupMarker {
     gpu_display: Option<String>,
     requirements_hash: String,
     #[serde(default)]
+    provider_hashes: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
     source_hash: Option<String>,
     #[serde(default)]
     uv_version: Option<String>,
@@ -44,8 +46,18 @@ struct SetupMarker {
 pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
     let marker_path = paths::setup_marker_path(app)?;
     let venv_python = paths::venv_python(app)?;
+    let requirements_lock = paths::requirements_lock_txt(app)?;
     let requirements = paths::requirements_txt(app)?;
+    let bundled_requirements_lock = paths::bundled_requirements_lock_txt(app)?;
     let bundled_requirements = paths::bundled_requirements_txt(app)?;
+    let requirements_base_lock = paths::requirements_base_lock_txt(app)?;
+    let requirements_base = paths::requirements_base_txt(app)?;
+    let requirements_qwen_lock = paths::requirements_qwen_lock_txt(app)?;
+    let requirements_qwen = paths::requirements_qwen_txt(app)?;
+    let bundled_requirements_base_lock = paths::bundled_requirements_base_lock_txt(app)?;
+    let bundled_requirements_base = paths::bundled_requirements_base_txt(app)?;
+    let bundled_requirements_qwen_lock = paths::bundled_requirements_qwen_lock_txt(app)?;
+    let bundled_requirements_qwen = paths::bundled_requirements_qwen_txt(app)?;
     let tts_source = paths::tts_source_dir(app)?;
     let bundled_source = paths::bundled_source_dir(app)?;
 
@@ -84,12 +96,44 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
         });
     }
 
-    // Check 4: Has requirements.txt changed? (indicates app update)
-    // Compare bundled requirements hash against the marker's hash
-    let current_req_path = if bundled_requirements.exists() {
-        &bundled_requirements
+    // Check 4: Has requirement manifest set changed? (indicates app update)
+    let current_manifest_set = if bundled_requirements_lock.exists()
+        && bundled_requirements_base_lock.exists()
+        && bundled_requirements_qwen_lock.exists()
+    {
+        vec![
+            bundled_requirements_lock.clone(),
+            bundled_requirements_base_lock.clone(),
+            bundled_requirements_qwen_lock.clone(),
+        ]
+    } else if requirements_lock.exists()
+        && requirements_base_lock.exists()
+        && requirements_qwen_lock.exists()
+    {
+        vec![
+            requirements_lock.clone(),
+            requirements_base_lock.clone(),
+            requirements_qwen_lock.clone(),
+        ]
+    } else if bundled_requirements.exists()
+        && bundled_requirements_base.exists()
+        && bundled_requirements_qwen.exists()
+    {
+        vec![
+            bundled_requirements.clone(),
+            bundled_requirements_base.clone(),
+            bundled_requirements_qwen.clone(),
+        ]
+    } else if requirements.exists() && requirements_base.exists() && requirements_qwen.exists() {
+        vec![
+            requirements.clone(),
+            requirements_base.clone(),
+            requirements_qwen.clone(),
+        ]
+    } else if bundled_requirements.exists() {
+        vec![bundled_requirements.clone()]
     } else if requirements.exists() {
-        &requirements
+        vec![requirements.clone()]
     } else {
         // Can't verify — assume OK
         return Ok(SetupState::Ready {
@@ -98,7 +142,7 @@ pub fn check_environment(app: &tauri::AppHandle) -> Result<SetupState, String> {
         });
     };
 
-    let current_hash = setup::compute_file_sha256(current_req_path)?;
+    let current_hash = setup::compute_manifest_set_sha256(&current_manifest_set)?;
 
     if current_hash != marker.requirements_hash {
         println!(

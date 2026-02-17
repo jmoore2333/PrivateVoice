@@ -3,7 +3,7 @@
 # No longer builds a PyInstaller sidecar. Instead, bundles:
 #   - uv binary (Python package manager)
 #   - tts_server/ Python source
-#   - requirements.txt
+#   - requirements manifests (base/qwen/chatterbox)
 #
 # On first launch, the app uses uv to install Python + dependencies
 # into the user's app data directory (no admin required).
@@ -63,16 +63,28 @@ if (Test-Path $TtsServerSrc) {
     exit 1
 }
 
-# Copy requirements.txt
-$ReqSrc = Join-Path $ProjectRoot "python" | Join-Path -ChildPath "requirements.txt"
-$ReqDst = Join-Path $ResourcesDir "requirements.txt"
+# Copy requirements manifests
+$Manifests = @(
+    "requirements.txt",
+    "requirements.lock.txt",
+    "requirements.base.txt",
+    "requirements.base.lock.txt",
+    "requirements.qwen.txt",
+    "requirements.qwen.lock.txt",
+    "requirements.chatterbox.txt",
+    "requirements.chatterbox.lock.txt"
+)
 
-if (Test-Path $ReqSrc) {
-    Copy-Item $ReqSrc $ReqDst
-    Write-Host "Copied requirements.txt"
-} else {
-    Write-Error "python/requirements.txt not found"
-    exit 1
+foreach ($manifest in $Manifests) {
+    $src = Join-Path $ProjectRoot ("python\" + $manifest)
+    $dst = Join-Path $ResourcesDir $manifest
+    if (Test-Path $src) {
+        Copy-Item $src $dst
+        Write-Host "Copied $manifest"
+    } else {
+        Write-Error "python\$manifest not found"
+        exit 1
+    }
 }
 
 # Verify staged dependency manifest hash
@@ -123,6 +135,11 @@ if (Test-Path $UvExe) {
 }
 $TtsSrcSize = [math]::Round((Get-ChildItem $TtsServerDst -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB, 1)
 Write-Host "  tts_server/:   $TtsSrcSize MB"
+foreach ($manifest in $Manifests) {
+    $path = Join-Path $ResourcesDir $manifest
+    $lineCount = (Get-Content $path).Count
+    Write-Host "  $manifest: $lineCount lines"
+}
 Write-Host ""
 
 $BundleDir = Join-Path (Join-Path (Join-Path (Join-Path $ProjectRoot "src-tauri") "target") "release") "bundle"

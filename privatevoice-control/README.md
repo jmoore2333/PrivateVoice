@@ -50,13 +50,19 @@ Add to your `claude_desktop_config.json`:
 
 | Tool | Description |
 |------|-------------|
-| `app_launch_and_verify` | Launch PrivateVoice and wait for backend ready state |
+| `app_launch_and_verify` | Launch PrivateVoice and wait for backend ready state (optional `model_id` or `provider` + `model_key`) |
 | `app_get_status` | Check backend health, loaded model, and connection state |
+| `app_get_model_catalog` | Retrieve provider/model catalog (`/model-catalog`) for compatibility checks |
+| `app_get_model_status` | Retrieve provider-aware model status (`/model-status`) |
 | `app_trigger_action` | Trigger TTS generation or backend actions via HTTP API |
 | `app_capture_view` | Take a native screenshot of the PrivateVoice window |
 | `app_listen_audio` | Capture system audio output to a WAV file |
 | `verify_speech_accuracy` | Transcribe audio via mlx-whisper and compute Word Error Rate |
 | `app_shutdown` | Gracefully shut down the app |
+
+`app_trigger_action` supports both legacy actions and provider-aware actions:
+- Legacy: `generate_custom_voice`, `generate_voice_clone`, `generate_voice_design`, `load_model`, `unload_model`
+- Provider-aware: `generate_speech`, `load_provider_model`, `get_model_catalog`, `get_model_status`
 
 ### Whisper Models for Speech Verification
 

@@ -1,0 +1,8 @@
+# uv release archive checksums
+# Format: <uv_version> <archive_name> <sha256>
+0.6.6 uv-aarch64-apple-darwin.tar.gz d0fb047593122746c7529960f8efd5d7d10d2cb230302f71158e9765ad37727b
+0.6.6 uv-x86_64-apple-darwin.tar.gz c584b85e81df8d8ae8142876b80ae977e41c6bba14c57cc1061b6a87f361ad2e
+0.6.6 uv-aarch64-unknown-linux-gnu.tar.gz 37a543598cdb7d8fc9b74e6b1fe1fdf8b9a279c6137c7ff8396a88f69ec7a43c
+0.6.6 uv-x86_64-unknown-linux-gnu.tar.gz 4c3426c4919d9f44633ab9884827fa1ad64ad8d993516d636eb955a3835c4a8c
+0.6.6 uv-aarch64-pc-windows-msvc.zip 6bb6d5a28e8a181fd5b0046778b97a75c3ec1c5117a058e1961e0f6df9ee2925
+0.6.6 uv-x86_64-pc-windows-msvc.zip 72d7866fac1a9f5e895ec632a0b8a98ea59627cb2c3b8e68af4fec899ee4b43b

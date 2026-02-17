@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 import tempfile
 
@@ -42,6 +43,11 @@ class TTSClient:
             r = await c.get("/model-status")
             return r.json()
 
+    async def get_model_catalog(self) -> dict:
+        async with self._client() as c:
+            r = await c.get("/model-catalog")
+            return r.json()
+
     async def get_system_info(self) -> dict:
         async with self._client() as c:
             r = await c.get("/system-info")
@@ -68,9 +74,25 @@ class TTSClient:
     # Model management
     # ------------------------------------------------------------------
 
-    async def load_model(self, model_id: str) -> dict:
+    async def load_model(
+        self,
+        model_id: str | None = None,
+        provider: str | None = None,
+        model_key: str | None = None,
+    ) -> dict:
+        payload: dict[str, str] = {}
+        if model_id:
+            payload["model_id"] = model_id
+        if provider:
+            payload["provider"] = provider
+        if model_key:
+            payload["model_key"] = model_key
+
+        if not payload:
+            return {"error": "Provide model_id or provider/model_key."}
+
         async with self._client() as c:
-            r = await c.post("/load-model", json={"model_id": model_id})
+            r = await c.post("/load-model", json=payload)
             return r.json()
 
     async def unload_model(self) -> dict:
@@ -154,6 +176,44 @@ class TTSClient:
 
         return await self._generate("/generate/voice-design", payload)
 
+    async def generate_speech(self, params: dict) -> dict:
+        mode = params.get("mode")
+        text = params.get("text")
+        if not mode:
+            return {"error": "Parameter 'mode' is required."}
+        if not text:
+            return {"error": "Parameter 'text' is required."}
+
+        payload = {
+            "mode": mode,
+            "provider": params.get("provider"),
+            "model_key": params.get("model_key"),
+            "text": text,
+            "language": params.get("language", "english"),
+            "speaker": params.get("speaker", "serena"),
+            "instruction": params.get("instruction", ""),
+            "voice_description": params.get("voice_description", ""),
+            "reference_text": params.get("reference_text", ""),
+            "x_vector_only_mode": params.get("x_vector_only_mode", False),
+            "format": params.get("format", "wav"),
+            "mp3_bitrate": params.get("mp3_bitrate", 192),
+            "stable_lead_in": params.get("stable_lead_in", True),
+            "seed": params.get("seed"),
+            "sample_rate": params.get("sample_rate"),
+            "bit_depth": params.get("bit_depth", 16),
+            "advanced": params.get("advanced", {}) or {},
+            "reference_audio_base64": None,
+        }
+
+        ref_audio_path = params.get("reference_audio")
+        if ref_audio_path:
+            if not os.path.exists(ref_audio_path):
+                return {"error": f"Reference audio not found: {ref_audio_path}"}
+            with open(ref_audio_path, "rb") as f:
+                payload["reference_audio_base64"] = base64.b64encode(f.read()).decode("ascii")
+
+        return await self._generate("/generate/speech", payload)
+
     # ------------------------------------------------------------------
     # Shutdown
     # ------------------------------------------------------------------
@@ -175,9 +235,21 @@ class TTSClient:
             "generate_custom_voice": self.generate_custom_voice,
             "generate_voice_clone": self.generate_voice_clone,
             "generate_voice_design": self.generate_voice_design,
-            "load_model": lambda p: self.load_model(p.get("model_id", "")),
+            "generate_speech": self.generate_speech,
+            "load_model": lambda p: self.load_model(
+                model_id=p.get("model_id"),
+                provider=p.get("provider"),
+                model_key=p.get("model_key"),
+            ),
+            "load_provider_model": lambda p: self.load_model(
+                provider=p.get("provider"),
+                model_key=p.get("model_key"),
+                model_id=p.get("model_id"),
+            ),
             "unload_model": lambda _: self.unload_model(),
             "get_speakers": lambda _: self.get_speakers(),
+            "get_model_status": lambda _: self.get_model_status(),
+            "get_model_catalog": lambda _: self.get_model_catalog(),
             "get_system_info": lambda _: self.get_system_info(),
         }
 

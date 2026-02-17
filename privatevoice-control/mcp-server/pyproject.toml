@@ -11,6 +11,11 @@ dependencies = [
     "jiwer>=3.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
 [project.scripts]
 privatevoice-mcp = "privatevoice_mcp.server:main"
 

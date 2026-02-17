@@ -11,7 +11,7 @@ Authentication: In production, requests require `X-API-Key` (the app injects thi
 | `/health` | GET | `{status, version}` | Startup polling |
 | `/startup-status` | GET | `{phase, message, progress}` | StartupScreen |
 | `/download-progress` | GET | `{status, file_name, bytes_downloaded, bytes_total, speed_mbps, eta}` | DownloadProgress.svelte |
-| `/model-status` | GET | `{loaded, model_id, device, memory}` | Model status polling |
+| `/model-status` | GET | `{loaded, model_id, device, memory, provider?, model_key?, capabilities?, languages?, display_name?}` | Model status polling |
 | `/memory-check/{model_id}` | GET | `{required_gb, available_gb, sufficient, warning}` | Pre-load memory check |
 
 `/memory-check/{model_id}` validates model IDs and returns HTTP 400 for unknown IDs.
@@ -35,13 +35,15 @@ Authentication: In production, requests require `X-API-Key` (the app injects thi
 
 | Endpoint | Method | Request | Response | Notes |
 |---|---|---|---|---|
-| `/load-model` | POST | `{model_id}` | `{status, model_id}` | Runs in background thread (asyncio.to_thread). Validates model ID — returns 400 for unknown IDs. |
+| `/model-catalog` | GET | — | `[{provider, model_key, legacy_model_id?, display_name, capabilities[], languages[], description?, advanced_controls[], size_gb?}]` | Provider/model capability metadata |
+| `/load-model` | POST | Legacy: `{model_id}` or provider-aware: `{provider, model_key}` | `{status, provider, model_key, model_id, display_name}` | Runs in background thread (asyncio.to_thread). Validates selection and compatibility. |
 | `/unload-model` | POST | — | `{status}` | Frees GPU memory |
 
 ## Generation
 
 | Endpoint | Method | Request | Response | Notes |
 |---|---|---|---|---|
+| `/generate/speech` | POST | JSON `{mode, text, provider?, model_key?, format?, mp3_bitrate?, seed?, sample_rate?, bit_depth?, params?, reference_audio_base64?, advanced?}` | audio bytes | Normalized provider-aware generation route |
 | `/generate/custom-voice` | POST | JSON `{text, speaker, instruction, language, format, mp3_bitrate, stable_lead_in, seed?, sample_rate?, bit_depth?}` | audio bytes | CustomVoice mode |
 | `/generate/voice-clone` | POST | multipart `{text, reference_text, reference_audio, x_vector_only_mode, language, format, mp3_bitrate, seed?, sample_rate?, bit_depth?}` | audio bytes | Base model required |
 | `/generate/voice-design` | POST | JSON `{text, voice_description, language, format, mp3_bitrate, stable_lead_in, seed?, sample_rate?, bit_depth?}` | audio bytes | VoiceDesign model required |
@@ -59,6 +61,12 @@ When format is WAV, `sample_rate` is optional (allowed: 8000, 16000, 22050, 2400
 - **400** — Client error: empty text, text exceeds 2000 chars, unsupported sample rate/bit depth, incompatible model type, invalid mode/model/input
 - **499** — Generation was cancelled via `/cancel-generation`
 - **500** — Server error: inference failure, model not loaded
+
+Provider-aware errors may return structured `detail` payloads with machine-readable codes:
+- `incompatible_model_mode`
+- `provider_runtime_missing`
+- `provider_feature_unsupported`
+- `invalid_provider_params`
 
 ## Generation Control
 

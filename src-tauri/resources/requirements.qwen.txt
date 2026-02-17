@@ -1,0 +1,15 @@
+# Core ML/AI for Qwen provider
+torch>=2.1.0
+transformers>=4.40.0
+accelerate>=0.26.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
+
+# Qwen3-TTS
+qwen-tts>=0.0.5
+
+# Audio processing
+soundfile>=0.12.0
+librosa>=0.10.0
+numpy>=1.24.0
+lameenc>=1.7.0

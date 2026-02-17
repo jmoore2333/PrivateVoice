@@ -11,12 +11,18 @@ from typing import Any, Optional
 
 import torch
 
+from .model_registry import (
+    TRANSLATION_MODEL_SPECS,
+    ensure_required_files,
+    verify_snapshot_hashes,
+)
+
 logger = logging.getLogger("tts_server")
 
 
 TRANSLATION_MODELS = {
     "nllb-600m": {
-        "model_id": "facebook/nllb-200-distilled-600M",
+        "model_id": TRANSLATION_MODEL_SPECS["nllb-600m"].repo_id,
         "label": "NLLB Distilled 600M",
         "parameters": "600M",
         "download_size_mb": 1300,
@@ -140,7 +146,8 @@ class LocalTranslator:
 
     def load(self, model_key: Optional[str] = None) -> None:
         resolved_model_key = _normalize_model_key(model_key or self.model_key)
-        resolved_model_id = TRANSLATION_MODELS[resolved_model_key]["model_id"]
+        model_spec = TRANSLATION_MODEL_SPECS[resolved_model_key]
+        resolved_model_id = model_spec.repo_id
 
         if self._loaded and self.model_id == resolved_model_id:
             return
@@ -153,11 +160,20 @@ class LocalTranslator:
                 self._release_model()
                 gc.collect()
 
+            from huggingface_hub import snapshot_download
             from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
             logger.info("Loading translation model: %s", resolved_model_id)
-            self._tokenizer = AutoTokenizer.from_pretrained(resolved_model_id)
-            self._model = AutoModelForSeq2SeqLM.from_pretrained(resolved_model_id)
+            local_path = snapshot_download(
+                repo_id=resolved_model_id,
+                revision=model_spec.revision,
+                allow_patterns=list(model_spec.required_files),
+            )
+            ensure_required_files(local_path, model_spec.required_files)
+            verify_snapshot_hashes(local_path, model_spec.expected_sha256)
+
+            self._tokenizer = AutoTokenizer.from_pretrained(local_path)
+            self._model = AutoModelForSeq2SeqLM.from_pretrained(local_path)
             self._model.eval()
             self.model_key = resolved_model_key
             self.model_id = resolved_model_id

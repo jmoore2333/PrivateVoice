@@ -13,11 +13,36 @@ export interface ModelStatus {
   loaded: boolean;
   model_id: string | null;
   device: string | null;
+  provider?: "qwen3" | "chatterbox" | null;
+  model_key?: string | null;
+  capabilities?: string[];
+  languages?: string[];
+  display_name?: string | null;
   memory: {
     device: string;
     total_gb: number;
     available_gb: number;
   };
+}
+
+export type ProviderId = "qwen3" | "chatterbox";
+
+export interface ModelCatalogEntry {
+  provider: ProviderId;
+  model_key: string;
+  legacy_model_id: string | null;
+  display_name: string;
+  capabilities: string[];
+  languages: string[];
+  description: string;
+  advanced_controls: string[];
+  size_gb?: number | null;
+}
+
+export interface ProviderLoadModelRequest {
+  provider?: ProviderId;
+  model_key?: string;
+  model_id?: string;
 }
 
 export interface StartupStatus {
@@ -80,6 +105,27 @@ export interface VoiceDesignRequest {
   seed?: number | null;
   sample_rate?: number | null;
   bit_depth?: number;
+}
+
+export interface GenerateSpeechRequest {
+  mode: "custom-voice" | "voice-clone" | "voice-design";
+  provider?: ProviderId;
+  model_key?: string;
+  text: string;
+  language?: string;
+  speaker?: string;
+  instruction?: string;
+  voice_description?: string;
+  reference_text?: string;
+  x_vector_only_mode?: boolean;
+  reference_audio_base64?: string | null;
+  format?: string;
+  mp3_bitrate?: number;
+  stable_lead_in?: boolean;
+  seed?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number;
+  advanced?: Record<string, unknown>;
 }
 
 export interface VoiceCloneRequestOptions {
@@ -289,6 +335,13 @@ class TTSClient {
     return res.json();
   }
 
+  async getModelCatalog(): Promise<ModelCatalogEntry[]> {
+    const res = await this.request("/model-catalog");
+    if (!res.ok) throw new Error("Failed to get model catalog");
+    const data = await res.json() as { models?: ModelCatalogEntry[] };
+    return data.models ?? [];
+  }
+
   // ============================================================================
   // Debug & System Info
   // ============================================================================
@@ -336,11 +389,15 @@ class TTSClient {
   // Model Management
   // ============================================================================
 
-  async loadModel(modelId: string = "0.6b"): Promise<void> {
+  async loadModel(model: string | ProviderLoadModelRequest = "0.6b"): Promise<void> {
+    const payload: ProviderLoadModelRequest =
+      typeof model === "string"
+        ? { model_id: model }
+        : model;
     const res = await this.request("/load-model", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model_id: modelId }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       throw new Error(await this.readErrorMessage(res, "Failed to load model"));
@@ -417,6 +474,24 @@ class TTSClient {
     const signal = this.createGenerationSignal();
     try {
       const res = await this.request("/generate/voice-design", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal,
+      });
+      if (!res.ok) {
+        throw new Error(await this.readErrorMessage(res, "Failed to generate audio"));
+      }
+      return res.blob();
+    } finally {
+      this._abortController = null;
+    }
+  }
+
+  async generateSpeech(request: GenerateSpeechRequest): Promise<Blob> {
+    const signal = this.createGenerationSignal();
+    try {
+      const res = await this.request("/generate/speech", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
