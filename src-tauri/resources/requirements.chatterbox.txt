@@ -1,2 +1,4 @@
 # Chatterbox provider runtime (installed on-demand)
 chatterbox-tts>=0.1.6
+# Needed for perth's pkg_resources import path (removed in setuptools>=81)
+setuptools<81

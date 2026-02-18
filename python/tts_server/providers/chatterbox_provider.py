@@ -79,12 +79,14 @@ class ChatterboxProvider(TTSProvider):
         except ProviderError:
             raise
         except Exception as exc:
-            # Most common cause is missing dependency/runtime install.
+            # Most common causes are missing runtime dependencies or
+            # incompatible local package state.
             raise ProviderError(
                 "provider_runtime_missing",
                 (
-                    "Chatterbox runtime is not available. Install provider dependencies "
-                    "from Settings, then retry."
+                    "Chatterbox runtime is not available or is incompatible in this "
+                    "environment. Run Environment > Full rebuild, restart PrivateVoice, "
+                    "and retry."
                 ),
                 status_code=400,
                 extra={"provider": self.provider_id, "detail": str(exc)},
