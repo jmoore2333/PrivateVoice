@@ -1,4 +1,9 @@
-import { ttsClient, type BatchProgress, type BatchRequest } from "$lib/api/ttsClient";
+import {
+  ttsClient,
+  isCancellation,
+  type BatchProgress,
+  type BatchRequest,
+} from "$lib/api/ttsClient";
 import { settingsStore } from "./settingsStore.svelte";
 
 export interface BatchFile {
@@ -28,6 +33,25 @@ const EMPTY_PROGRESS: BatchProgress = {
   status: "idle",
 };
 
+const POLL_INTERVAL_MS = 500;
+
+/**
+ * How long the server may report zero progress before the client gives up.
+ *
+ * Issue #13: a fixed total budget cannot suit both a 2-item batch and a 50-item
+ * one. Liveness is the right signal — the progress poll already runs, so a
+ * batch is healthy for as long as `completed` or `current_item` keeps moving.
+ *
+ * Deliberately generous. The server streams nothing until the whole ZIP is
+ * built, so tripping this discards every item already generated — a false
+ * positive is destructive, while a late true positive merely delays an outcome
+ * the user is going to get anyway. The window must therefore clear the SLOWEST
+ * plausible single item, not the average: the issue reporter saw ~5 minutes per
+ * item, and a full 2,000-character item on a CPU-only machine can run several
+ * times that.
+ */
+export const BATCH_STALL_TIMEOUT_MS = 30 * 60 * 1000;
+
 function createBatchStore() {
   let state = $state<BatchState>({
     files: [],
@@ -39,6 +63,9 @@ function createBatchStore() {
   });
 
   let progressTimer: ReturnType<typeof setInterval> | null = null;
+  let lastProgressAt = 0;
+  let lastProgressKey = "";
+  let stalledOut = false;
 
   function makeId(): string {
     if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -108,16 +135,70 @@ function createBatchStore() {
     }
   }
 
+  /** Identity of a progress snapshot — changes whenever the server moves forward. */
+  function progressKey(progress: BatchProgress): string {
+    return `${progress.completed}|${progress.current_item}|${progress.status}`;
+  }
+
+  function handleStall() {
+    stalledOut = true;
+    // Abort FIRST. abortGeneration is local and synchronous, so it guarantees
+    // generateBatch rejects and the `finally` runs (clearing this interval).
+    // Awaiting the network call first would mean a hung /cancel-generation
+    // leaves the batch pending forever — the exact hang this watchdog exists
+    // to end. The two are independent requests; cancelBatch is best-effort
+    // courtesy so the server stops burning CPU (issue #13: 25 minutes of it).
+    ttsClient.abortGeneration();
+    void ttsClient.cancelBatch().catch(() => {
+      // Best-effort — we are giving up either way.
+    });
+  }
+
   function startPolling() {
     stopPolling();
-    progressTimer = setInterval(async () => {
-      try {
-        const progress = await ttsClient.getBatchProgress();
-        state.progress = progress;
-      } catch {
-        // Ignore polling failures during generation.
+    lastProgressAt = Date.now();
+    lastProgressKey = "";
+    stalledOut = false;
+    let pollInFlight = false;
+
+    progressTimer = setInterval(() => {
+      if (stalledOut) return;
+
+      // Staleness is judged on the CLIENT tick, never behind an await. A server
+      // that accepts connections but never answers (generation runs via
+      // asyncio.to_thread, so a native hang blocks the event loop) would leave
+      // an awaited poll pending forever — and with no total timeout any more,
+      // the batch would hang indefinitely. The tick always fires; the poll is
+      // merely how we learn about progress.
+      if (Date.now() - lastProgressAt >= BATCH_STALL_TIMEOUT_MS) {
+        handleStall();
+        return;
       }
-    }, 500);
+
+      // Never stack polls against an unresponsive server.
+      if (pollInFlight) return;
+      pollInFlight = true;
+
+      void ttsClient
+        .getBatchProgress()
+        .then((progress) => {
+          state.progress = progress;
+          const key = progressKey(progress);
+          if (key !== lastProgressKey) {
+            lastProgressKey = key;
+            lastProgressAt = Date.now();
+          }
+          // A poll that succeeds but reports no movement is NOT progress:
+          // lastProgressAt stays put and the deadline keeps running.
+        })
+        .catch(() => {
+          // A failed poll is not progress either. Deliberately does not touch
+          // lastProgressAt, so a server that stops answering still stalls out.
+        })
+        .finally(() => {
+          pollInFlight = false;
+        });
+    }, POLL_INTERVAL_MS);
   }
 
   async function startBatch(request: BatchRequest) {
@@ -153,10 +234,23 @@ function createBatchStore() {
         };
       }
     } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") {
+      if (stalledOut) {
+        const minutes = Math.round(BATCH_STALL_TIMEOUT_MS / 60000);
+        // Do NOT imply the completed items were kept. The server builds the ZIP
+        // only after the last item, so stopping early discards all of them —
+        // saying "N of M finished" would read as N files delivered.
+        state.error =
+          `Batch stopped: the server reported no progress for ${minutes} minutes ` +
+          `(it had reached ${state.progress.completed} of ${state.progress.total}). ` +
+          `No files were saved — a batch is only downloadable once every item finishes. ` +
+          `Try a smaller batch or shorter files.`;
+        state.progress = { ...state.progress, status: "error" };
+      } else if (isCancellation(e)) {
         state.progress = { ...state.progress, status: "cancelled" };
       } else {
-        state.error = e instanceof Error ? e.message : "Batch generation failed";
+        // Issue #13: an abort reason that was a plain string fell through both
+        // branches and produced a bare "Batch generation failed" with no cause.
+        state.error = e instanceof Error ? e.message : String(e) || "Batch generation failed";
         state.progress = { ...state.progress, status: "error" };
       }
     } finally {
