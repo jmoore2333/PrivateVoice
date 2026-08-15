@@ -28,6 +28,12 @@
     isGenerating: boolean;
     elapsedTime?: number;
     modelSupported?: boolean;
+    /**
+     * Batch mode reuses this panel for voice configuration only. The text to
+     * speak comes from the queued files and generation is driven by the batch
+     * controls, so the per-generation pieces are hidden (issue #13).
+     */
+    batchMode?: boolean;
     modelLoading?: boolean;
     recommendedModelLabel?: string;
     currentModelId?: string | null;
@@ -53,6 +59,7 @@
     isGenerating,
     elapsedTime = 0,
     modelSupported = true,
+    batchMode = false,
     modelLoading = false,
     recommendedModelLabel = "0.6B Custom",
     currentModelId = null,
@@ -111,12 +118,14 @@
     </div>
   {/if}
 
-  <TextInput
-    bind:value={text}
-    onInput={onTextChange}
-    placeholder="Enter the text you want to generate as speech..."
-    maxLength={2000}
-  />
+  {#if !batchMode}
+    <TextInput
+      bind:value={text}
+      onInput={onTextChange}
+      placeholder="Enter the text you want to generate as speech..."
+      maxLength={2000}
+    />
+  {/if}
 
   <div class="grid grid-cols-2 gap-4">
     <LanguageSelector
@@ -127,7 +136,7 @@
     <div></div>
   </div>
 
-  {#if hasTranslation}
+  {#if hasTranslation && !batchMode}
     <div class="space-y-1">
       <button
         class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
@@ -209,12 +218,14 @@
     {onSeedChange}
   />
 
-  <!-- Generate Button -->
-  <button
-    class="w-full py-3 rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-    disabled={!text.trim() || isGenerating || modelLoading || !modelSupported}
-    onclick={onGenerate}
-  >
-    {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
-  </button>
+  {#if !batchMode}
+    <!-- Generate Button -->
+    <button
+      class="w-full py-3 rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      disabled={!text.trim() || isGenerating || modelLoading || !modelSupported}
+      onclick={onGenerate}
+    >
+      {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
+    </button>
+  {/if}
 </div>

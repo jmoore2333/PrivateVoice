@@ -14,6 +14,12 @@
     referenceAudioUrl: string | null;
     referenceAudioBlob: Blob | null;
     isGenerating: boolean;
+    /**
+     * Batch mode reuses this panel for voice configuration only. The text to
+     * speak comes from the queued files and generation is driven by the batch
+     * controls, so the per-generation pieces are hidden (issue #13).
+     */
+    batchMode?: boolean;
     elapsedTime?: number;
     hasWhisper: boolean;
     hasTranslation?: boolean;
@@ -49,6 +55,7 @@
     referenceAudioUrl,
     referenceAudioBlob,
     isGenerating,
+    batchMode = false,
     elapsedTime = 0,
     hasWhisper = false,
     hasTranslation = false,
@@ -240,36 +247,38 @@
 
   <hr class="border-[var(--color-border-subtle)]" />
 
-  <!-- Step 3: Text to generate -->
-  <div class="flex items-center gap-2 -mb-4">
-    <span class="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold {text.trim() ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]'}">3</span>
-    <span class="text-sm font-medium text-[var(--color-text-primary)]">Text to generate</span>
-  </div>
-
-  <TextInput
-    bind:value={text}
-    onInput={onTextChange}
-    label=""
-    placeholder="Enter the text you want the cloned voice to speak..."
-    maxLength={2000}
-  />
-
-  {#if canTranslateText}
-    <div class="space-y-1">
-      <button
-        class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
-        disabled={isTranslatingText || !text.trim() || language === 'Auto'}
-        onclick={onTranslateText}
-      >
-        {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
-      </button>
-      {#if textTranslationError}
-        <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
-      {/if}
-      {#if language === 'Auto'}
-        <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
-      {/if}
+  {#if !batchMode}
+    <!-- Step 3: Text to generate -->
+    <div class="flex items-center gap-2 -mb-4">
+      <span class="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold {text.trim() ? 'bg-[var(--color-success)]/20 text-[var(--color-success)]' : 'bg-[var(--color-bg-hover)] text-[var(--color-text-muted)]'}">3</span>
+      <span class="text-sm font-medium text-[var(--color-text-primary)]">Text to generate</span>
     </div>
+
+    <TextInput
+      bind:value={text}
+      onInput={onTextChange}
+      label=""
+      placeholder="Enter the text you want the cloned voice to speak..."
+      maxLength={2000}
+    />
+
+    {#if canTranslateText}
+      <div class="space-y-1">
+        <button
+          class="text-xs text-[var(--color-accent)] hover:underline disabled:opacity-50 disabled:no-underline"
+          disabled={isTranslatingText || !text.trim() || language === 'Auto'}
+          onclick={onTranslateText}
+        >
+          {isTranslatingText ? 'Translating text...' : `Translate text to ${language}`}
+        </button>
+        {#if textTranslationError}
+          <p class="text-xs text-[var(--color-error)]">{textTranslationError}</p>
+        {/if}
+        {#if language === 'Auto'}
+          <p class="text-xs text-[var(--color-text-muted)]">Select a target language to translate text.</p>
+        {/if}
+      </div>
+    {/if}
   {/if}
 
   <LanguageSelector
@@ -282,12 +291,14 @@
     {onSeedChange}
   />
 
-  <!-- Generate Button -->
-  <button
-    class="w-full py-3 rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-    disabled={!canGenerate || isGenerating || modelLoading}
-    onclick={onGenerate}
-  >
-    {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
-  </button>
+  {#if !batchMode}
+    <!-- Generate Button -->
+    <button
+      class="w-full py-3 rounded-lg bg-[var(--color-accent)] text-white font-medium hover:bg-[var(--color-accent-hover)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      disabled={!canGenerate || isGenerating || modelLoading}
+      onclick={onGenerate}
+    >
+      {isGenerating ? `Generating... ${elapsedTime.toFixed(1)}s` : 'Generate'}
+    </button>
+  {/if}
 </div>
