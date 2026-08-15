@@ -903,3 +903,45 @@ Run the real shell, not a browser — the library only persists under Tauri FS:
 3. Generate. Expect audio in the cloned voice.
 4. Library drawer → item menu → **Edit** → rename → confirm the new name shows in both the drawer and the Voice picker.
 5. Confirm a pre-existing legacy clone no longer appears under **Saved** but is still present in the Library drawer.
+
+---
+
+## Review Adjudication
+
+A clean-eyes review (fable subagent, independent context, verified against source)
+raised 3 blocking and 6 should-fix findings. Disposition:
+
+### Blocking
+
+| # | Finding | Disposition |
+|---|---|---|
+| B1 | Task 6 e2e cannot pass: `setupMocks` doesn't exist, missing `failFs: true` (the FS mock returns `undefined` so the localStorage seed is ignored), and the key assertion is unreachable in a browser context | **Accepted.** Caught independently before the review landed; tests were written against the real helpers with `failFs: true` and a reachable assertion. Revised again after B3 changed what is reachable. |
+| B2 | Task 2's TDD steps give false signals — `ttsStore.test.ts` has no shared model setup, so both tests would fail on the mode-support check before *and* after the fix | **Accepted for the plan text; did not materialise.** Each test wires its own `getModelStatus` + `checkServerHealth`. Verified empirically by stashing the guard: the test fails with exactly `Unknown speaker: 8f20a31f-ed04-4b85-ac66-d8d5ff03f258` and passes with it. |
+| B3 | The plan re-creates the bug's shape as a *silent* no-op: `hasReferenceAudio` was set even when the write threw, so an item could still advertise a voice it cannot deliver | **Accepted — this was the review's most valuable catch.** Fixed differently than recommended: rather than proceeding into Voice Clone with a missing reference, the flag is made *truthful* (set only on successful write, existence-checked on load, cleared for localStorage-restored items). The missing-blob path keeps an explicit notice and is now rare rather than routine. |
+
+### Should-fix
+
+| # | Finding | Disposition |
+|---|---|---|
+| S1 | `referenceAudioBlob` may be WebM/Opus; writing it as `{id}.ref.wav` breaks only *after* restart | **Accepted.** Caught independently — persists `ttsState.referenceAudio` (already WAV-converted). |
+| S2 | The library id still reaches `localSpeaker` through the bindable chain, so batch mode would send a uuid | **Accepted.** Caught independently — `VoiceSelector` assigns `value` for presets only. |
+| S3 | x-vector-only clones have no transcript; without persisting the flag, restoring one demands text the user never supplied | **Accepted.** Caught independently — `metadata.lowQualityMode` persisted and restored. |
+| S4 | `buildLibraryItem` also feeds Recent, so every unsaved clone take would be named "Voice 1" | **Accepted.** "Voice N" is applied at save time only. |
+| S5 | `LibraryItem` labels the clone action "Use in Custom Voice"; it now loads Voice Clone | **Accepted.** Relabelled. |
+| S6 | `referenceAudioUrl` has no consumer, yet `init()` preloaded every clone's reference into memory at startup | **Accepted.** Field and preload removed; the existence check that satisfies B3 replaced it without reading bytes. |
+
+### Design
+
+- **Mode switch is surprising** (raised by the review and independently by the maintainer while watching the demo). Custom Voice literally cannot render a non-preset voice, so the switch is unavoidable — but it was only explained *after* it happened. Saved entries now read **"Opens in Voice Clone"** before the click, and the empty state says why.
+- **Follow-up worth considering:** move saved voice profiles into Voice Clone as a first-class picker and drop the Saved tab from Custom Voice entirely. The tab's presence inside Custom Voice is the residual confusion; this fix makes it honest rather than removing the tension.
+
+### Found during verification, not in the review
+
+- Restored reference audio was wired into state but `AudioRecorder` kept its own waveform, so the panel looked empty while holding a valid reference. Fixed with a `restoredAudioUrl` prop.
+- `applyVoiceProfile` leaked one object URL per click; the previous preview is now revoked.
+
+### Knowingly not addressed
+
+- The Library drawer's **Use Voice** on a *legacy* or *Recent* clone still lands in Voice Clone without reference audio. The resulting error is now actionable ("Please upload a reference audio file") rather than an opaque uuid, and legacy items cannot be recovered (D4).
+- `LibraryItem`'s **Export** action is dead in the same way Edit was — `onExport` is never passed by the drawer. Out of scope for this issue.
+- Pre-existing and unchanged: concurrent `writeIndex` races, `{id}.wav` naming when the export format is mp3, and duplicate reference copies when several takes from one recording are saved.
