@@ -1,0 +1,6 @@
+# The dependency-integrity gate hashes python/requirements.txt and compares it
+# against a hash recorded on LF. A CRLF checkout on Windows changes the bytes
+# and the gate fails, so pin the manifest (and the scripts that read it) to LF.
+python/requirements.txt   text eol=lf
+python/requirements.sha256 text eol=lf
+*.sh                      text eol=lf
