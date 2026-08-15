@@ -404,11 +404,7 @@
     return {
       id: crypto.randomUUID(),
       type: isClone ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
-      // A clone is saved to be reused as a voice, so name it after the voice —
-      // not the sentence it happened to say. Renameable from the Library.
-      name: isClone
-        ? nextVoiceName()
-        : ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
+      name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
       audioUrl: ttsState.audioUrl!,
       createdAt: new Date(),
       metadata: {
@@ -449,8 +445,13 @@
         // referenceAudioBlob may still be WebM/Opus straight from the mic.
         const referenceBlob =
           ttsState.mode === 'voice-clone' ? (ttsState.referenceAudio ?? undefined) : undefined;
+        // A saved clone is kept to be reused as a voice, so name it after the
+        // voice — not the sentence it happened to say. Renameable from the
+        // Library. Applied only on save: Recent entries stay text-named so
+        // successive unsaved takes remain distinguishable.
+        const item = buildLibraryItem();
         const result = await libraryStore.saveToLibrary(
-          buildLibraryItem(),
+          referenceBlob ? { ...item, name: nextVoiceName() } : item,
           ttsState.audioBlob,
           referenceBlob
         );

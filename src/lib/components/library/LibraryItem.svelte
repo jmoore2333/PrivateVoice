@@ -160,7 +160,7 @@
               class="w-full px-3 py-2 text-left text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
               onclick={handleUse}
             >
-              Use in Custom Voice
+              Use in Voice Clone
             </button>
           {/if}
           <hr class="my-1 border-[var(--color-border-subtle)]" />

@@ -171,7 +171,7 @@ async function seedLibrary(page: Page, items: Array<{
   createdAt: string;
   comment?: string;
   tags?: string[];
-  metadata?: Record<string, string | boolean>;
+  metadata?: Record<string, string | boolean | undefined>;
 }>) {
   await page.addInitScript((serializedItems) => {
     localStorage.setItem('privatevoice-library', JSON.stringify({
@@ -457,7 +457,10 @@ test.describe('Issue #11 — saved voice in Custom Voice', () => {
     await expect(page.getByText(/Unknown speaker/)).toHaveCount(0);
   });
 
-  test('picking a saved voice never raises "Unknown speaker"', async ({ page }) => {
+  // An item must never advertise a voice it cannot deliver — that mismatch is
+  // the shape of the original bug. localStorage persists metadata but not blobs,
+  // so a stored hasReferenceAudio flag is cleared on load rather than trusted.
+  test('a stored reference flag with no retrievable audio is not offered', async ({ page }) => {
     await setupTauriMocks(page, { failFs: true });
     await setupApiMocks(page);
     await setupBypassOnboarding(page);
@@ -471,12 +474,9 @@ test.describe('Issue #11 — saved voice in Custom Voice', () => {
     await navigateAndWait(page);
 
     await page.locator('nav').getByRole('button', { name: 'Custom Voice' }).click();
-    await page.getByRole('button', { name: 'Saved (1)' }).click();
-    await page.getByText('Voice 1').click();
+    await page.getByRole('button', { name: 'Saved (0)' }).click();
 
-    // localStorage holds no blob, so this lands on the explicit "no stored
-    // reference audio" notice — never on the raw uuid error.
-    await expect(page.getByText(/no stored reference audio/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/No reusable voices yet/)).toBeVisible({ timeout: 5000 });
     await expect(page.getByText(/Unknown speaker/)).toHaveCount(0);
   });
 });

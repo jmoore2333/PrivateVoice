@@ -31,8 +31,6 @@ export interface LibraryItem {
   comment?: string;
   tags?: string[];
   metadata?: LibraryItemMetadata;
-  /** Object URL for the clone's reference audio. Never persisted to index.json. */
-  referenceAudioUrl?: string;
 }
 
 // Serialized form for index.json (no audioUrl, dates as ISO strings)
@@ -160,6 +158,18 @@ async function writeReferenceFile(id: string, blob: Blob): Promise<void> {
   });
 }
 
+/** Cheap existence check — used at load so `hasReferenceAudio` can't lie. */
+async function referenceFileExists(id: string): Promise<boolean> {
+  const fs = await getTauriFs();
+  if (!fs) return false;
+
+  try {
+    return await fs.exists(refFileName(id), { baseDir: fs.BaseDirectory.AppData });
+  } catch {
+    return false;
+  }
+}
+
 async function readReferenceBlob(id: string): Promise<Blob | null> {
   const fs = await getTauriFs();
   if (!fs) return null;
@@ -241,6 +251,11 @@ function createLibraryStore() {
           saved = (data.saved || []).map((item: StoredItem) => ({
             ...item,
             audioUrl: '', // Audio URLs don't survive restart in localStorage mode
+            // Neither does reference audio — localStorage holds no blobs — so the
+            // flag would claim a reusable voice that cannot be delivered.
+            metadata: item.metadata
+              ? { ...item.metadata, hasReferenceAudio: undefined }
+              : undefined,
             createdAt: new Date(item.createdAt),
           }));
         } catch (e) {
@@ -255,7 +270,7 @@ function createLibraryStore() {
     const storage = getStorage();
     if (storage) {
       const stripped: StoredItem[] = saved.map(
-        ({ audioUrl: _url, referenceAudioUrl: _ref, createdAt, ...rest }) => ({
+        ({ audioUrl: _url, createdAt, ...rest }) => ({
           ...rest,
           createdAt: createdAt.toISOString(),
         })
@@ -283,15 +298,19 @@ function createLibraryStore() {
       for (const stored of storedItems) {
         const audioUrl = await readAudioFile(stored.id);
         if (audioUrl) {
-          const referenceBlob = stored.metadata?.hasReferenceAudio
-            ? await readReferenceBlob(stored.id)
-            : null;
-          if (referenceBlob) referenceBlobs.set(stored.id, referenceBlob);
+          // Verify rather than trust: the flag lives in index.json but the bytes
+          // live on disk, and an item that claims a voice it can't deliver is
+          // exactly the failure this whole fix removes. Existence only — the
+          // blob itself is read lazily by getReferenceBlob().
+          const hasReference =
+            !!stored.metadata?.hasReferenceAudio && (await referenceFileExists(stored.id));
 
           loadedItems.push({
             ...stored,
             audioUrl,
-            referenceAudioUrl: referenceBlob ? URL.createObjectURL(referenceBlob) : undefined,
+            metadata: stored.metadata
+              ? { ...stored.metadata, hasReferenceAudio: hasReference || undefined }
+              : undefined,
             createdAt: new Date(stored.createdAt),
           });
         } else {
@@ -315,7 +334,7 @@ function createLibraryStore() {
   async function persist() {
     if (useTauriFs) {
       const index: StoredItem[] = saved.map(
-        ({ audioUrl: _url, referenceAudioUrl: _ref, createdAt, ...rest }) => ({
+        ({ audioUrl: _url, createdAt, ...rest }) => ({
           ...rest,
           createdAt: createdAt.toISOString(),
         })
@@ -332,6 +351,12 @@ function createLibraryStore() {
   return {
     get recent() { return recent; },
     get saved() { return saved; },
+
+    /** Re-read the persisted library from disk/localStorage. */
+    async reload() {
+      initialized = false;
+      await init();
+    },
     get maxRecent() { return maxRecent; },
     get initialized() { return initialized; },
 
@@ -372,21 +397,23 @@ function createLibraryStore() {
       }
 
       if (referenceBlob) {
-        referenceBlobs.set(item.id, referenceBlob);
+        // Only claim a reusable voice if the reference is actually retrievable:
+        // persisted to disk, or held in memory for the rest of this session.
+        let reusable = true;
         if (useTauriFs) {
           try {
             await writeReferenceFile(item.id, referenceBlob);
           } catch (e) {
-            // A missing reference only costs reusability — the clip itself saved
-            // fine, so don't fail the whole save over it.
+            // The clip itself saved fine — don't fail the whole save — but the
+            // voice is not reusable after restart, so don't advertise it as one.
             console.error(`Failed to save reference audio for ${item.id}:`, e);
+            reusable = false;
           }
         }
-        item = {
-          ...item,
-          referenceAudioUrl: URL.createObjectURL(referenceBlob),
-          metadata: { ...item.metadata, hasReferenceAudio: true },
-        };
+        referenceBlobs.set(item.id, referenceBlob);
+        if (reusable) {
+          item = { ...item, metadata: { ...item.metadata, hasReferenceAudio: true } };
+        }
       }
 
       saved = [item, ...saved];
@@ -409,9 +436,6 @@ function createLibraryStore() {
       const item = saved.find(i => i.id === id);
       if (item?.audioUrl?.startsWith('blob:')) {
         URL.revokeObjectURL(item.audioUrl);
-      }
-      if (item?.referenceAudioUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(item.referenceAudioUrl);
       }
       referenceBlobs.delete(id);
       if (useTauriFs) {
@@ -442,9 +466,6 @@ function createLibraryStore() {
       for (const item of [...recent, ...saved]) {
         if (item.audioUrl?.startsWith('blob:')) {
           URL.revokeObjectURL(item.audioUrl);
-        }
-        if (item.referenceAudioUrl?.startsWith('blob:')) {
-          URL.revokeObjectURL(item.referenceAudioUrl);
         }
       }
 

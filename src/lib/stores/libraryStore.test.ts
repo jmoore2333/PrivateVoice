@@ -326,7 +326,6 @@ describe('libraryStore reference audio', () => {
     expect(result.ok).toBe(true);
     const saved = libraryStore.saved.find(i => i.id === 'ref-1');
     expect(saved?.metadata?.hasReferenceAudio).toBe(true);
-    expect(saved?.referenceAudioUrl).toBeTruthy();
   });
 
   it('returns the stored reference blob for reuse', async () => {
@@ -372,15 +371,12 @@ describe('libraryStore reference audio', () => {
       undefined,
       makeBlob()
     );
-    const savedUrl = libraryStore.saved.find(i => i.id === 'ref-4')?.referenceAudioUrl;
-
     await libraryStore.removeFromLibrary('ref-4');
 
     expect(await libraryStore.getReferenceBlob('ref-4')).toBeNull();
-    expect(revokedUrls).toContain(savedUrl);
   });
 
-  it('never writes the reference object URL into persisted metadata', async () => {
+  it('keeps the object URL out of persisted metadata', async () => {
     await libraryStore.saveToLibrary(
       makeItem({ id: 'ref-5', type: 'clone' }),
       undefined,
@@ -388,9 +384,34 @@ describe('libraryStore reference audio', () => {
     );
 
     const stored = JSON.parse(localStorage.getItem('privatevoice-library') ?? '{}');
-    expect(stored.saved[0].referenceAudioUrl).toBeUndefined();
     expect(stored.saved[0].audioUrl).toBeUndefined();
     expect(stored.saved[0].metadata.hasReferenceAudio).toBe(true);
+  });
+
+  // Regression guard for the shape of the original bug: an item must never
+  // advertise a voice it cannot deliver. localStorage holds no blobs, so a
+  // restored item's flag is cleared no matter what the stored metadata claims.
+  it('clears the reusable flag for items restored from localStorage', async () => {
+    localStorage.setItem(
+      'privatevoice-library',
+      JSON.stringify({
+        saved: [{
+          id: 'restored-1',
+          type: 'clone',
+          name: 'Voice 1',
+          createdAt: '2026-08-15T00:00:00.000Z',
+          metadata: { referenceText: 'Testing.', hasReferenceAudio: true },
+        }],
+      })
+    );
+
+    await libraryStore.reload();
+
+    const restored = libraryStore.saved.find(i => i.id === 'restored-1');
+    expect(restored).toBeDefined();
+    expect(restored?.metadata?.hasReferenceAudio).toBeFalsy();
+    expect(restored?.metadata?.referenceText).toBe('Testing.');
+    expect(await libraryStore.getReferenceBlob('restored-1')).toBeNull();
   });
 });
 

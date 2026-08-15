@@ -88,15 +88,16 @@
           onclick={() => selectVoice(voice.id, false)}
         >
           <div class="font-medium text-sm text-[var(--color-text-primary)]">{voice.name}</div>
-          {#if voice.comment}
-            <div class="text-xs text-[var(--color-text-muted)] truncate">{voice.comment}</div>
-          {/if}
+          <!-- Custom Voice can only render the presets, so a saved voice moves
+               the app to Voice Clone. Say so before the click, not after. -->
+          <div class="text-xs text-[var(--color-accent)] mt-1">Opens in Voice Clone</div>
         </button>
       {/each}
     {:else}
       <div class="col-span-2 py-8 text-center text-[var(--color-text-muted)] text-sm">
-        No reusable voices yet. Clone a voice and save it — the reference audio
-        is stored so you can use the voice again.
+        No reusable voices yet. Clone a voice and save it — the reference audio is
+        stored so you can use the voice again. Saved voices open in Voice Clone,
+        the only mode that can render a voice other than the presets.
       </div>
     {/if}
   </div>

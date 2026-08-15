@@ -6,9 +6,15 @@
   interface Props {
     onRecordingComplete?: (blob: Blob, url: string) => void;
     onImport?: (file: File) => void;
+    /**
+     * Audio restored from outside the recorder (e.g. a saved voice profile).
+     * Without this the waveform stays blank even though the parent holds the
+     * audio, which reads as "no reference loaded".
+     */
+    restoredAudioUrl?: string | null;
   }
 
-  let { onRecordingComplete, onImport }: Props = $props();
+  let { onRecordingComplete, onImport, restoredAudioUrl = null }: Props = $props();
 
   let container: HTMLDivElement;
   let wavesurfer: WaveSurfer | null = null;
@@ -542,6 +548,15 @@
       onImport?.(file);
     }
   }
+
+  // Show audio the parent restored (saved voice profile) in the waveform.
+  $effect(() => {
+    const url = restoredAudioUrl;
+    if (!url || url === recordedUrl || !wavesurfer) return;
+    recordedUrl = url;
+    hasRecording = true;
+    wavesurfer.load(url);
+  });
 
   function clearRecording() {
     hasRecording = false;
