@@ -93,7 +93,9 @@
           features: 'Preset timbres (fast, lightweight)',
           languages: '10 languages',
           streaming: 'Yes',
-          instruction: 'Limited',
+          // Not "Limited": qwen_tts discards the instruction outright on this
+          // model (`if tts_model_size in "0b6": instruct = None`).
+          instruction: 'Ignored',
         },
         {
           model: 'Qwen3-TTS-12Hz-0.6B-Base',
@@ -205,6 +207,68 @@ Model mapping:
         { title: 'Describe the voice', text: 'Include age, gender, accent, emotion, pacing, and texture. The more specific you are, the closer the result.' },
         { title: 'Iterate quickly', text: 'Use short texts for fast iteration, then generate longer passages once the style is dialed in.' },
       ]
+    },
+    {
+      id: 'voice-controls',
+      title: 'What You Can Control (and What You Cannot)',
+      type: 'voice-guides',
+      subsections: [
+        {
+          title: 'There are no speed, pitch, or emphasis sliders',
+          text: 'Qwen3-TTS exposes no numeric parameters for rate, pitch, emphasis, or volume — the model has no such inputs. Prosody is controlled entirely through style instruction text. Ask for "speaking at an extremely slow pace" or "clear emphasis on key words" and the model interprets it.',
+        },
+        {
+          title: 'Style instructions work on two models only',
+          text: 'Instruction control is available on 1.7B CustomVoice and 1.7B VoiceDesign. The 0.6B CustomVoice model discards instructions entirely — it renders the speaker\'s default style no matter what you type. Voice Clone accepts no instructions on any model.',
+        },
+        {
+          title: 'Style preset chips',
+          text: 'In Custom Voice with the 1.7B Custom model loaded, one-click chips cover Happy, Sad, Angry, Whisper, Slow, Fast, Low pitch, Formal and Excited. These are the closest thing to speed and emphasis controls. They are hidden on 0.6B because that model would ignore them.',
+        },
+        {
+          title: 'Cloned voices cannot use Custom Voice controls',
+          text: 'A cloned voice reproduces the timbre of your reference recording and can only be rendered in Voice Clone mode, on a Base model. Custom Voice renders the nine preset speakers only. This is why picking a saved voice under Voice → Saved switches the app to Voice Clone: it is the only mode that can render a voice other than the presets. To change how a cloned voice performs, change the reference recording — a calmer or faster reference produces a calmer or faster clone.',
+        },
+        {
+          title: 'Seed',
+          text: 'Generation samples randomly, so the same text produces slightly different audio each run. Pin a seed to make a result reproducible, and reuse that seed to regenerate the same delivery.',
+        },
+      ],
+    },
+    {
+      id: 'batch-mode',
+      title: 'Batch Mode',
+      type: 'voice-guides',
+      subsections: [
+        {
+          title: 'Which settings a batch uses',
+          text: 'A batch applies your current voice configuration to every queued file: the mode, the loaded model, speaker and style instruction (Custom Voice), reference audio and transcript (Voice Clone), or voice description (Voice Design) — plus language, seed, and the export format, sample rate and bit depth from Settings. The "This batch will use" card above the file queue lists exactly what will be sent.',
+        },
+        {
+          title: 'Changing settings during batch mode',
+          text: 'The voice panel stays visible and editable while files are queued, so you can adjust the voice before starting. It locks while a batch is running — changing the voice mid-run would produce inconsistent output across files. Cancel, adjust, and start again.',
+        },
+        {
+          title: 'One voice per batch',
+          text: 'Every file in a batch is rendered with the same voice. To use different voices, run one batch per voice.',
+        },
+        {
+          title: 'File size limit',
+          text: 'Each file must be 2,000 characters or fewer — roughly two minutes of speech, which is close to the model\'s maximum output length. Longer files are rejected when you add them, naming the file so you can split it.',
+        },
+        {
+          title: 'A batch is all-or-nothing',
+          text: 'Results are packaged into a single ZIP once the last file finishes, so nothing is saved until the whole batch completes. Cancelling partway through, or stopping the app, discards the items generated so far. For a long run, prefer several smaller batches over one large one.',
+        },
+        {
+          title: 'How long a batch takes',
+          text: 'Time scales with the number of files. A single item takes seconds on a GPU but several minutes on a CPU-only machine, so a large batch can run for hours. Progress shows the current file and completed count. There is no overall time limit — a batch is considered healthy for as long as it keeps advancing.',
+        },
+        {
+          title: 'Red rows in the Debug console',
+          text: 'The Python machine-learning libraries write ordinary status messages to the error stream. These are informational, not failures — a batch that reports completed succeeded even if the Debug console showed warnings while it ran.',
+        },
+      ],
     },
     {
       id: 'examples',
