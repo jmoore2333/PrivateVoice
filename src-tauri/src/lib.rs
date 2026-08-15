@@ -71,16 +71,82 @@ impl Drop for SidecarState {
     }
 }
 
-fn parse_log_level(line: &str) -> String {
-    if line.contains("ERROR") || line.contains("error") {
-        "ERROR".to_string()
-    } else if line.contains("WARNING") || line.contains("warning") || line.contains("WARN") {
+/// Classify a sidecar log line into a severity level.
+///
+/// stderr is NOT a severity signal. Python's `transformers` and `uvicorn` both
+/// write ordinary warnings and startup banners there, and issue #13 showed a
+/// Debug console full of red rows that were really benign `transformers`
+/// output. So stderr is classified by content like stdout; only its *default*
+/// differs (WARNING rather than INFO) so unrecognised stderr stays visible
+/// without reading as failure.
+fn classify_log_line(line: &str, is_stderr: bool) -> String {
+    // Explicit level tokens win on either stream. Uppercase-only, and bounded
+    // by a non-alphanumeric neighbour, so "errorless" is not an error.
+    if contains_token(line, "CRITICAL")
+        || contains_token(line, "ERROR")
+        || line.starts_with("Traceback")
+        || is_python_exception_line(line)
+    {
+        return "ERROR".to_string();
+    }
+    if contains_token(line, "WARNING") || contains_token(line, "WARN") {
+        return "WARNING".to_string();
+    }
+    if contains_token(line, "DEBUG") {
+        return "DEBUG".to_string();
+    }
+    if contains_token(line, "INFO") {
+        return "INFO".to_string();
+    }
+
+    if is_stderr {
         "WARNING".to_string()
-    } else if line.contains("DEBUG") || line.contains("debug") {
-        "DEBUG".to_string()
     } else {
         "INFO".to_string()
     }
+}
+
+/// True for the final line of a Python traceback, e.g. `ValueError: boom`.
+///
+/// Only the `Traceback (most recent call last):` header is recognisable by
+/// prefix; the line that actually names the failure carries no level token, so
+/// without this a crash would render as a warning while its header rendered
+/// red. Deliberately strict: the line must START with an `*Error`/`*Exception`
+/// identifier followed by a colon, so prose merely mentioning an error, a URL,
+/// or a Windows path is unaffected.
+fn is_python_exception_line(line: &str) -> bool {
+    let Some((head, _)) = line.split_once(':') else {
+        return false;
+    };
+    if head.is_empty() || head.len() > 64 {
+        return false;
+    }
+    // Allow dotted paths such as `requests.exceptions.HTTPError`.
+    if !head
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    {
+        return false;
+    }
+    let name = head.rsplit('.').next().unwrap_or(head);
+    name.ends_with("Error") || name.ends_with("Exception")
+}
+
+/// True when `token` appears in `line` as a standalone word.
+fn contains_token(line: &str, token: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut from = 0usize;
+    while let Some(rel) = line[from..].find(token) {
+        let start = from + rel;
+        let end = start + token.len();
+        let before_ok = start == 0 || !bytes[start - 1].is_ascii_alphanumeric();
+        let after_ok = end >= bytes.len() || !bytes[end].is_ascii_alphanumeric();
+        if before_ok && after_ok {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
 }
 
 fn get_timestamp() -> String {
@@ -285,7 +351,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 /// Process a stdout line: emit log event, buffer it, and detect startup phases.
 fn process_stdout_line(app: &tauri::AppHandle, line: &str) {
     let entry = LogEntry {
-        level: parse_log_level(line),
+        level: classify_log_line(line, false),
         message: line.to_string(),
         timestamp: get_timestamp(),
     };
@@ -352,7 +418,7 @@ fn process_stdout_line(app: &tauri::AppHandle, line: &str) {
 /// must run here too (not just on stdout).
 fn process_stderr_line(app: &tauri::AppHandle, line: &str) {
     let entry = LogEntry {
-        level: "ERROR".to_string(),
+        level: classify_log_line(line, true),
         message: line.to_string(),
         timestamp: get_timestamp(),
     };
@@ -951,4 +1017,91 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_log_line;
+
+    #[test]
+    fn stderr_warnings_are_not_errors() {
+        // The exact line from issue #13's screenshot, emitted once per generated item.
+        let line = "Setting `pad_token_id` to `eos_token_id`:2150 for open-end generation.";
+        assert_eq!(classify_log_line(line, true), "WARNING");
+    }
+
+    #[test]
+    fn stderr_defaults_to_warning_not_error() {
+        assert_eq!(classify_log_line("some unremarkable stderr chatter", true), "WARNING");
+    }
+
+    #[test]
+    fn stderr_real_errors_are_still_errors() {
+        assert_eq!(classify_log_line("ERROR: model failed to load", true), "ERROR");
+        assert_eq!(classify_log_line("Traceback (most recent call last):", true), "ERROR");
+    }
+
+    #[test]
+    fn uvicorn_startup_on_stderr_is_info() {
+        assert_eq!(
+            classify_log_line("INFO:     Uvicorn running on http://127.0.0.1:8765", true),
+            "INFO"
+        );
+        assert_eq!(classify_log_line("INFO:     Application startup complete.", true), "INFO");
+    }
+
+    #[test]
+    fn stdout_still_defaults_to_info() {
+        assert_eq!(classify_log_line("Model loaded successfully on mps", false), "INFO");
+    }
+
+    #[test]
+    fn explicit_levels_win_on_both_streams() {
+        assert_eq!(classify_log_line("[10:40:20] WARNING - low memory", false), "WARNING");
+        assert_eq!(classify_log_line("[10:40:20] ERROR - boom", false), "ERROR");
+        assert_eq!(classify_log_line("[10:40:20] DEBUG - noisy", false), "DEBUG");
+    }
+
+    #[test]
+    fn substring_matches_do_not_false_positive() {
+        // "error" inside a longer word must not promote the line to ERROR.
+        assert_eq!(
+            classify_log_line("[10:40:20] INFO - errorless run completed", false),
+            "INFO"
+        );
+        // "ERRORS" is a different word and must not match the ERROR token.
+        assert_eq!(classify_log_line("ERRORS everywhere", true), "WARNING");
+    }
+
+    #[test]
+    fn python_exception_lines_are_errors() {
+        // A traceback's last line carries the actual failure and has no level
+        // token. Without this, only the "Traceback" header would be red and the
+        // exception itself would render as a warning.
+        assert_eq!(classify_log_line("ValueError: Unknown speaker: 3f2a-uuid", true), "ERROR");
+        assert_eq!(classify_log_line("RuntimeError: Model not loaded", true), "ERROR");
+        assert_eq!(classify_log_line("requests.exceptions.HTTPError: 503", true), "ERROR");
+        assert_eq!(
+            classify_log_line("  File \"main.py\", line 42, in generate_batch", true),
+            "WARNING"
+        );
+    }
+
+    #[test]
+    fn prose_and_paths_are_not_promoted_to_errors() {
+        // is_python_exception_line must not fire on ordinary colon-bearing text.
+        assert_eq!(classify_log_line("Note: an error may occur later", true), "WARNING");
+        assert_eq!(classify_log_line("https://huggingface.co/Qwen", true), "WARNING");
+        assert_eq!(classify_log_line("C:\\Users\\x\\model.safetensors loaded", true), "WARNING");
+    }
+
+    #[test]
+    fn multibyte_lines_do_not_panic() {
+        // contains_token indexes bytes around a match; a non-ASCII neighbour
+        // must not cause a slice on a non-char-boundary.
+        assert_eq!(classify_log_line("日本語ERROR", true), "ERROR");
+        assert_eq!(classify_log_line("émoji ERROR here", true), "ERROR");
+        assert_eq!(classify_log_line("🎉 INFO 🎉", false), "INFO");
+        assert_eq!(classify_log_line("", true), "WARNING");
+    }
 }
