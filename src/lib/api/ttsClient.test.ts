@@ -1046,3 +1046,126 @@ describe('shutdown', () => {
     await expect(ttsClient.shutdown()).rejects.toThrow('Connection refused');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Abort reasons (issue #13)
+// ---------------------------------------------------------------------------
+
+/** A fetch that never settles until its signal aborts, like a long generation. */
+function hangingFetch(onAbort?: () => void) {
+  return (_url: unknown, init?: RequestInit) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      signal?.addEventListener(
+        'abort',
+        () => {
+          onAbort?.();
+          reject(signal.reason);
+        },
+        { once: true }
+      );
+    });
+}
+
+describe('abort reasons (issue #13)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('rejects a cancelled generation with a typed Error, not a bare string', async () => {
+    const { GenerationCancelledError, isCancellation } = await import('./ttsClient');
+
+    fetchMock.mockImplementationOnce(hangingFetch() as never);
+
+    const pending = ttsClient.generateCustomVoice({ text: 'hello', speaker: 'aiden' });
+    const captured = pending.catch((e) => e);
+    ttsClient.abortGeneration();
+
+    const e = await captured;
+    // The old code aborted with a string, so both of these were false and the
+    // caller fell through to a hardcoded "...failed" message.
+    expect(e).toBeInstanceOf(Error);
+    expect(e).toBeInstanceOf(GenerationCancelledError);
+    expect(isCancellation(e)).toBe(true);
+  });
+
+  it('rejects a timed-out generation with GenerationTimeoutError carrying the budget', async () => {
+    vi.useFakeTimers();
+    const { GenerationTimeoutError, isCancellation, SINGLE_GENERATION_TIMEOUT_MS } =
+      await import('./ttsClient');
+
+    fetchMock.mockImplementationOnce(hangingFetch() as never);
+
+    const pending = ttsClient.generateCustomVoice({ text: 'hello', speaker: 'aiden' });
+    // Attach the handler BEFORE advancing: the rejection happens *during*
+    // advanceTimersByTimeAsync, and an unhandled rejection fails the run.
+    const captured = pending.catch((e) => e);
+
+    await vi.advanceTimersByTimeAsync(SINGLE_GENERATION_TIMEOUT_MS + 1000);
+
+    const e = await captured;
+    expect(e).toBeInstanceOf(GenerationTimeoutError);
+    expect((e as InstanceType<typeof GenerationTimeoutError>).timeoutMs).toBe(
+      SINGLE_GENERATION_TIMEOUT_MS
+    );
+    // A timeout is not a cancellation — the user did not ask for this.
+    expect(isCancellation(e)).toBe(false);
+  });
+
+  it('does not impose a total timeout on a batch', async () => {
+    vi.useFakeTimers();
+    const { SINGLE_GENERATION_TIMEOUT_MS } = await import('./ttsClient');
+
+    let aborted = false;
+    fetchMock.mockImplementationOnce(hangingFetch(() => {
+      aborted = true;
+    }) as never);
+
+    const pending = ttsClient.generateBatch({
+      mode: 'custom-voice',
+      items: [{ text: 'a', output_filename: 'a.wav' }],
+    });
+    const guard = pending.catch(() => {});
+
+    // Long past the single-generation budget, the batch must still be running:
+    // liveness for a batch is the stall watchdog's job, not a fixed cap.
+    await vi.advanceTimersByTimeAsync(SINGLE_GENERATION_TIMEOUT_MS * 3);
+    expect(aborted).toBe(false);
+
+    ttsClient.abortGeneration();
+    await guard;
+  });
+
+  it('treats a bare AbortError as a cancellation too', async () => {
+    const { isCancellation } = await import('./ttsClient');
+    const bare = new DOMException('This operation was aborted', 'AbortError');
+    expect(isCancellation(bare)).toBe(true);
+  });
+
+  it('a finished generation cannot be aborted by its own stale timer', async () => {
+    vi.useFakeTimers();
+    const { SINGLE_GENERATION_TIMEOUT_MS } = await import('./ttsClient');
+
+    // Pre-existing latent bug this rewrite fixes: the old timeout closure
+    // referenced `this._abortController` (the field), and nothing cleared the
+    // timer on NORMAL completion — only on abort. So a timer armed by request A
+    // fired later and aborted whichever request happened to be in flight.
+    fetchMock.mockResolvedValueOnce(blobResponse());
+    await ttsClient.generateCustomVoice({ text: 'first', speaker: 'aiden' });
+
+    let secondAborted = false;
+    fetchMock.mockImplementationOnce(hangingFetch(() => {
+      secondAborted = true;
+    }) as never);
+
+    const second = ttsClient.generateCustomVoice({ text: 'second', speaker: 'aiden' });
+    const guard = second.catch(() => {});
+
+    // Advance past when the FIRST request's timer would have fired.
+    await vi.advanceTimersByTimeAsync(SINGLE_GENERATION_TIMEOUT_MS - 1000);
+    expect(secondAborted).toBe(false);
+
+    ttsClient.abortGeneration();
+    await guard;
+  });
+});

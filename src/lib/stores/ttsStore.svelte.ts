@@ -2,7 +2,13 @@
  * TTS application state store using Svelte 5 runes.
  */
 
-import { ttsClient, type ModelStatus, type Speaker, PRESET_SPEAKERS } from "$lib/api/ttsClient";
+import {
+  ttsClient,
+  isCancellation,
+  GenerationTimeoutError,
+  type Speaker,
+  PRESET_SPEAKERS,
+} from "$lib/api/ttsClient";
 import { settingsStore } from "./settingsStore.svelte";
 
 export type TTSMode = "custom-voice" | "voice-clone" | "voice-design";
@@ -239,9 +245,13 @@ function createTTSStore() {
       state.audioBlob = blob;
       state.audioUrl = URL.createObjectURL(blob);
     } catch (e) {
-      // Don't show error for user-initiated cancellation
-      if (e instanceof DOMException && e.name === "AbortError") {
-        console.debug("[generate] AbortError (cancelled):", (e as DOMException).message);
+      if (isCancellation(e)) {
+        // User-initiated stop. Issue #13: the old check only matched a
+        // DOMException, but the client aborted with a string, so cancelling
+        // raised a false "Generation failed" banner every time.
+        console.debug("[generate] cancelled by user");
+      } else if (e instanceof GenerationTimeoutError) {
+        state.error = `${e.message}. Try shorter text, or a smaller model — CPU-only machines are much slower.`;
       } else {
         const msg = e instanceof Error ? e.message : "Generation failed";
         console.error("[generate] Error:", e);
