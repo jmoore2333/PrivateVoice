@@ -37,7 +37,15 @@ class TestInferenceCustomVoice:
             non_streaming_mode=False,
             subtalker_dosample=False,
         )
-        model.audio_to_format.assert_called_once_with("fake-wav", 24000, "wav", mp3_bitrate=192)
+        model.audio_to_format.assert_called_once_with(
+            "fake-wav",
+            24000,
+            "wav",
+            mp3_bitrate=192,
+            target_sample_rate=None,
+            bit_depth=16,
+            channels=1,
+        )
         mock_sync.assert_called_once_with("cpu")
 
     @patch("tts_server.inference.synchronize_device")
@@ -99,5 +107,13 @@ class TestInferenceVoiceDesign:
             non_streaming_mode=False,
             subtalker_dosample=False,
         )
-        model.audio_to_format.assert_called_once_with("fake-wav", 24000, "wav", mp3_bitrate=192)
+        model.audio_to_format.assert_called_once_with(
+            "fake-wav",
+            24000,
+            "wav",
+            mp3_bitrate=192,
+            target_sample_rate=None,
+            bit_depth=16,
+            channels=1,
+        )
         mock_sync.assert_called_once_with("cpu")

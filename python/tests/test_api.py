@@ -474,7 +474,12 @@ class TestLoadModel:
         client = _get_client()
         resp = client.post("/load-model", json={"model_id": "1.7b"})
         assert resp.status_code == 500
-        assert "Out of memory" in resp.json()["detail"]
+        # The detail is deliberately generic: internal failure text is logged,
+        # never returned. This test used to assert the raw "Out of memory"
+        # string and went stale when the endpoint was hardened.
+        detail = resp.json()["detail"]
+        assert detail == "Internal server error"
+        assert "Out of memory" not in detail
 
 
 class TestUnloadModel:
@@ -1065,13 +1070,17 @@ class TestCORSOrigins:
     """CORS middleware restricts origins to localhost and Tauri."""
 
     def test_allowed_origin(self):
+        # Must be an origin allowed in PRODUCTION mode. The suite runs without
+        # TTS_SERVER_DEV, and http://localhost:1420 is added to the allow-list
+        # only when that flag is set (main.py:434-438) — asserting it here made
+        # this test depend on an env var nothing in the suite sets.
         client = _get_client()
         resp = client.get(
             "/health",
-            headers={"Origin": "http://localhost:1420"},
+            headers={"Origin": "tauri://localhost"},
         )
         assert resp.status_code == 200
-        assert resp.headers.get("access-control-allow-origin") == "http://localhost:1420"
+        assert resp.headers.get("access-control-allow-origin") == "tauri://localhost"
 
     def test_disallowed_origin(self):
         client = _get_client()

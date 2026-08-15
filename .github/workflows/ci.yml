@@ -91,6 +91,31 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # conftest.py mocks torch and the heavy ML stack, so the suite only needs
+      # the web layer. python-multipart is NOT optional: main.py declares
+      # Form()/UploadFile routes and FastAPI raises
+      # `RuntimeError: Form data requires "python-multipart" to be installed`
+      # at route-definition time, so the job would die during collection.
+      # Verified in a clean venv: this exact list runs all 100 tests green.
+      - name: Install test dependencies
+        run: python -m pip install pytest fastapi httpx pydantic python-multipart
+
+      - name: Run backend tests
+        run: python -m pytest tests/ -q
+        working-directory: python
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
