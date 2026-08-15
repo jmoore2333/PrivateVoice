@@ -472,6 +472,23 @@
     ttsStore.downloadAudio();
   }
 
+  // Renaming a library item. Until now the Library's Edit control was wired to
+  // an `onEdit` prop the drawer never passed, so a default name was permanent.
+  let renameTarget = $state<{ id: string; name: string } | null>(null);
+
+  function startRename(id: string) {
+    const item =
+      libraryStore.saved.find(i => i.id === id) ?? libraryStore.recent.find(i => i.id === id);
+    if (item) renameTarget = { id, name: item.name };
+  }
+
+  async function commitRename() {
+    if (!renameTarget) return;
+    const name = renameTarget.name.trim();
+    if (name) await libraryStore.updateItem(renameTarget.id, { name });
+    renameTarget = null;
+  }
+
   function handleLoadVoiceDesignModel() {
     ttsStore.loadModel(recommendedDesignModelId);
   }
@@ -1134,7 +1151,41 @@
 
     libraryOpen = false;
   }}
+  onEditItem={startRename}
 />
+
+<!-- Rename a library item -->
+{#if renameTarget}
+  <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+    <div class="w-80 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border-default)] p-4 space-y-3">
+      <p class="text-sm font-medium text-[var(--color-text-primary)]">Rename</p>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        autofocus
+        bind:value={renameTarget.name}
+        onkeydown={(e) => {
+          if (e.key === 'Enter') commitRename();
+          if (e.key === 'Escape') renameTarget = null;
+        }}
+        class="w-full px-3 py-2 rounded-lg bg-[var(--color-bg-surface)] border border-[var(--color-border-subtle)] text-sm text-[var(--color-text-primary)] focus:outline-none focus:border-[var(--color-accent)]"
+      />
+      <div class="flex justify-end gap-2">
+        <button
+          class="px-3 py-1.5 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+          onclick={() => renameTarget = null}
+        >
+          Cancel
+        </button>
+        <button
+          class="px-3 py-1.5 text-sm rounded-lg bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)]"
+          onclick={commitRename}
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <!-- Debug Console -->
 <DebugConsole />

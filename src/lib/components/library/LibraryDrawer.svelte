@@ -6,9 +6,10 @@
     isOpen: boolean;
     onClose: () => void;
     onUseVoice?: (voiceId: string) => void;
+    onEditItem?: (itemId: string) => void;
   }
 
-  let { isOpen, onClose, onUseVoice }: Props = $props();
+  let { isOpen, onClose, onUseVoice, onEditItem }: Props = $props();
 
   let activeTab = $state<'recent' | 'voices' | 'audio'>('recent');
   let searchQuery = $state('');
@@ -113,6 +114,7 @@
             <LibraryItem
               {item}
               onUse={() => onUseVoice?.(item.id)}
+              onEdit={() => onEditItem?.(item.id)}
               onDelete={() => { libraryStore.removeFromLibrary(item.id); }}
             />
           {/each}
