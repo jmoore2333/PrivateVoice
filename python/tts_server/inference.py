@@ -113,12 +113,44 @@ class TTSModel:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
 
-        # Suppress pad_token_id warning by setting it explicitly
-        if hasattr(self.model, 'config') and hasattr(self.model.config, 'eos_token_id'):
-            self.model.config.pad_token_id = self.model.config.eos_token_id
+        self._silence_pad_token_warning()
 
         self._loaded = True
         logger.info(f"Model loaded successfully on {self.config.device}")
+
+    def _silence_pad_token_warning(self) -> None:
+        """Pre-set the talker's pad_token_id so transformers stops warning about it.
+
+        transformers logs ``Setting `pad_token_id` to `eos_token_id`:2150 for
+        open-end generation.`` on stderr once per generate() call whenever
+        generation_config.pad_token_id is None (transformers/generation/utils.py).
+        Issue #13 showed a Debug console full of these rendered as errors.
+
+        modeling_qwen3_tts passes eos_token_id=config.talker_config.codec_eos_token_id
+        into talker.generate(), and transformers would then derive
+        pad_token = eos_token[0]. Assigning that same value up front is
+        behaviour-preserving — verified bit-identical audio before/after, once
+        the model's first-generation warm-up run is discarded.
+
+        Best-effort by design: qwen_tts internals are not a stable API, so every
+        step is guarded and any failure leaves generation untouched.
+        """
+        try:
+            inner = getattr(self.model, "model", None)
+            talker = getattr(inner, "talker", None)
+            gen_config = getattr(talker, "generation_config", None)
+            if gen_config is None or getattr(gen_config, "pad_token_id", None) is not None:
+                return
+
+            talker_config = getattr(getattr(inner, "config", None), "talker_config", None)
+            codec_eos = getattr(talker_config, "codec_eos_token_id", None)
+            if codec_eos is None:
+                return
+
+            gen_config.pad_token_id = codec_eos
+            logger.debug("Set talker pad_token_id to %s to suppress generation warning", codec_eos)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not pre-set pad_token_id: %s", e)
 
     def unload(self) -> None:
         """Unload the model and free memory."""

@@ -177,7 +177,46 @@ export const PRESET_SPEAKERS = [
 
 export type Speaker = (typeof PRESET_SPEAKERS)[number];
 
-const GENERATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * Ceiling for a single generation request.
+ *
+ * Issue #13: this was 5 minutes and was also applied to whole batches. A
+ * CPU-only machine takes 4-5 minutes for ONE item, so a batch aborted during
+ * item 2 while the server kept generating for another 25 minutes. Batches now
+ * opt out of the total cap entirely (batchStore runs a stall watchdog off the
+ * progress poll); single generations keep a generous ceiling purely to stop the
+ * UI hanging forever.
+ */
+export const SINGLE_GENERATION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+/** The user asked to stop. Not an error condition — callers should stay quiet. */
+export class GenerationCancelledError extends Error {
+  constructor(message = "Generation cancelled") {
+    super(message);
+    this.name = "GenerationCancelledError";
+  }
+}
+
+/** The client gave up waiting. Distinct from a cancellation: the user gets told. */
+export class GenerationTimeoutError extends Error {
+  readonly timeoutMs: number;
+  constructor(timeoutMs: number) {
+    super(`Generation timed out after ${Math.round(timeoutMs / 60000)} minutes`);
+    this.name = "GenerationTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * True when a rejection represents a deliberate stop rather than a failure.
+ *
+ * Covers the bare `abort()` DOMException as well, so a caller that aborts
+ * without a reason is still handled correctly.
+ */
+export function isCancellation(e: unknown): boolean {
+  if (e instanceof GenerationCancelledError) return true;
+  return e instanceof DOMException && e.name === "AbortError";
+}
 
 class TTSClient {
   private baseUrl: string;
@@ -206,18 +245,36 @@ class TTSClient {
     return fetch(`${this.baseUrl}${path}`, { ...init, headers });
   }
 
-  /** Create a signal for generation requests with timeout + manual abort. */
-  private createGenerationSignal(): AbortSignal {
-    this._abortController = new AbortController();
-    const timeoutId = setTimeout(() => this._abortController?.abort("Generation timed out"), GENERATION_TIMEOUT_MS);
-    // Clear timeout when signal aborts (manual or timeout)
-    this._abortController.signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
-    return this._abortController.signal;
+  /**
+   * Create a signal for generation requests. Pass `null` to skip the total-time cap.
+   *
+   * The timer closes over the LOCAL controller, not `this._abortController`.
+   * With the field, a timer armed by a request that finished normally (nothing
+   * clears it in that case) would later fire and abort whichever request
+   * happened to be in flight.
+   */
+  private createGenerationSignal(
+    timeoutMs: number | null = SINGLE_GENERATION_TIMEOUT_MS
+  ): AbortSignal {
+    const controller = new AbortController();
+    this._abortController = controller;
+
+    if (timeoutMs !== null) {
+      const timeoutId = setTimeout(
+        () => controller.abort(new GenerationTimeoutError(timeoutMs)),
+        timeoutMs
+      );
+      controller.signal.addEventListener("abort", () => clearTimeout(timeoutId), { once: true });
+    }
+    return controller.signal;
   }
 
   /** Abort the current generation request. */
   abortGeneration(): void {
-    this._abortController?.abort("Generation cancelled");
+    // Abort with a real Error. Passing a string made fetch reject with that
+    // string, which is neither an Error nor a DOMException, so every caller's
+    // catch fell through to a hardcoded "...failed" message (issue #13).
+    this._abortController?.abort(new GenerationCancelledError());
     this._abortController = null;
   }
 
@@ -432,7 +489,9 @@ class TTSClient {
   }
 
   async generateBatch(request: BatchRequest): Promise<Blob> {
-    const signal = this.createGenerationSignal();
+    // No total cap: batch length is proportional to item count, so a fixed
+    // budget is always wrong. batchStore's stall watchdog owns liveness here.
+    const signal = this.createGenerationSignal(null);
     try {
       const res = await this.request("/generate/batch", {
         method: "POST",

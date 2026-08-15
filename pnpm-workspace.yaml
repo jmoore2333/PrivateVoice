@@ -1,0 +1,6 @@
+# pnpm 10+ refuses to run a dependency's install scripts unless it is named
+# here, and treats an unresolved entry as an install failure. esbuild's
+# postinstall resolves the platform-specific binary (@esbuild/darwin-arm64 on
+# Apple Silicon, @esbuild/linux-x64 on CI), which Vite needs to bundle at all.
+allowBuilds:
+  esbuild: true

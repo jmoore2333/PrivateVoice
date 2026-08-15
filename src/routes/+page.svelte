@@ -21,6 +21,7 @@
   import VoiceClonePanel from "$lib/components/input/VoiceClonePanel.svelte";
   import VoiceDesignPanel from "$lib/components/input/VoiceDesignPanel.svelte";
   import BatchPanel from "$lib/components/input/BatchPanel.svelte";
+  import BatchSummary from "$lib/components/input/BatchSummary.svelte";
 
   // Output
   import OutputPanel from "$lib/components/output/OutputPanel.svelte";
@@ -174,6 +175,7 @@
 
   const recommendedCloneHint = $derived(buildRecommendedHint(debugStore.state.systemInfo));
   const batchModeEnabled = $derived(settingsStore.state.enableBatchMode);
+  const inBatchMode = $derived(batchModeEnabled && batchMode);
 
   // Sync local state from store when store changes
   $effect(() => {
@@ -917,10 +919,11 @@
               <p class="text-xs text-[var(--color-text-muted)]">Use queued text files with your current voice configuration.</p>
             </div>
             <button
-              class="relative w-11 h-6 rounded-full transition-colors {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              class="relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
               role="switch"
               aria-checked={batchMode}
               aria-label="Toggle batch mode"
+              disabled={batchState.isProcessing}
               onclick={handleBatchModeToggle}
             >
               <span
@@ -930,21 +933,15 @@
           </div>
         {/if}
 
-        {#if batchModeEnabled && batchMode}
-          <BatchPanel
-            files={batchState.files}
-            isProcessing={batchState.isProcessing}
-            progress={batchState.progress}
-            resultsCount={batchState.results.length}
-            error={batchState.error}
-            onAddFiles={handleBatchFilesAdded}
-            onRemoveFile={handleBatchFileRemove}
-            onOutputFilenameChange={handleBatchFilenameChange}
-            onStart={handleStartBatch}
-            onCancel={handleCancelBatch}
-            onDownload={() => batchStore.downloadResults()}
-          />
-        {:else if ttsState.mode === 'custom-voice'}
+        <!-- Voice configuration. Batch mode used to replace this outright, which
+             left Voice Clone batches impossible to configure -- the reference
+             audio control was gone (issue #13). It now stays put, and locks
+             while a batch is running so every file gets the same voice. -->
+        <div
+          class:pointer-events-none={batchState.isProcessing}
+          class:opacity-60={batchState.isProcessing}
+        >
+        {#if ttsState.mode === 'custom-voice'}
           <CustomVoicePanel
             bind:text={localText}
             bind:language={localLanguage}
@@ -955,6 +952,7 @@
             {isTranslatingText}
             {textTranslationError}
             modelSupported={customVoiceModelSupported}
+            batchMode={inBatchMode}
             modelLoading={ttsState.isLoadingModel}
             recommendedModelLabel={recommendedCustomModelLabel}
             currentModelId={ttsState.modelId}
@@ -978,6 +976,7 @@
             {referenceAudioUrl}
             {referenceAudioBlob}
             modelSupported={voiceCloneModelSupported}
+            batchMode={inBatchMode}
             modelLoading={ttsState.isLoadingModel}
             recommendedModelLabel={recommendedCloneModelLabel}
             recommendedModelHint={recommendedCloneHint}
@@ -1016,6 +1015,7 @@
             isGenerating={ttsState.isGenerating}
             {elapsedTime}
             modelLoaded={voiceDesignModelLoaded}
+            batchMode={inBatchMode}
             modelLoading={ttsState.isLoadingModel}
             recommendedModelLabel={recommendedDesignModelLabel}
             onGenerate={handleGenerate}
@@ -1027,11 +1027,44 @@
             onTranslateText={handleTranslateInputText}
           />
         {/if}
+        </div>
+
+        {#if inBatchMode}
+          <BatchSummary
+            mode={ttsState.mode}
+            modelId={ttsState.modelId}
+            modelLabel={MODEL_OPTIONS.find((m) => m.id === ttsState.modelId)?.label ?? (ttsState.modelId ?? 'None')}
+            speaker={localSpeaker}
+            instruction={localInstruction}
+            voiceDescription={localVoiceDescription}
+            referenceAudioName={ttsState.referenceAudio?.name ?? null}
+            lowQualityMode={ttsState.cloneLowQualityMode}
+            language={localLanguage}
+            format={settingsStore.state.exportFormat || 'wav'}
+            sampleRate={(settingsStore.state.exportFormat || 'wav') === 'wav' ? settingsStore.state.wavSampleRate : null}
+            bitDepth={settingsStore.state.wavBitDepth}
+            seed={localSeed}
+          />
+
+          <BatchPanel
+            files={batchState.files}
+            isProcessing={batchState.isProcessing}
+            progress={batchState.progress}
+            resultsCount={batchState.results.length}
+            error={batchState.error}
+            onAddFiles={handleBatchFilesAdded}
+            onRemoveFile={handleBatchFileRemove}
+            onOutputFilenameChange={handleBatchFilenameChange}
+            onStart={handleStartBatch}
+            onCancel={handleCancelBatch}
+            onDownload={() => batchStore.downloadResults()}
+          />
+        {/if}
       </div>
     {/snippet}
 
     {#snippet outputPanel()}
-      {#if batchModeEnabled && batchMode}
+      {#if inBatchMode}
         <div class="h-full flex flex-col justify-center">
           <div class="max-w-xl mx-auto w-full rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-6 space-y-4">
             <div>

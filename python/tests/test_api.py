@@ -474,7 +474,12 @@ class TestLoadModel:
         client = _get_client()
         resp = client.post("/load-model", json={"model_id": "1.7b"})
         assert resp.status_code == 500
-        assert "Out of memory" in resp.json()["detail"]
+        # The detail is deliberately generic: internal failure text is logged,
+        # never returned. This test used to assert the raw "Out of memory"
+        # string and went stale when the endpoint was hardened.
+        detail = resp.json()["detail"]
+        assert detail == "Internal server error"
+        assert "Out of memory" not in detail
 
 
 class TestUnloadModel:
@@ -1065,13 +1070,17 @@ class TestCORSOrigins:
     """CORS middleware restricts origins to localhost and Tauri."""
 
     def test_allowed_origin(self):
+        # Must be an origin allowed in PRODUCTION mode. The suite runs without
+        # TTS_SERVER_DEV, and http://localhost:1420 is added to the allow-list
+        # only when that flag is set (main.py:434-438) — asserting it here made
+        # this test depend on an env var nothing in the suite sets.
         client = _get_client()
         resp = client.get(
             "/health",
-            headers={"Origin": "http://localhost:1420"},
+            headers={"Origin": "tauri://localhost"},
         )
         assert resp.status_code == 200
-        assert resp.headers.get("access-control-allow-origin") == "http://localhost:1420"
+        assert resp.headers.get("access-control-allow-origin") == "tauri://localhost"
 
     def test_disallowed_origin(self):
         client = _get_client()
@@ -1100,3 +1109,109 @@ class TestDocsDisabledInProd:
         client = _get_client()
         resp = client.get("/redoc")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Generation: batch (issue #13)
+# ---------------------------------------------------------------------------
+
+class TestGenerateBatch:
+    """POST /generate/batch."""
+
+    @patch("tts_server.main.get_model")
+    def test_batch_failure_names_the_item_that_failed(self, mock_get_model):
+        """A 500 from a batch used to say only "Internal server error", so a
+        user could not tell which of N files broke, or how far the run got."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_model.generate_custom_voice.side_effect = [
+            (b"fake-wav-data", "audio/wav"),
+            RuntimeError("kaboom"),
+        ]
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/batch",
+            json={
+                "mode": "custom-voice",
+                "speaker": "serena",
+                "items": [
+                    {"text": "one", "output_filename": "one.wav"},
+                    {"text": "two", "output_filename": "two.wav"},
+                ],
+            },
+        )
+
+        assert resp.status_code == 500
+        detail = resp.json()["detail"]
+        assert "two.wav" in detail                    # which item failed
+        assert "item 2 of 2" in detail                # how far the run got
+        assert "kaboom" not in detail                 # no internals leaked
+        assert "No files were produced" in detail     # sets the right expectation
+
+    @patch("tts_server.main.reclaim_device_memory")
+    @patch("tts_server.main.get_model")
+    def test_batch_reclaims_device_memory_between_items(self, mock_get_model, mock_reclaim):
+        """A batch runs N generations back to back. Without reclaiming between
+        items, a long batch accumulates device memory that single generation
+        never does, because that returns to idle between requests."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/batch",
+            json={
+                "mode": "custom-voice",
+                "speaker": "serena",
+                "items": [
+                    {"text": "one", "output_filename": "one.wav"},
+                    {"text": "two", "output_filename": "two.wav"},
+                    {"text": "three", "output_filename": "three.wav"},
+                ],
+            },
+        )
+
+        assert resp.status_code == 200
+        assert mock_reclaim.call_count == 3
+
+    @patch("tts_server.main.get_model")
+    def test_batch_success_returns_a_zip(self, mock_get_model):
+        """Baseline: a healthy batch still returns a ZIP of every item."""
+        mock_model = _make_mock_model(loaded=True)
+        mock_get_model.return_value = mock_model
+
+        client = _get_client()
+        resp = client.post(
+            "/generate/batch",
+            json={
+                "mode": "custom-voice",
+                "speaker": "serena",
+                "items": [
+                    {"text": "one", "output_filename": "one.wav"},
+                    {"text": "two", "output_filename": "two.wav"},
+                ],
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/zip"
+
+        import io
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as archive:
+            assert sorted(archive.namelist()) == ["one.wav", "two.wav"]
+
+
+def test_health_reports_the_package_version():
+    """The server version was hardcoded to 1.0.0 in two places and drifted
+    behind __init__.py (verified live during the issue #13 investigation:
+    {"status":"ok","version":"1.0.0"} while the package said 1.0.3)."""
+    from tts_server import __version__
+
+    client = _get_client()
+    resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json()["version"] == __version__

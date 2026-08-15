@@ -15,14 +15,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -42,14 +40,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -68,6 +64,70 @@ jobs:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
 
+  rust-tests:
+    name: Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Tauri's Linux build needs webkit2gtk and its build-time deps.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf build-essential \
+            curl wget file libssl-dev libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # tauri.conf.json declares resources/uv*, resources/tts_server/**/* and
+      # resources/requirements.txt as bundle resources, and the Tauri build
+      # script fails the whole compile if a glob matches nothing:
+      #   glob pattern resources/uv* path not found or didn't match any files
+      # Those are generated at build time and untracked, so a clean checkout has
+      # none of them. Stage them the same way scripts/build-release.sh does.
+      - name: Stage bundle resources
+        run: |
+          bash scripts/download-uv.sh
+          cp -r python/tts_server src-tauri/resources/tts_server
+          cp python/requirements.txt src-tauri/resources/requirements.txt
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # conftest.py mocks torch and the heavy ML stack, so the suite only needs
+      # the web layer. python-multipart is NOT optional: main.py declares
+      # Form()/UploadFile routes and FastAPI raises
+      # `RuntimeError: Form data requires "python-multipart" to be installed`
+      # at route-definition time, so the job would die during collection.
+      # Verified in a clean venv: this exact list runs all 100 tests green.
+      - name: Install test dependencies
+        run: python -m pip install pytest fastapi httpx pydantic python-multipart
+
+      - name: Run backend tests
+        run: python -m pytest tests/ -q
+        working-directory: python
+
   e2e-tests:
     name: E2E Tests
     runs-on: ubuntu-latest
@@ -76,14 +136,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -114,14 +172,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 8
+        uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies

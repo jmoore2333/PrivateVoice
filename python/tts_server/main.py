@@ -39,9 +39,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from . import __version__
 from .inference import get_model, PRESET_SPEAKERS, MODEL_IDS, request_cancel, clear_cancel, is_cancelled
 from .device import (
-    get_device_config, get_memory_info, check_memory_for_model,
+    get_device_config, get_memory_info, check_memory_for_model, clear_cache,
     MODEL_MEMORY_REQUIREMENTS, SUPPORTED_MP3_BITRATES,
 )
 from .download_tracker import get_download_tracker, DownloadProgress
@@ -347,6 +348,25 @@ def validate_model_supports_mode(model_id: str, mode: str) -> None:
         )
 
 
+def reclaim_device_memory(model) -> None:
+    """Best-effort device cache reclaim between batch items.
+
+    Single generation returns the process to idle between requests; a batch does
+    not, so a long run accumulates device memory that no single-generation test
+    would ever surface (issue #13 ran seven long voice-clone items back to back).
+
+    Every step is guarded: a cleanup failure must never fail a batch that has
+    otherwise succeeded.
+    """
+    device = getattr(getattr(model, "config", None), "device", None)
+    if not device:
+        return
+    try:
+        clear_cache(device)
+    except Exception as e:  # pragma: no cover - never fail a batch on cleanup
+        logger.debug("Could not reclaim device memory: %s", e)
+
+
 def sanitize_output_filename(name: str, fallback: str) -> str:
     candidate = os.path.basename((name or "").strip()) or fallback
     candidate = re.sub(r"[^A-Za-z0-9._-]", "_", candidate)
@@ -418,7 +438,7 @@ if not _auth_enabled and not _is_dev:
 app = FastAPI(
     title="PrivateVoice Server",
     description="Local text-to-speech server powered by Qwen3-TTS",
-    version="1.0.0",
+    version=__version__,
     lifespan=lifespan,
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
@@ -469,7 +489,7 @@ async def validate_api_key(request: Request, call_next):
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Check server health."""
-    return HealthResponse(status="ok", version="1.0.0")
+    return HealthResponse(status="ok", version=__version__)
 
 
 @app.get("/startup-status", response_model=StartupStatusResponse)
@@ -857,6 +877,9 @@ async def generate_batch(request: BatchRequest):
     )
 
     zip_buffer = io.BytesIO()
+    # Tracked so a failure can say which item died and how far the run got.
+    current_index = 0
+    current_name = ""
     try:
         with zipfile.ZipFile(zip_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
             for index, item in enumerate(request.items, start=1):
@@ -867,6 +890,8 @@ async def generate_batch(request: BatchRequest):
 
                 raw_name = sanitize_output_filename(item.output_filename, f"item_{index}")
                 output_filename = ensure_extension(raw_name, fmt)
+                current_index = index
+                current_name = output_filename
                 _batch_progress.set_current_item(output_filename)
 
                 if mode == "custom-voice":
@@ -918,6 +943,7 @@ async def generate_batch(request: BatchRequest):
 
                 archive.writestr(output_filename, audio_bytes)
                 _batch_progress.increment_completed()
+                await asyncio.to_thread(reclaim_device_memory, model)
 
         _batch_progress.set_current_item("")
         _batch_progress.set_status("completed")
@@ -933,8 +959,24 @@ async def generate_batch(request: BatchRequest):
         raise
     except Exception:
         _batch_progress.set_status("error")
-        logger.exception("Batch generation failed")
-        raise HTTPException(status_code=500, detail=INTERNAL_ERROR_DETAIL)
+        # Log the traceback for the Debug console, but return only what is safe
+        # and useful: which item died and how far the run got. Issue #13's
+        # reporter had no way to tell either from a bare "Internal server error".
+        logger.exception(
+            "Batch generation failed on item %d of %d (%s)",
+            current_index,
+            len(request.items),
+            current_name,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Batch failed while generating item {current_index} of "
+                f"{len(request.items)} ({current_name}). No files were produced — "
+                f"a batch is only downloadable once every item finishes. "
+                f"See the Debug console for details."
+            ),
+        )
 
 
 @app.get("/batch-progress", response_model=BatchProgressResponse)

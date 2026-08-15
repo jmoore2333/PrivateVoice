@@ -29,9 +29,10 @@ cd python && pytest tests/      # Python backend tests
 # Building
 ./scripts/update-requirements-hash.sh   # Refresh tracked SHA-256 after Python dependency edits
 .\scripts\update-requirements-hash.ps1  # Windows PowerShell equivalent
-./python/build_sidecar.sh       # Build Python sidecar via PyInstaller
-pnpm tauri build                # Build Tauri app (requires sidecar built first)
-./scripts/build-release.sh      # Full release build (includes dependency hash verification)
+./scripts/build-release.sh      # Full release build — the one to use. Stages the
+                                # Python source + uv into src-tauri/resources,
+                                # verifies the dependency hash, then builds Tauri.
+pnpm tauri build                # Tauri only; assumes resources are already staged
 ```
 
 ## Architecture
@@ -48,7 +49,7 @@ Tauri 2 Rust Shell (sidecar lifecycle, native APIs)
 
 **Frontend** (`src/`): SvelteKit with adapter-static (SPA mode). State managed with Svelte 5 runes (`$state`, `$derived`, `$effect`) in store files (`src/lib/stores/*.svelte.ts`). The HTTP client in `src/lib/api/ttsClient.ts` handles all backend communication.
 
-**Tauri Rust** (`src-tauri/`): Manages the Python sidecar process lifecycle. In dev mode (`debug_assertions`), spawns Python directly from venv. In release mode, uses `tauri-plugin-shell` to run the PyInstaller-bundled binary. Streams sidecar stdout/stderr as Tauri events (`sidecar-log`, `sidecar-startup`). Uses `tauri-plugin-dialog` for native save/open dialogs and `tauri-plugin-fs` for file system access (library persistence, export).
+**Tauri Rust** (`src-tauri/`): Manages the Python sidecar process lifecycle. In dev mode (`debug_assertions`), spawns Python directly from venv. In release mode, runs the Python source staged into `src-tauri/resources/tts_server/` using an interpreter that `uv` installs into the user's app data directory on first launch (no PyInstaller bundle). Streams sidecar stdout/stderr as Tauri events (`sidecar-log`, `sidecar-startup`). Uses `tauri-plugin-dialog` for native save/open dialogs and `tauri-plugin-fs` for file system access (library persistence, export).
 
 **Python Backend** (`python/tts_server/`): FastAPI server wrapping Qwen3-TTS. `inference.py` handles model loading (two-phase: `snapshot_download` with progress tracking, then `from_pretrained` from local cache) and audio generation (WAV and MP3 via lameenc). `device.py` auto-detects Apple Silicon MPS, NVIDIA CUDA, or CPU and configures dtype/attention accordingly. `download_tracker.py` provides real-time download progress via `/download-progress` endpoint. Models downloaded from HuggingFace Hub on first use (~1.2-3.4GB).
 
@@ -82,13 +83,13 @@ Voice library uses two-tier storage:
 
 - **Svelte 5 runes only** — all stores use `$state()`, `$derived()`, `$effect()`. No legacy `writable()`/`readable()` stores.
 - **Tailwind CSS 4** — uses `@tailwindcss/vite` plugin, not PostCSS config.
-- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright (90 tests across 4 spec files) in `e2e/` directory with full Tauri + API mocking (CI-compatible). Visual validation generates 46 screenshots at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080) with an HTML report at `docs/e2e-visual-validation-report.html`.
+- **Unit tests** use Vitest + @testing-library/svelte with jsdom environment. Test files live alongside source (`*.test.ts`). Python tests use pytest in `python/tests/`. **E2E tests** use Playwright (102 tests across 5 spec files, with shared mocks in `e2e/helpers.ts` — specs must never import other specs) in `e2e/` directory with full Tauri + API mocking (CI-compatible). Visual validation generates 46 screenshots at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080) with an HTML report at `docs/e2e-visual-validation-report.html`.
 - **Pre-commit hook** (Husky) runs `svelte-check` on staged `.ts`/`.svelte` files.
-- **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Also reflected in `SettingsPanel.svelte` and `main.py` health endpoint.
+- **Version** must be updated in four places: `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `python/tts_server/__init__.py`. Those four are the *only* places to edit — everything else derives: the UI reads `__APP_VERSION__`, which `vite.config.js` injects from `package.json`, and `main.py` imports `__version__` from `python/tts_server/__init__.py` for the FastAPI app and `/health`.
 - **Dependency integrity gate**: if `python/requirements.txt` changes, run `./scripts/update-requirements-hash.sh` (or `.\scripts\update-requirements-hash.ps1` on Windows) and commit `python/requirements.sha256`. Release builds validate this hash and fail on mismatch.
 - **Cache locality**: the sidecar sets `HF_HOME`/`HF_HUB_CACHE`/`TRANSFORMERS_CACHE` to `{appData}/python_env/huggingface` and setup sets `UV_CACHE_DIR`/`PIP_CACHE_DIR` under `{appData}/python_env`, keeping runtime/model/download artifacts app-scoped.
 - **Orphaned sidecar handling**: if the app crashes or is force-quit, the Python sidecar may survive as an orphan holding port 8765. On next launch the Rust side auto-detects this by checking the process command line against our app data path, then reclaims the port (SIGTERM → 2 s → SIGKILL). During dev, if `pnpm tauri dev` is killed abruptly, you may need to manually run `kill $(lsof -ti :8765)` or simply relaunch — the app will reclaim its own orphan automatically.
-- The Python sidecar binary goes to `src-tauri/binaries/tts-server-{arch}` (e.g., `tts-server-aarch64-apple-darwin`).
+- The sidecar ships as **Python source**, not a compiled binary: `scripts/build-release.sh` copies `python/tts_server/` into `src-tauri/resources/tts_server/` (untracked, regenerated each build) alongside `requirements.txt` and the `uv` binary. Editing `python/` alone is not enough for a release build — re-run the script so the staged copy is refreshed.
 
 ## Tauri Plugins
 
@@ -123,15 +124,41 @@ Multi-column layout with fixed-width input panel (380px) and flexible output pan
 
 ## Testing
 
-343 automated tests total:
-- **216 unit tests** (Vitest): Stores, components, API client, audio
-- **90 E2E tests** (Playwright across 4 spec files):
+493 automated tests total:
+- **272 unit tests** (Vitest): Stores, components, API client, audio
+- **109 backend tests** (pytest): API endpoints, inference, device, download tracker
+- **10 Rust tests** (cargo): sidecar log-level classification
+- **102 E2E tests** (Playwright across 5 spec files):
   - `example.spec.ts` (8): Basic app loading and navigation
   - `library.spec.ts` (14): Library save, search, tabs, persistence
   - `production.spec.ts` (34): Startup, generation, modes, settings, debug
   - `visual-validation.spec.ts` (34): Module visibility, mode switching, settings, library, debug, help panels, generate button accessibility, input/output layout
+  - `batch-settings.spec.ts` (8): Batch-mode voice settings visibility, file pre-flight, capability docs
 - **Visual validation**: 46 screenshots captured at 4 resolutions (900x650, 1280x800, 1440x900, 1920x1080), saved to `e2e/screenshots/`
 - **HTML report**: `docs/e2e-visual-validation-report.html` — visual review of all captured screenshots
 - All E2E tests mock Tauri internals + API routes for full CI compatibility
 
 See `docs/PRODUCTION_TEST_PROCEDURE.md` for manual pre-release checklist (93+ test cases).
+
+### Driving the built app for verification (macOS)
+
+The UI is HTML inside a Tauri WebView, so **AppleScript/System Events cannot see or click any in-app control** — it only sees the window chrome. Querying `button 1 of window 1` returns the window's close button, and clicking it quits the app.
+
+To drive the real app, post events at the HID level with a small Swift CGEvent helper (`swiftc` ships with Xcode CLT, no install needed):
+
+```swift
+// clicker.swift — click X Y | type "text" | key <code> [cmd] | scroll X Y <lines>
+let src = CGEventSource(stateID: .hidSystemState)
+CGEvent(mouseEventSource: src, mouseType: .leftMouseDown,
+        mouseCursorPosition: pt, mouseButton: .left)?.post(tap: .cghidEventTap)
+```
+
+Workflow that works reliably:
+
+1. `swiftc -O clicker.swift -o clicker`
+2. Focus the app: `osascript -e 'tell application "System Events" to set frontmost of first process whose name contains "privatevoice" to true'`
+3. `screencapture -x -o shot.png` — **do not resize**; on this display the capture is 1920×1200 and maps **1:1** to CGEvent point coordinates, so you can read a target's position straight off the screenshot. Resizing breaks that mapping.
+4. Read coordinates off the screenshot, click, re-capture to confirm.
+5. `screencapture -x -R x,y,w,h out.png` crops a region for precise coordinate reading (`sips -c` crops from the centre, which is rarely what you want).
+
+Gotchas: overlay panels (Settings/Help/Library) render as fixed overlays with a blurred backdrop — if a crop of the *left* side suddenly looks blurred, a panel opened successfully. The app must be frontmost or clicks land elsewhere; re-focus between steps if you switch to a terminal.

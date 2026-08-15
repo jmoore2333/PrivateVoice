@@ -2,6 +2,23 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock ttsClient before importing the store (must be hoisted)
 vi.mock("$lib/api/ttsClient", () => {
+  // Hoisted above imports, so these are redefined rather than imported. They
+  // must behave like the real ones: ttsStore branches on them, and a closed
+  // factory that omitted them would make every error-path test throw.
+  class GenerationCancelledError extends Error {
+    constructor(message = "Generation cancelled") {
+      super(message);
+      this.name = "GenerationCancelledError";
+    }
+  }
+  class GenerationTimeoutError extends Error {
+    readonly timeoutMs: number;
+    constructor(timeoutMs: number) {
+      super(`Generation timed out after ${Math.round(timeoutMs / 60000)} minutes`);
+      this.name = "GenerationTimeoutError";
+      this.timeoutMs = timeoutMs;
+    }
+  }
   return {
     ttsClient: {
       health: vi.fn(),
@@ -12,6 +29,12 @@ vi.mock("$lib/api/ttsClient", () => {
       generateVoiceDesign: vi.fn(),
       abortGeneration: vi.fn(),
     },
+    GenerationCancelledError,
+    GenerationTimeoutError,
+    isCancellation: (e: unknown) =>
+      e instanceof GenerationCancelledError ||
+      (e instanceof DOMException && e.name === "AbortError"),
+    SINGLE_GENERATION_TIMEOUT_MS: 30 * 60 * 1000,
     PRESET_SPEAKERS: [
       "aiden",
       "dylan",
@@ -446,6 +469,51 @@ describe("ttsStore", () => {
 
       expect(ttsStore.state.error).toBeNull();
       expect(ttsStore.state.isGenerating).toBe(false);
+    });
+
+    it("does not show an error when the user cancels", async () => {
+      // The test above mocks a DOMException, which production NEVER emitted --
+      // abortGeneration() aborted with a string. It passed for the whole life of
+      // the bug while cancelling always raised a false error banner (issue #13).
+      // This pins what the client actually rejects with.
+      const { GenerationCancelledError } = await import("$lib/api/ttsClient");
+      vi.mocked(ttsClient.getModelStatus).mockResolvedValue({
+        loaded: true,
+        model_id: "0.6b",
+        device: "mps",
+        memory: { device: "mps", total_gb: 16, available_gb: 8 },
+      });
+      vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
+      await ttsStore.checkServerHealth();
+
+      vi.mocked(ttsClient.generateCustomVoice).mockRejectedValue(new GenerationCancelledError());
+
+      ttsStore.setText("Hello");
+      await ttsStore.generate();
+
+      expect(ttsStore.state.error).toBeNull();
+      expect(ttsStore.state.isGenerating).toBe(false);
+    });
+
+    it("reports a timeout distinctly from a cancellation", async () => {
+      const { GenerationTimeoutError } = await import("$lib/api/ttsClient");
+      vi.mocked(ttsClient.getModelStatus).mockResolvedValue({
+        loaded: true,
+        model_id: "0.6b",
+        device: "mps",
+        memory: { device: "mps", total_gb: 16, available_gb: 8 },
+      });
+      vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
+      await ttsStore.checkServerHealth();
+
+      vi.mocked(ttsClient.generateCustomVoice).mockRejectedValue(
+        new GenerationTimeoutError(30 * 60 * 1000)
+      );
+
+      ttsStore.setText("Hello");
+      await ttsStore.generate();
+
+      expect(ttsStore.state.error).toMatch(/timed out/i);
     });
   });
 
