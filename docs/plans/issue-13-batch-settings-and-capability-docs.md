@@ -160,6 +160,8 @@ Use the normal `pnpm` commands throughout implementation. The one thing still un
 | `src/lib/api/ttsClient.ts` | Typed abort errors, `isCancellation()`, per-call timeout, batch opts out of the total cap. |
 | `src/lib/stores/batchStore.svelte.ts` | Stall watchdog, accurate error reporting, server-side cancel on stall, text-length pre-flight. |
 | `src/lib/stores/ttsStore.svelte.ts` | Uses `isCancellation()`; reports timeouts distinctly. |
+| `src/lib/stores/ttsStore.test.ts` | Mock factory extended with the new exports (Task 3 Step 0) — without it all 74 tests break. |
+| `e2e/production.spec.ts` | Imports mock helpers from `e2e/helpers.ts` instead of defining them. |
 | `src/lib/components/input/CustomVoicePanel.svelte` | `batchMode` prop hides text + Generate. |
 | `src/lib/components/input/VoiceClonePanel.svelte` | Same. |
 | `src/lib/components/input/VoiceDesignPanel.svelte` | Same. |
@@ -175,6 +177,7 @@ Use the normal `pnpm` commands throughout implementation. The one thing still un
 | `src/lib/stores/batchStore.test.ts` | Covers stall watchdog, error classification, pre-flight. |
 | `src/lib/components/input/BatchSummary.test.ts` | Covers per-mode summary rows. |
 | `python/tests/test_inference_warmup.py` | Covers the pad_token_id assignment. |
+| `e2e/helpers.ts` | Shared Tauri/API mocks, moved out of `production.spec.ts` so specs never import specs. |
 | `e2e/batch-settings.spec.ts` | Regression for the reported flow. |
 
 ---
@@ -241,6 +244,28 @@ mod tests {
     fn substring_matches_do_not_false_positive() {
         // "error" inside a longer word must not promote the line to ERROR.
         assert_eq!(classify_log_line("[10:40:20] INFO - errorless run completed", false), "INFO");
+        // "ERRORS" is a different word and must not match the ERROR token.
+        assert_eq!(classify_log_line("ERRORS everywhere", true), "WARNING");
+    }
+
+    #[test]
+    fn python_exception_lines_are_errors() {
+        // A traceback's last line carries the actual failure and has no level
+        // token. Without this, only the "Traceback" header would be red and the
+        // exception itself would render as a warning.
+        assert_eq!(classify_log_line("ValueError: Unknown speaker: 3f2a-uuid", true), "ERROR");
+        assert_eq!(classify_log_line("RuntimeError: Model not loaded", true), "ERROR");
+        assert_eq!(classify_log_line("  File \"main.py\", line 42, in generate_batch", true), "WARNING");
+    }
+
+    #[test]
+    fn multibyte_lines_do_not_panic() {
+        // contains_token indexes bytes around a match; a non-ASCII neighbour
+        // must not cause a slice on a non-char-boundary.
+        assert_eq!(classify_log_line("日本語ERROR", true), "ERROR");
+        assert_eq!(classify_log_line("émoji ERROR here", true), "ERROR");
+        assert_eq!(classify_log_line("🎉 INFO 🎉", false), "INFO");
+        assert_eq!(classify_log_line("", true), "WARNING");
     }
 }
 ```
@@ -248,10 +273,12 @@ mod tests {
 - [ ] **Step 2: Run the test to verify it fails**
 
 ```bash
-cd src-tauri && cargo test classify
+cd src-tauri && cargo test
 ```
 
 Expected: FAIL — `cannot find function 'classify_log_line' in this scope`.
+
+(Do not narrow this to `cargo test classify`: no test *name* contains "classify", so the filter matches nothing and the run would look misleadingly clean once it compiles.)
 
 - [ ] **Step 3: Implement the classifier**
 
@@ -269,7 +296,11 @@ Replace `parse_log_level` (`src-tauri/src/lib.rs:74-84`) with:
 fn classify_log_line(line: &str, is_stderr: bool) -> String {
     // Explicit level tokens win on either stream. Uppercase-only, and
     // bounded by a non-alphanumeric neighbour, so "errorless" is not an error.
-    if contains_token(line, "CRITICAL") || contains_token(line, "ERROR") || line.starts_with("Traceback") {
+    if contains_token(line, "CRITICAL")
+        || contains_token(line, "ERROR")
+        || line.starts_with("Traceback")
+        || is_python_exception_line(line)
+    {
         return "ERROR".to_string();
     }
     if contains_token(line, "WARNING") || contains_token(line, "WARN") {
@@ -287,6 +318,28 @@ fn classify_log_line(line: &str, is_stderr: bool) -> String {
     } else {
         "INFO".to_string()
     }
+}
+
+/// True for the final line of a Python traceback, e.g. `ValueError: boom`.
+///
+/// Only the `Traceback (most recent call last):` header is recognisable by
+/// prefix; the line that actually names the failure carries no level token, so
+/// without this a crash would render as a warning while its header rendered red.
+/// Deliberately strict: the line must START with an `*Error`/`*Exception`
+/// identifier followed by a colon, so prose merely mentioning an error is unaffected.
+fn is_python_exception_line(line: &str) -> bool {
+    let Some((head, _)) = line.split_once(':') else {
+        return false;
+    };
+    if head.is_empty() || head.len() > 64 {
+        return false;
+    }
+    // Allow dotted paths such as `requests.exceptions.HTTPError`.
+    if !head.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+        return false;
+    }
+    let name = head.rsplit('.').next().unwrap_or(head);
+    name.ends_with("Error") || name.ends_with("Exception")
 }
 
 /// True when `token` appears in `line` as a standalone word.
@@ -550,10 +603,13 @@ Add to `.github/workflows/ci.yml` after the `rust-tests` job:
         with:
           python-version: '3.11'
 
-      # conftest.py mocks torch and the heavy ML stack, so the suite only
-      # needs the web layer installed.
+      # conftest.py mocks torch and the heavy ML stack, so the suite only needs
+      # the web layer. python-multipart is NOT optional: main.py declares
+      # Form()/UploadFile routes (:696-700) and FastAPI raises
+      # `RuntimeError: Form data requires "python-multipart" to be installed`
+      # at route-definition time, so the job would die during collection.
       - name: Install test dependencies
-        run: python -m pip install pytest fastapi httpx pydantic
+        run: python -m pip install pytest fastapi httpx pydantic python-multipart
 
       - name: Run backend tests
         run: python -m pytest tests/ -q
@@ -577,6 +633,64 @@ Root cause C. Fixes both the reported `"Batch generation failed"` and the false 
 - Modify: `src/lib/api/ttsClient.ts:180`, `209-226`, `361-450`
 - Modify: `src/lib/stores/ttsStore.svelte.ts:241-249`
 - Test: `src/lib/api/ttsClient.test.ts`
+- **Test: `src/lib/stores/ttsStore.test.ts` — its mock factory MUST be extended first (Step 0) or all 74 tests in the file break.**
+
+> **Step 0 is not optional.** `ttsStore.test.ts:3-27` mocks `$lib/api/ttsClient` with a *closed* factory that returns only `ttsClient` and `PRESET_SPEAKERS`. The moment `ttsStore.svelte.ts` imports `isCancellation` and `GenerationTimeoutError` from that module, both resolve to `undefined` under the mock: `isCancellation(e)` throws `TypeError: isCancellation is not a function`, and `e instanceof GenerationTimeoutError` throws `Right-hand side of 'instanceof' is not callable`. Every error-path test in the file fails.
+
+- [ ] **Step 0: Extend the existing mock factory before touching the store**
+
+In `src/lib/stores/ttsStore.test.ts`, the factory at line 3 currently ends with `PRESET_SPEAKERS: [...]`. Add the three new exports the store will import. Define the classes inline — the factory is hoisted above imports, so it cannot reference the real module:
+
+```ts
+vi.mock("$lib/api/ttsClient", () => {
+  // Hoisted above imports, so these are redefined rather than imported.
+  // They must behave like the real ones: ttsStore branches on them.
+  class GenerationCancelledError extends Error {
+    constructor(message = "Generation cancelled") {
+      super(message);
+      this.name = "GenerationCancelledError";
+    }
+  }
+  class GenerationTimeoutError extends Error {
+    readonly timeoutMs: number;
+    constructor(timeoutMs: number) {
+      super(`Generation timed out after ${Math.round(timeoutMs / 60000)} minutes`);
+      this.name = "GenerationTimeoutError";
+      this.timeoutMs = timeoutMs;
+    }
+  }
+  return {
+    ttsClient: {
+      health: vi.fn(),
+      getModelStatus: vi.fn(),
+      loadModel: vi.fn(),
+      generateCustomVoice: vi.fn(),
+      generateVoiceClone: vi.fn(),
+      generateVoiceDesign: vi.fn(),
+      abortGeneration: vi.fn(),
+    },
+    GenerationCancelledError,
+    GenerationTimeoutError,
+    isCancellation: (e: unknown) =>
+      e instanceof GenerationCancelledError ||
+      (e instanceof DOMException && e.name === "AbortError"),
+    SINGLE_GENERATION_TIMEOUT_MS: 30 * 60 * 1000,
+    PRESET_SPEAKERS: [
+      "aiden",
+      "dylan",
+      "eric",
+      "ono_anna",
+      "ryan",
+      "serena",
+      "sohee",
+      "uncle_fu",
+      "vivian",
+    ] as const,
+  };
+});
+```
+
+Run `pnpm test:run src/lib/stores/ttsStore.test.ts` — 74 tests must still pass *before* you change the store.
 
 **Interfaces:**
 - Consumes: nothing.
@@ -631,15 +745,50 @@ describe('abort reasons (issue #13)', () => {
     );
 
     const pending = ttsClient.generateCustomVoice({ text: 'hello', speaker: 'aiden' });
+    // Attach the handler BEFORE advancing: the rejection happens *during*
+    // advanceTimersByTimeAsync, and an unhandled rejection fails the run.
+    const assertion = expect(pending).rejects.toBeInstanceOf(GenerationTimeoutError);
+    const captured = pending.catch((e) => e);
+
     await vi.advanceTimersByTimeAsync(SINGLE_GENERATION_TIMEOUT_MS + 1000);
 
-    await expect(pending).rejects.toBeInstanceOf(GenerationTimeoutError);
-    await pending.catch((e) => {
-      expect((e as InstanceType<typeof GenerationTimeoutError>).timeoutMs)
-        .toBe(SINGLE_GENERATION_TIMEOUT_MS);
-      // A timeout is not a cancellation — the user did not ask for this.
-      expect(isCancellation(e)).toBe(false);
-    });
+    await assertion;
+    const e = await captured;
+    expect((e as InstanceType<typeof GenerationTimeoutError>).timeoutMs)
+      .toBe(SINGLE_GENERATION_TIMEOUT_MS);
+    // A timeout is not a cancellation — the user did not ask for this.
+    expect(isCancellation(e)).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('a finished generation cannot be aborted by its own stale timer', async () => {
+    vi.useFakeTimers();
+    const { SINGLE_GENERATION_TIMEOUT_MS } = await import('./ttsClient');
+
+    // Pre-existing latent bug this rewrite fixes: the old timeout closure
+    // referenced `this._abortController` (the field), and nothing cleared the
+    // timer on NORMAL completion — only on abort. So a timer armed by request A
+    // fired later and aborted whichever request happened to be in flight.
+    fetchMock.mockResolvedValueOnce(blobResponse());
+    await ttsClient.generateCustomVoice({ text: 'first', speaker: 'aiden' });
+
+    let secondSettled = false;
+    fetchMock.mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = (init as RequestInit)?.signal as AbortSignal;
+          signal?.addEventListener('abort', () => { secondSettled = true; reject(signal.reason); }, { once: true });
+        }) as Promise<Response>
+    );
+    const second = ttsClient.generateCustomVoice({ text: 'second', speaker: 'aiden' });
+    const guard = second.catch(() => {});
+
+    // Advance past when the FIRST request's timer would have fired.
+    await vi.advanceTimersByTimeAsync(SINGLE_GENERATION_TIMEOUT_MS - 1000);
+    expect(secondSettled).toBe(false);
+
+    ttsClient.abortGeneration();
+    await guard;
     vi.useRealTimers();
   });
 
@@ -1020,6 +1169,94 @@ describe('batchStore error reporting (issue #13)', () => {
     ttsClient.abortGeneration();
     await running;
   });
+
+  it('stalls out even when the server never answers the progress poll', async () => {
+    vi.useFakeTimers();
+    const { batchStore, BATCH_STALL_TIMEOUT_MS } = await import('./batchStore.svelte');
+    const { ttsClient, GenerationCancelledError } = await import('$lib/api/ttsClient');
+
+    await batchStore.addFiles([new File(['hello'], 'one.txt', { type: 'text/plain' })]);
+
+    let rejectBatch: (reason: unknown) => void = () => {};
+    vi.mocked(ttsClient.generateBatch).mockImplementation(
+      () => new Promise<Blob>((_resolve, reject) => { rejectBatch = reject; })
+    );
+    vi.mocked(ttsClient.abortGeneration).mockImplementation(() => {
+      rejectBatch(new GenerationCancelledError());
+    });
+    vi.mocked(ttsClient.cancelBatch).mockResolvedValue(undefined);
+
+    // A wedged server: connections accepted, nothing ever answered. Generation
+    // runs on a worker thread, so a native hang blocks the event loop and the
+    // poll never settles. If staleness were only checked after a successful
+    // poll, this batch would hang forever now that the total timeout is gone.
+    vi.mocked(ttsClient.getBatchProgress).mockImplementation(() => new Promise(() => {}));
+
+    const running = batchStore.startBatch(REQUEST);
+    await vi.advanceTimersByTimeAsync(BATCH_STALL_TIMEOUT_MS + 2000);
+    await running;
+
+    expect(batchStore.state.progress.status).toBe('error');
+    expect(batchStore.state.error).toMatch(/no progress/i);
+    expect(batchStore.state.isProcessing).toBe(false);
+  });
+
+  it('does not hang when the cancel request itself never returns', async () => {
+    vi.useFakeTimers();
+    const { batchStore, BATCH_STALL_TIMEOUT_MS } = await import('./batchStore.svelte');
+    const { ttsClient, GenerationCancelledError } = await import('$lib/api/ttsClient');
+
+    await batchStore.addFiles([new File(['hello'], 'one.txt', { type: 'text/plain' })]);
+
+    let rejectBatch: (reason: unknown) => void = () => {};
+    vi.mocked(ttsClient.generateBatch).mockImplementation(
+      () => new Promise<Blob>((_resolve, reject) => { rejectBatch = reject; })
+    );
+    vi.mocked(ttsClient.abortGeneration).mockImplementation(() => {
+      rejectBatch(new GenerationCancelledError());
+    });
+    vi.mocked(ttsClient.getBatchProgress).mockResolvedValue(idleProgress());
+
+    // /cancel-generation hangs too. Awaiting it before aborting would mean the
+    // abort never happens and the batch never settles — the watchdog would
+    // itself hang. Aborting first makes the outcome independent of this call.
+    vi.mocked(ttsClient.cancelBatch).mockImplementation(() => new Promise(() => {}));
+
+    const running = batchStore.startBatch(REQUEST);
+    await vi.advanceTimersByTimeAsync(BATCH_STALL_TIMEOUT_MS + 2000);
+    await running;
+
+    expect(batchStore.state.isProcessing).toBe(false);
+    expect(batchStore.state.error).toMatch(/no progress/i);
+  });
+
+  it('tells the user nothing was saved, since a partial batch produces no files', async () => {
+    vi.useFakeTimers();
+    const { batchStore, BATCH_STALL_TIMEOUT_MS } = await import('./batchStore.svelte');
+    const { ttsClient, GenerationCancelledError } = await import('$lib/api/ttsClient');
+
+    await batchStore.addFiles([new File(['hello'], 'one.txt', { type: 'text/plain' })]);
+
+    let rejectBatch: (reason: unknown) => void = () => {};
+    vi.mocked(ttsClient.generateBatch).mockImplementation(
+      () => new Promise<Blob>((_resolve, reject) => { rejectBatch = reject; })
+    );
+    vi.mocked(ttsClient.abortGeneration).mockImplementation(() => {
+      rejectBatch(new GenerationCancelledError());
+    });
+    vi.mocked(ttsClient.cancelBatch).mockResolvedValue(undefined);
+    vi.mocked(ttsClient.getBatchProgress).mockResolvedValue(
+      idleProgress({ total: 10, completed: 6 })
+    );
+
+    const running = batchStore.startBatch(REQUEST);
+    await vi.advanceTimersByTimeAsync(BATCH_STALL_TIMEOUT_MS + 2000);
+    await running;
+
+    // The ZIP is only built after the final item, so "6 of 10 finished" must not
+    // be phrased as though six files were delivered.
+    expect(batchStore.state.error).toMatch(/no files were saved/i);
+  });
 });
 ```
 
@@ -1055,9 +1292,16 @@ const POLL_INTERVAL_MS = 500;
  * Issue #13: a fixed total budget cannot suit both a 2-item batch and a 50-item
  * one. Liveness is the right signal — the progress poll already runs, so a
  * batch is healthy for as long as `completed` or `current_item` keeps moving.
- * 15 minutes comfortably clears a slow CPU-only item (~5 minutes observed).
+ *
+ * Deliberately generous. The server streams nothing until the whole ZIP is
+ * built, so tripping this discards every item already generated — a false
+ * positive is destructive, while a late true positive merely delays an outcome
+ * the user is going to get anyway. The window must therefore clear the SLOWEST
+ * plausible single item, not the average: the issue reporter saw ~5 minutes per
+ * item, and a full 2,000-character item on a CPU-only machine can run several
+ * times that.
  */
-export const BATCH_STALL_TIMEOUT_MS = 15 * 60 * 1000;
+export const BATCH_STALL_TIMEOUT_MS = 30 * 60 * 1000;
 ```
 
 Replace the polling and `startBatch` block (lines 104-166):
@@ -1080,16 +1324,18 @@ Replace the polling and `startBatch` block (lines 104-166):
     return `${progress.completed}|${progress.current_item}|${progress.status}`;
   }
 
-  async function handleStall() {
+  function handleStall() {
     stalledOut = true;
-    // Tell the server to stop before dropping the connection. Without this it
-    // keeps generating into a socket nobody is reading (issue #13: 25 minutes of it).
-    try {
-      await ttsClient.cancelBatch();
-    } catch {
-      // Best-effort — we are giving up either way.
-    }
+    // Abort FIRST. abortGeneration is local and synchronous, so it guarantees
+    // generateBatch rejects and the `finally` runs (clearing this interval).
+    // Awaiting the network call first would mean a hung /cancel-generation
+    // leaves the batch pending forever — the exact hang this watchdog exists
+    // to end. The two are independent requests; cancelBatch is best-effort
+    // courtesy so the server stops burning CPU (issue #13: 25 minutes of it).
     ttsClient.abortGeneration();
+    void ttsClient.cancelBatch().catch(() => {
+      // Best-effort — we are giving up either way.
+    });
   }
 
   function startPolling() {
@@ -1097,29 +1343,45 @@ Replace the polling and `startBatch` block (lines 104-166):
     lastProgressAt = Date.now();
     lastProgressKey = "";
     stalledOut = false;
+    let pollInFlight = false;
 
-    progressTimer = setInterval(async () => {
-      let progress: BatchProgress;
-      try {
-        progress = await ttsClient.getBatchProgress();
-      } catch {
-        // A dead server surfaces through the generateBatch rejection instead;
-        // a transient poll failure should not be read as a stall.
+    progressTimer = setInterval(() => {
+      if (stalledOut) return;
+
+      // Staleness is judged on the CLIENT tick, never behind an await. A server
+      // that accepts connections but never answers (generation runs via
+      // asyncio.to_thread, so a native hang blocks the event loop) would leave
+      // an awaited poll pending forever — and with no total timeout any more,
+      // the batch would hang indefinitely. The tick always fires; the poll is
+      // merely how we learn about progress.
+      if (Date.now() - lastProgressAt >= BATCH_STALL_TIMEOUT_MS) {
+        handleStall();
         return;
       }
 
-      state.progress = progress;
+      // Never stack polls against an unresponsive server.
+      if (pollInFlight) return;
+      pollInFlight = true;
 
-      const key = progressKey(progress);
-      if (key !== lastProgressKey) {
-        lastProgressKey = key;
-        lastProgressAt = Date.now();
-        return;
-      }
-
-      if (!stalledOut && Date.now() - lastProgressAt >= BATCH_STALL_TIMEOUT_MS) {
-        await handleStall();
-      }
+      void ttsClient
+        .getBatchProgress()
+        .then((progress) => {
+          state.progress = progress;
+          const key = progressKey(progress);
+          if (key !== lastProgressKey) {
+            lastProgressKey = key;
+            lastProgressAt = Date.now();
+          }
+          // A poll that succeeds but reports no movement is NOT progress:
+          // lastProgressAt stays put and the deadline keeps running.
+        })
+        .catch(() => {
+          // A failed poll is not progress either. Deliberately does not touch
+          // lastProgressAt, so a server that stops answering still stalls out.
+        })
+        .finally(() => {
+          pollInFlight = false;
+        });
     }, POLL_INTERVAL_MS);
   }
 
@@ -1158,10 +1420,14 @@ Replace the polling and `startBatch` block (lines 104-166):
     } catch (e) {
       if (stalledOut) {
         const minutes = Math.round(BATCH_STALL_TIMEOUT_MS / 60000);
+        // Do NOT imply the completed items were kept. The server builds the ZIP
+        // only after the last item, so stopping early discards all of them —
+        // saying "N of M finished" would read as N files delivered.
         state.error =
-          `Batch stopped: no progress for ${minutes} minutes. ` +
-          `${state.progress.completed} of ${state.progress.total} finished. ` +
-          `The server was asked to stop.`;
+          `Batch stopped: the server reported no progress for ${minutes} minutes ` +
+          `(it had reached ${state.progress.completed} of ${state.progress.total}). ` +
+          `No files were saved — a batch is only downloadable once every item finishes. ` +
+          `Try a smaller batch or shorter files.`;
         state.progress = { ...state.progress, status: "error" };
       } else if (isCancellation(e)) {
         state.progress = { ...state.progress, status: "cancelled" };
@@ -1226,7 +1492,10 @@ describe('batch file pre-flight (issue #13)', () => {
 
     expect(batchStore.state.files).toHaveLength(0);
     expect(batchStore.state.error).toContain('chapter-one.txt');
-    expect(batchStore.state.error).toContain(String(MAX_BATCH_ITEM_CHARS));
+    // The message renders the limit with toLocaleString(), i.e. "2,000" — not
+    // String(2000). Match either so the assertion tracks the message, not a
+    // guess about its formatting.
+    expect(batchStore.state.error).toMatch(/2,000|2000/);
   });
 
   it('keeps the files that fit when only some are too long', async () => {
@@ -1350,6 +1619,162 @@ Expected: PASS, 7 tests.
 ```bash
 git add src/lib/stores/batchStore.svelte.ts src/lib/stores/batchStore.test.ts
 git commit -m "feat(batch): reject oversized text files before upload and name the offender"
+```
+
+---
+
+## Task 5b: Make a server-side batch failure survivable and diagnosable
+
+Two defects found while re-reading the batch loop, both specific to batch and invisible to single-generation testing.
+
+**Files:**
+- Modify: `python/tts_server/main.py:859-937` (the batch loop and its handler)
+- Test: `python/tests/test_api.py`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: no signature changes. Batch 500s gain an item-scoped `detail`; device cache is reclaimed between items.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `python/tests/test_api.py`, matching the existing `_get_client()` style:
+
+```python
+def test_batch_failure_names_the_item_that_failed():
+    """A 500 from a batch used to say only "Internal server error", so a user
+    could not tell which of N files broke, or how far the run got."""
+    model = _make_mock_model(loaded=True)
+    model.generate_custom_voice.side_effect = [
+        (b"ok", "audio/wav"),
+        RuntimeError("kaboom"),
+    ]
+
+    with patch("tts_server.main.get_model", return_value=model):
+        client = _get_client()
+        response = client.post("/generate/batch", json={
+            "mode": "custom-voice",
+            "speaker": "aiden",
+            "items": [
+                {"text": "one", "output_filename": "one.wav"},
+                {"text": "two", "output_filename": "two.wav"},
+            ],
+        })
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert "two.wav" in detail                    # which item failed
+    assert "item 2 of 2" in detail                # how far the run got
+    assert "kaboom" not in detail                 # no internals leaked
+    assert "No files were produced" in detail     # sets the right expectation
+
+
+def test_batch_reclaims_device_memory_between_items():
+    """A batch runs N generations back to back. Without reclaiming between
+    items, a long batch accumulates device memory that single generation never
+    does, because that returns to idle between requests."""
+    model = _make_mock_model(loaded=True)
+
+    with patch("tts_server.main.get_model", return_value=model), \
+         patch("tts_server.main.clear_cache") as clear_cache:
+        client = _get_client()
+        response = client.post("/generate/batch", json={
+            "mode": "custom-voice",
+            "speaker": "aiden",
+            "items": [
+                {"text": "one", "output_filename": "one.wav"},
+                {"text": "two", "output_filename": "two.wav"},
+                {"text": "three", "output_filename": "three.wav"},
+            ],
+        })
+
+    assert response.status_code == 200
+    assert clear_cache.call_count >= 3
+```
+
+Mirror whatever auth header the neighbouring tests pass to `_get_client()`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+```bash
+cd python && .venv/bin/python -m pytest tests/test_api.py -k batch_failure_names -v
+cd python && .venv/bin/python -m pytest tests/test_api.py -k reclaims_device -v
+```
+
+Expected: FAIL — the detail is `"Internal server error"`, and `clear_cache` is never imported into `main`.
+
+- [ ] **Step 3: Reclaim device memory between items**
+
+In `python/tts_server/main.py`, extend the existing `from .device import (...)` block (around line 43) to include `clear_cache`.
+
+Add this helper next to the other module-level helpers (near `sanitize_output_filename`, line 350). Every step is guarded — a cleanup failure must never fail a batch that has otherwise succeeded:
+
+```python
+def reclaim_device_memory(model) -> None:
+    """Best-effort device cache reclaim between batch items.
+
+    Single generation returns the process to idle between requests; a batch
+    does not, so a long run accumulates device memory that no single-generation
+    test would ever surface (issue #13 ran seven long voice-clone items).
+    """
+    device = getattr(getattr(model, "config", None), "device", None)
+    if not device:
+        return
+    try:
+        clear_cache(device)
+    except Exception as e:  # pragma: no cover - never fail a batch on cleanup
+        logger.debug("Could not reclaim device memory: %s", e)
+```
+
+Then call it at the end of each loop iteration, right after `_batch_progress.increment_completed()` (line 920). Run it off the event loop, matching how generation itself is dispatched:
+
+```python
+                archive.writestr(output_filename, audio_bytes)
+                _batch_progress.increment_completed()
+                await asyncio.to_thread(reclaim_device_memory, model)
+```
+
+Note the test patches `tts_server.main.clear_cache`, so the import must land in `main`'s namespace (`from .device import clear_cache`), not be reached through `device.clear_cache`.
+
+- [ ] **Step 4: Name the item that failed**
+
+Replace the batch handler's generic `except Exception` (main.py:934-937). Track the current item so the message can name it — declare `current_index = 0` and `current_name = ""` before the `try`, assign them at the top of each iteration, then:
+
+```python
+    except Exception:
+        _batch_progress.set_status("error")
+        # Log the traceback for the Debug console, but return only what is safe
+        # and useful: which item died and how far the run got. Issue #13's
+        # reporter had no way to tell either from "Internal server error".
+        logger.exception(
+            "Batch generation failed on item %d of %d (%s)",
+            current_index,
+            len(request.items),
+            current_name,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Batch failed while generating item {current_index} of "
+                f"{len(request.items)} ({current_name}). No files were produced — "
+                f"a batch is only downloadable once every item finishes. "
+                f"See the Debug console for details."
+            ),
+        )
+```
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+```bash
+cd python && .venv/bin/python -m pytest tests/ -q
+```
+
+Expected: all pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add python/tts_server/main.py python/tests/test_api.py
+git commit -m "fix(batch): reclaim device memory between items and name the failing item"
 ```
 
 ---
@@ -1563,7 +1988,22 @@ Then rewrite the region from line 933 (`{#if batchModeEnabled && batchMode}`) th
         {/if}
 ```
 
-The outer `space-y-4` wrapper and the batch-mode toggle block (lines 913-931) are unchanged. Replace the remaining `batchModeEnabled && batchMode` occurrence in the output panel (line 1034) with `inBatchMode` for consistency.
+The outer `space-y-4` wrapper is unchanged. Replace the remaining `batchModeEnabled && batchMode` occurrence in the output panel (line 1034) with `inBatchMode` for consistency.
+
+One fix in the toggle block (lines 913-931): the switch sits outside the locked region, so it stays clickable while a batch runs — and toggling it mid-run hides the batch UI while the request is still in flight. Add `disabled` to the toggle button:
+
+```svelte
+            <button
+              class="relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed {batchMode ? 'bg-[var(--color-accent-cyan)]' : 'bg-[var(--color-bg-hover)]'}"
+              role="switch"
+              aria-checked={batchMode}
+              aria-label="Toggle batch mode"
+              disabled={batchState.isProcessing}
+              onclick={handleBatchModeToggle}
+            >
+```
+
+This is pre-existing behaviour, but the restructure makes it reachable in more situations, so it belongs with this change.
 
 Every prop above is copied verbatim from the current call sites — only `batchMode={inBatchMode}` is new. If a prop name has drifted, trust the file over this plan.
 
@@ -1641,7 +2081,11 @@ describe('BatchSummary', () => {
   it('warns when voice clone has no reference audio, before the batch is started', () => {
     render(BatchSummary, { props: { ...BASE, mode: 'voice-clone', referenceAudioName: null } });
 
-    expect(screen.getByText(/reference audio/i)).toBeTruthy();
+    // Two elements mention reference audio here — the summary row and the
+    // warning — so getByText would throw "Found multiple elements". Assert the
+    // warning specifically; that is the part that tells the user what to do.
+    expect(screen.getByText('Add reference audio above before starting the batch.')).toBeTruthy();
+    expect(screen.getByText('No reference audio selected')).toBeTruthy();
   });
 
   it('reports a random seed when none is pinned', () => {
@@ -1862,10 +2306,9 @@ In `src/routes/+page.svelte`, add the import beside the other input imports:
   import BatchSummary from "$lib/components/input/BatchSummary.svelte";
 ```
 
-Insert between the mode-panel block and `<BatchPanel>` (see Task 6, step 4):
+Replace the `<!-- BatchSummary is inserted here in Task 7 -->` comment left by Task 6 — it sits inside that task's existing `{#if inBatchMode}` block, so no new guard is needed:
 
 ```svelte
-        {#if batchModeEnabled && batchMode}
           <BatchSummary
             mode={ttsState.mode}
             modelId={ttsState.modelId}
@@ -1881,7 +2324,6 @@ Insert between the mode-panel block and `<BatchPanel>` (see Task 6, step 4):
             bitDepth={settingsStore.state.wavBitDepth}
             seed={localSeed}
           />
-        {/if}
 ```
 
 - [ ] **Step 6: Verify**
@@ -1992,7 +2434,11 @@ Insert immediately after the `voice-controls` entry:
         },
         {
           title: 'How long a batch takes',
-          text: 'Time scales with the number of files. A single item takes seconds on a GPU but several minutes on a CPU-only machine, so a large batch can run for hours. Progress shows the current file and completed count. If the server stops making progress for 15 minutes the batch is stopped and the server is told to stand down, and any files already finished are reported.',
+          text: 'Time scales with the number of files. A single item takes seconds on a GPU but several minutes on a CPU-only machine, so a large batch can run for hours. Progress shows the current file and completed count. There is no overall time limit — a batch is considered healthy for as long as it keeps advancing.',
+        },
+        {
+          title: 'A batch is all-or-nothing',
+          text: 'Results are packaged into a single ZIP once the last file finishes, so nothing is saved until the whole batch completes. Cancelling partway through, or stopping the app, discards the items generated so far. For a long run, prefer several smaller batches over one large one.',
         },
         {
           title: 'Red rows in the Debug console',
@@ -2022,20 +2468,47 @@ git commit -m "docs(help): document real model capabilities, batch settings, and
 ## Task 9: End-to-end regression for the reported flow
 
 **Files:**
+- Create: `e2e/helpers.ts` (mock helpers moved out of `production.spec.ts`)
 - Create: `e2e/batch-settings.spec.ts`
+- Modify: `e2e/production.spec.ts` (import the moved helpers)
 
 **Interfaces:**
-- Consumes: the Tauri + API mocking helpers used by `e2e/production.spec.ts`.
+- Consumes: the Tauri + API mocking helpers currently living in `e2e/production.spec.ts`.
+- Produces: `e2e/helpers.ts` exporting `MockServerState`, `defaultMockState`, `makeWavBytes`, `setupMocks`.
 
-- [ ] **Step 1: Export the mock helpers for reuse**
+- [ ] **Step 1: Extract the mock helpers into a non-spec module**
 
-`setupMocks`, `defaultMockState` and `MockServerState` are module-private in `e2e/production.spec.ts`. Add `export` to each of those three declarations so the new spec reuses one mocking approach rather than inventing a second. Do not change their bodies.
+`setupMocks`, `defaultMockState`, `MockServerState` and `makeWavBytes` are module-private in `e2e/production.spec.ts`.
+
+**Do not simply export them and import the spec from another spec.** `playwright.config.ts` sets `testDir: './e2e'` with the default `testMatch`, so `production.spec.ts` is itself a test file. Importing it from `batch-settings.spec.ts` executes its top-level `test.describe()` blocks during collection of the *importing* file — its 34 tests get attributed to the wrong file, and Node's module cache then leaves `production.spec.ts` registering nothing when loaded for itself. That is a known Playwright anti-pattern.
+
+Instead, **move** those four declarations (bodies unchanged) into a new `e2e/helpers.ts`. `helpers.ts` does not match `testMatch`, so Playwright will not collect it:
 
 ```ts
-export interface MockServerState {
-export const defaultMockState: MockServerState = {
+// e2e/helpers.ts
+import type { Page, Route } from '@playwright/test';
+
+export interface MockServerState { /* body moved verbatim */ }
+export const defaultMockState: MockServerState = { /* moved verbatim */ };
+export function makeWavBytes(): Uint8Array { /* moved verbatim */ }
 export async function setupMocks(page: Page, mockState: MockServerState = defaultMockState) {
+  /* moved verbatim */
+}
 ```
+
+Then add to `e2e/production.spec.ts`, replacing the moved declarations:
+
+```ts
+import { setupMocks, defaultMockState, makeWavBytes, type MockServerState } from './helpers';
+```
+
+Re-run the existing suite before writing anything new — the move must be behaviour-neutral:
+
+```bash
+pnpm test:e2e
+```
+
+Expected: the existing 90 tests still pass, still attributed to their own files.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -2043,7 +2516,7 @@ Create `e2e/batch-settings.spec.ts`:
 
 ```ts
 import { test, expect, Page } from '@playwright/test';
-import { setupMocks, defaultMockState } from './production.spec';
+import { setupMocks, defaultMockState } from './helpers';
 
 /**
  * Issue #13 regressions.
@@ -2238,20 +2711,23 @@ git commit -m "test(e2e): cover batch settings visibility and capability docs fo
 
 Append to `python/tests/test_api.py`:
 
+`test_api.py` has **no** `client` pytest fixture — it uses a module-level `_get_client()` helper (line 58) that every test calls itself. Match that, or the test fails with "fixture 'client' not found":
+
 ```python
-def test_health_reports_the_package_version(client):
+def test_health_reports_the_package_version():
     """The server version was hardcoded to 1.0.0 in two places and drifted
     behind __init__.py (verified live during the issue #13 investigation:
     {"status":"ok","version":"1.0.0"} while the package said 1.0.3)."""
     from tts_server import __version__
 
+    client = _get_client()
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json()["version"] == __version__
 ```
 
-Use whatever client fixture `python/tests/test_api.py` already defines; match its existing style rather than adding a new one.
+Check how neighbouring tests handle auth headers when calling `_get_client()` and follow the same pattern.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -2341,7 +2817,7 @@ git commit -m "chore: bump version to 1.0.4 and derive the server version from t
 
 Found during investigation, deliberately not addressed here:
 
-- **`wavChannels` is a dead setting.** Present in `settingsStore` and the Settings UI, never sent by any request path. Either wire it through or remove it — a separate change with its own audio-quality verification.
+- **`wavChannels` is a dead setting.** Declared in `settingsStore.svelte.ts:19,44` (and its test) but exposed by no Settings control and sent by no request path — the mono/stereo choice cannot be made or applied. Either wire it through or remove it; a separate change with its own audio verification.
 - **`mp3_bitrate` is a dead field** on the TS `BatchRequest` interface. There is no bitrate setting in the UI (the Settings label hardcodes "192kbps"), so nothing is broken today, but CLAUDE.md's claim of a "configurable bitrate" is aspirational. Remove the field or add the setting, separately.
 - **Advanced sampling sliders** (`temperature`, `top_p`, `top_k`, `repetition_penalty`). The model supports them; the maintainer's scope decision for 1.0.4 is documentation only. They control randomness and stability, not speed, so shipping them under the banner of this issue would answer a question nobody asked.
 - **Chunking oversized `.txt` files** into multiple items. Task 5 rejects them with a clear message; automatic splitting needs a sentence-boundary strategy and a naming scheme for the pieces.
@@ -2373,4 +2849,37 @@ After the PR merges to `main`:
 
 ## Review Adjudication
 
-_To be filled in after the clean-eyes review, before implementation begins._
+A clean-eyes reviewer with no prior context verified the plan against the codebase. Its verdict on the diagnosis: all root causes reproduce at the claimed lines, all capability claims are true against the installed `qwen_tts`, and an independent fifth-cause sweep found nothing missed. Every finding below was re-verified here before being applied — none was taken on trust.
+
+### Accepted — blocking
+
+- **B1. Task 3 would have broken 74 existing tests.** Verified: `ttsStore.test.ts:3-27` is a *closed* `vi.mock` factory returning only `ttsClient` and `PRESET_SPEAKERS`. Importing `isCancellation`/`GenerationTimeoutError` into the store makes both `undefined` under that mock, throwing in the new catch block. The plan had reasoned about this correctly for the *new* batchStore mock and missed the pre-existing one. Fixed: Task 3 gains **Step 0**, which extends the factory and re-runs the 74 tests *before* the store changes.
+- **B2. Task 5's test contradicted its own implementation.** Verified in Node: `(2000).toLocaleString()` is `"2,000"`, so `toContain("2000")` could never match. Assertion changed to `/2,000|2000/`.
+- **B3. A `BatchSummary` test would throw on multiple matches.** Verified: with `referenceAudioName: null` the component renders *two* elements matching `/reference audio/i`, so `getByText` throws. Now asserts the two exact strings.
+
+### Accepted — should-fix
+
+- **S1(a). The watchdog could never fire against a wedged server.** I had independently found this via a standalone fake-timer probe: the stall check sat behind `await getBatchProgress()` with `catch { return }`, so it only ran after a *successful* poll. Since this change also removes the total timeout, a server that accepts connections but never answers would have hung **forever** — trading a too-short timeout for none at all. Fixed: staleness is judged on the client tick, before any await, and polls no longer stack.
+- **S1(b). `handleStall` could hang itself.** Verified by inspection: it awaited `cancelBatch()` *before* `abortGeneration()`, so a hung `/cancel-generation` meant the abort never fired, `generateBatch` never settled, and the `finally` never cleared the interval. Fixed: abort first (local and synchronous), then fire-and-forget the cancel. Three new tests cover the wedged-server, hung-cancel, and no-files-saved cases.
+- **S2. Importing a spec from a spec.** Verified `playwright.config.ts` uses `testDir: './e2e'` with default `testMatch`, so `production.spec.ts` is itself collected; importing it would attribute its 34 tests to the importing file. Fixed: helpers **move** to `e2e/helpers.ts`, which `testMatch` does not collect.
+- **S3. The new Python CI job would die at collection.** `main.py:696-700` declares `Form()`/`UploadFile` routes and FastAPI raises at route-definition time without `python-multipart`. It is in `requirements.txt`, but the job installs a minimal list that omitted it. Added.
+- **S4. Unhandled-rejection risk.** The timeout test's promise rejects *during* `advanceTimersByTimeAsync` with no handler attached. Fixed: attach before advancing.
+- **S5. A pytest fixture that does not exist.** Verified: `test_api.py` has no `client` fixture, only a module-level `_get_client()` (line 58). Sample rewritten.
+
+### Accepted — from CONSIDER
+
+- **Tracebacks rendered as warnings.** Only the `Traceback` header was ERROR; the line naming the actual failure has no level token. Added `is_python_exception_line`, compiled and tested standalone across 17 cases — it promotes `ValueError: …` and dotted paths like `requests.exceptions.HTTPError:` while leaving Windows paths, URLs, uvicorn access logs and prose-with-colons alone.
+- **The stall window was dangerous, not just tight.** The reviewer noted a false stall *loses every finished item*, because the ZIP is only built after the last one — and that both the error message ("N of M finished") and the Help text ("any files already finished are reported") implied files had been delivered. Both were wrong. Window widened 15 → 30 min (a false positive is destructive; a late true positive only delays an outcome the user gets anyway), message rewritten to state plainly that nothing was saved, and Help gains an "A batch is all-or-nothing" subsection.
+- `cargo test classify` matched zero test names → use plain `cargo test`.
+- Task 7 now reuses Task 6's `inBatchMode` rather than re-deriving the condition.
+- The batch-mode toggle sat outside the locked region and stayed clickable mid-run → now `disabled` while processing.
+- `wavChannels` is **not** in the Settings UI as the Out of Scope note claimed — description corrected. Deferral stands.
+- The current timeout closure captures `this._abortController` and is never cleared on normal completion, so a stale timer can abort a *later* generation. Verified by inspection (`ttsClient.ts:212`; the `finally` blocks null the field but leave the timer armed). The rewrite's local `controller` fixes it incidentally — now pinned by a regression test.
+
+### Added independently of the review
+
+- **Task 5b.** `clear_cache()` is called only in `unload()`, never between batch items, so a long batch accumulates device memory in a way single generation never does. Plus: a server-side batch failure returned a bare "Internal server error" naming neither the failing item nor how far the run got.
+
+### Noted, not acted on
+
+- The reporter's phrase "the error batch generation failed **in Debug**" could describe either the UI banner or the Python log line at `main.py:936`. The 777×217 crop cannot settle it. The reviewer's independent sweep found that the literal string `"Batch generation failed"` is reachable *only* via the non-Error rejection path, and that a server crash yields a *different* string (`INTERNAL_ERROR_DETAIL`), which favours the client-timeout reading. Task 5b covers the server-side reading regardless, so the plan does not depend on resolving it.
