@@ -615,6 +615,11 @@
     }
 
     ttsStore.setMode('voice-clone');
+    // Release the previous reference preview before replacing it — picking
+    // voices repeatedly would otherwise leak an object URL per click.
+    if (referenceAudioUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(referenceAudioUrl);
+    }
     await handleReferenceAudioChange(referenceBlob, URL.createObjectURL(referenceBlob));
 
     ttsStore.setCloneLowQualityMode(item.metadata?.lowQualityMode ?? false);
