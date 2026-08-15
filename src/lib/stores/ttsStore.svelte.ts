@@ -176,8 +176,13 @@ function createTTSStore() {
       switch (state.mode) {
         case "custom-voice":
           const speakerId = state.speaker.trim().split(/\s+/)[0];
+          // Preset speakers are the only voices Custom Voice can render. A
+          // non-preset value means a saved clone leaked in from the Voice
+          // picker, so point the user at the mode that can actually use it.
           if (!PRESET_SPEAKERS.includes(speakerId as Speaker)) {
-            throw new Error(`Unknown speaker: ${speakerId}`);
+            throw new Error(
+              "That saved voice can't be used in Custom Voice. Pick it under Voice → Saved to load it in Voice Clone mode."
+            );
           }
           blob = await ttsClient.generateCustomVoice({
             text: state.text,

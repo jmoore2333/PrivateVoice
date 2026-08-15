@@ -1,0 +1,119 @@
+name: Release
+
+# Builds installers for macOS (Apple Silicon + Intel), Windows and Linux, and
+# attaches them to a draft GitHub release. Tauri cannot cross-compile, so each
+# platform builds on its own runner.
+#
+# Trigger by pushing a version tag (v1.0.3), or manually via workflow_dispatch.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and attach the installers to (e.g. v1.0.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS (Apple Silicon)
+            target: aarch64-apple-darwin
+          - os: macos-13
+            label: macOS (Intel)
+            target: x86_64-apple-darwin
+          - os: ubuntu-22.04
+            label: Linux (x86_64)
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            label: Windows (x86_64)
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux bundler needs webkit2gtk and its build-time deps.
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf build-essential curl wget file libssl-dev \
+            libgtk-3-dev libayatana-appindicator3-dev
+
+      - uses: pnpm/action-setup@v2
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The dependency-integrity gate the release script enforces locally.
+      - name: Verify Python dependency hash
+        shell: bash
+        run: |
+          cd python
+          if [ -f requirements.sha256 ]; then
+            EXPECTED=$(cut -d' ' -f1 requirements.sha256)
+            if command -v sha256sum >/dev/null; then
+              ACTUAL=$(sha256sum requirements.txt | cut -d' ' -f1)
+            else
+              ACTUAL=$(shasum -a 256 requirements.txt | cut -d' ' -f1)
+            fi
+            if [ "$EXPECTED" != "$ACTUAL" ]; then
+              echo "requirements.txt hash mismatch — run scripts/update-requirements-hash.sh and commit python/requirements.sha256"
+              exit 1
+            fi
+          fi
+
+      - name: Build Python sidecar
+        shell: bash
+        run: |
+          cd python
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            ./build_sidecar.ps1 || pwsh -File build_sidecar.ps1
+          else
+            chmod +x build_sidecar.sh
+            ./build_sidecar.sh
+          fi
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: PrivateVoice ${{ github.event.inputs.tag || github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

@@ -251,6 +251,53 @@ describe("ttsStore", () => {
       expect(ttsStore.state.error).toBe("Please enter a voice description");
       expect(ttsStore.state.isGenerating).toBe(false);
     });
+
+    // Regression: issue #11. Picking a saved clone under Voice → Saved put the
+    // library item's uuid in the speaker field, surfacing "Unknown speaker: <uuid>".
+    it("rejects a library id as a custom-voice speaker with actionable guidance", async () => {
+      ttsStore.setText("Hello world");
+      ttsStore.setMode("custom-voice");
+      ttsStore.setSpeaker("8f20a31f-ed04-4b85-ac66-d8d5ff03f258" as never);
+
+      vi.mocked(ttsClient.getModelStatus).mockResolvedValue({
+        loaded: true,
+        model_id: "0.6b",
+        device: "mps",
+        memory: { device: "mps", total_gb: 16, available_gb: 8 },
+      });
+      vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
+      await ttsStore.checkServerHealth();
+
+      await ttsStore.generate();
+
+      expect(ttsStore.state.error).toBe(
+        "That saved voice can't be used in Custom Voice. Pick it under Voice → Saved to load it in Voice Clone mode."
+      );
+      expect(ttsStore.state.error).not.toContain("8f20a31f");
+      expect(ttsStore.state.isGenerating).toBe(false);
+    });
+
+    it("still accepts a preset speaker in custom voice", async () => {
+      ttsStore.setText("Hello world");
+      ttsStore.setMode("custom-voice");
+      ttsStore.setSpeaker("aiden");
+
+      vi.mocked(ttsClient.getModelStatus).mockResolvedValue({
+        loaded: true,
+        model_id: "0.6b",
+        device: "mps",
+        memory: { device: "mps", total_gb: 16, available_gb: 8 },
+      });
+      vi.mocked(ttsClient.health).mockResolvedValue({ status: "ok", version: "1.0" });
+      await ttsStore.checkServerHealth();
+      vi.mocked(ttsClient.generateCustomVoice).mockResolvedValue(
+        new Blob(["audio-data"], { type: "audio/wav" })
+      );
+
+      await ttsStore.generate();
+
+      expect(ttsStore.state.error).toBeNull();
+    });
   });
 
   // ==========================================================================

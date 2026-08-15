@@ -22,12 +22,21 @@
     { id: 'sohee', name: 'Sohee', description: 'Warm Korean female', accent: 'Korean' },
   ];
 
+  // Only clones that kept their reference recording can be re-rendered as a
+  // voice. Clips saved before reference audio was persisted stay in the
+  // Library drawer, where they belong — offering them here produced the
+  // "Unknown speaker: <uuid>" failure in issue #11.
   const savedVoices = $derived(
-    libraryStore.saved.filter(item => item.type === 'clone')
+    libraryStore.saved.filter(
+      item => item.type === 'clone' && item.metadata?.hasReferenceAudio
+    )
   );
 
   function selectVoice(id: string, isPreset: boolean) {
-    value = id;
+    // Only presets are speakers. A saved voice is a library id, and writing it
+    // into the bound speaker leaks it into generation and batch requests — the
+    // route that produced "Unknown speaker: <uuid>". The parent loads it instead.
+    if (isPreset) value = id;
     onSelect?.(id, isPreset);
   }
 </script>
@@ -79,14 +88,16 @@
           onclick={() => selectVoice(voice.id, false)}
         >
           <div class="font-medium text-sm text-[var(--color-text-primary)]">{voice.name}</div>
-          {#if voice.comment}
-            <div class="text-xs text-[var(--color-text-muted)] truncate">{voice.comment}</div>
-          {/if}
+          <!-- Custom Voice can only render the presets, so a saved voice moves
+               the app to Voice Clone. Say so before the click, not after. -->
+          <div class="text-xs text-[var(--color-accent)] mt-1">Opens in Voice Clone</div>
         </button>
       {/each}
     {:else}
       <div class="col-span-2 py-8 text-center text-[var(--color-text-muted)] text-sm">
-        No saved voices yet. Clone a voice to save it here.
+        No reusable voices yet. Clone a voice and save it — the reference audio is
+        stored so you can use the voice again. Saved voices open in Voice Clone,
+        the only mode that can render a voice other than the presets.
       </div>
     {/if}
   </div>

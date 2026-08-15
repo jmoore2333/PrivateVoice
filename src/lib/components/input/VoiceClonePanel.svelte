@@ -124,6 +124,7 @@
       <span class="text-sm font-medium text-[var(--color-text-primary)]">Reference Audio</span>
     </div>
     <AudioRecorder
+      restoredAudioUrl={referenceAudioUrl}
       onRecordingComplete={(blob, url) => onReferenceAudioChange?.(blob, url)}
       onImport={(file) => {
         const url = URL.createObjectURL(file);

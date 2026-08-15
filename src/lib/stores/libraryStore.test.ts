@@ -301,6 +301,121 @@ describe('libraryStore (localStorage fallback)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Tests — reference audio (what makes a saved clone reusable as a voice)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('libraryStore reference audio', () => {
+  beforeEach(async () => {
+    tauriAvailable = false;
+    mockFs = {};
+    createdUrls.length = 0;
+    revokedUrls.length = 0;
+    vi.clearAllMocks();
+    await libraryStore.clearAll();
+  });
+
+  it('marks a clone saved with reference audio as reusable', async () => {
+    const reference = makeBlob();
+
+    const result = await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-1', type: 'clone', name: 'Voice 1' }),
+      undefined,
+      reference
+    );
+
+    expect(result.ok).toBe(true);
+    const saved = libraryStore.saved.find(i => i.id === 'ref-1');
+    expect(saved?.metadata?.hasReferenceAudio).toBe(true);
+  });
+
+  it('returns the stored reference blob for reuse', async () => {
+    const reference = makeBlob();
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-1', type: 'clone' }),
+      undefined,
+      reference
+    );
+
+    const roundTripped = await libraryStore.getReferenceBlob('ref-1');
+    expect(roundTripped).toBe(reference);
+  });
+
+  it('leaves a clone saved without reference audio unusable as a voice', async () => {
+    await libraryStore.saveToLibrary(makeItem({ id: 'ref-2', type: 'clone' }));
+
+    const saved = libraryStore.saved.find(i => i.id === 'ref-2');
+    expect(saved?.metadata?.hasReferenceAudio).toBeFalsy();
+    expect(await libraryStore.getReferenceBlob('ref-2')).toBeNull();
+  });
+
+  it('preserves existing metadata when recording the reference flag', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({
+        id: 'ref-3',
+        type: 'clone',
+        metadata: { referenceText: 'Testing, testing.', lowQualityMode: true },
+      }),
+      undefined,
+      makeBlob()
+    );
+
+    const saved = libraryStore.saved.find(i => i.id === 'ref-3');
+    expect(saved?.metadata?.referenceText).toBe('Testing, testing.');
+    expect(saved?.metadata?.lowQualityMode).toBe(true);
+    expect(saved?.metadata?.hasReferenceAudio).toBe(true);
+  });
+
+  it('drops the reference when the item is removed', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-4', type: 'clone' }),
+      undefined,
+      makeBlob()
+    );
+    await libraryStore.removeFromLibrary('ref-4');
+
+    expect(await libraryStore.getReferenceBlob('ref-4')).toBeNull();
+  });
+
+  it('keeps the object URL out of persisted metadata', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-5', type: 'clone' }),
+      undefined,
+      makeBlob()
+    );
+
+    const stored = JSON.parse(localStorage.getItem('privatevoice-library') ?? '{}');
+    expect(stored.saved[0].audioUrl).toBeUndefined();
+    expect(stored.saved[0].metadata.hasReferenceAudio).toBe(true);
+  });
+
+  // Regression guard for the shape of the original bug: an item must never
+  // advertise a voice it cannot deliver. localStorage holds no blobs, so a
+  // restored item's flag is cleared no matter what the stored metadata claims.
+  it('clears the reusable flag for items restored from localStorage', async () => {
+    localStorage.setItem(
+      'privatevoice-library',
+      JSON.stringify({
+        saved: [{
+          id: 'restored-1',
+          type: 'clone',
+          name: 'Voice 1',
+          createdAt: '2026-08-15T00:00:00.000Z',
+          metadata: { referenceText: 'Testing.', hasReferenceAudio: true },
+        }],
+      })
+    );
+
+    await libraryStore.reload();
+
+    const restored = libraryStore.saved.find(i => i.id === 'restored-1');
+    expect(restored).toBeDefined();
+    expect(restored?.metadata?.hasReferenceAudio).toBeFalsy();
+    expect(restored?.metadata?.referenceText).toBe('Testing.');
+    expect(await libraryStore.getReferenceBlob('restored-1')).toBeNull();
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Tests — Tauri FS path (mocked)
 // ──────────────────────────────────────────────────────────────────────────────
 
