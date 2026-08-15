@@ -171,7 +171,7 @@ async function seedLibrary(page: Page, items: Array<{
   createdAt: string;
   comment?: string;
   tags?: string[];
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string | boolean>;
 }>) {
   await page.addInitScript((serializedItems) => {
     localStorage.setItem('privatevoice-library', JSON.stringify({
@@ -418,5 +418,65 @@ test.describe('Voice Library with data', () => {
     await searchInput.clear();
     await expect(page.getByText('Hello World Audio')).toBeVisible();
     await expect(page.getByText('Second Audio Clip')).toBeVisible();
+  });
+});
+
+// =============================================================================
+// ISSUE #11 REGRESSION — saved clones must never become Custom Voice speakers
+// =============================================================================
+//
+// Coverage note: seedLibrary writes localStorage, which requires
+// setupTauriMocks({ failFs: true }) — with failFs off the FS mock returns
+// undefined for every plugin:fs call and the store reads an empty index.
+// localStorage cannot hold a blob, so getReferenceBlob() returns null here and
+// the *successful* reuse path is not reachable in E2E. These tests therefore
+// pin the regression itself: picking a saved voice can never again produce
+// "Unknown speaker". The happy path is covered by libraryStore unit tests and
+// the manual checklist in docs/plans/issue-11-saved-voice-reuse.md.
+
+test.describe('Issue #11 — saved voice in Custom Voice', () => {
+  test('a legacy clone without reference audio is not offered as a voice', async ({ page }) => {
+    await setupTauriMocks(page, { failFs: true });
+    await setupApiMocks(page);
+    await setupBypassOnboarding(page);
+    // The exact item shape that produced "Unknown speaker: <uuid>": saved
+    // before reference audio was persisted, so there is no voice to reuse.
+    await seedLibrary(page, [{
+      id: '8f20a31f-ed04-4b85-ac66-d8d5ff03f258',
+      type: 'clone' as const,
+      name: 'I remember there was like a ti...',
+      createdAt: '2026-08-15T00:00:00.000Z',
+      metadata: { referenceText: 'Testing, testing.' },
+    }]);
+    await navigateAndWait(page);
+
+    await page.locator('nav').getByRole('button', { name: 'Custom Voice' }).click();
+    await page.getByRole('button', { name: 'Saved (0)' }).click();
+
+    await expect(page.getByText(/No reusable voices yet/)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Unknown speaker/)).toHaveCount(0);
+  });
+
+  test('picking a saved voice never raises "Unknown speaker"', async ({ page }) => {
+    await setupTauriMocks(page, { failFs: true });
+    await setupApiMocks(page);
+    await setupBypassOnboarding(page);
+    await seedLibrary(page, [{
+      id: 'voice-profile-1',
+      type: 'clone' as const,
+      name: 'Voice 1',
+      createdAt: '2026-08-15T00:00:00.000Z',
+      metadata: { referenceText: 'Testing, testing.', hasReferenceAudio: true },
+    }]);
+    await navigateAndWait(page);
+
+    await page.locator('nav').getByRole('button', { name: 'Custom Voice' }).click();
+    await page.getByRole('button', { name: 'Saved (1)' }).click();
+    await page.getByText('Voice 1').click();
+
+    // localStorage holds no blob, so this lands on the explicit "no stored
+    // reference audio" notice — never on the raw uuid error.
+    await expect(page.getByText(/no stored reference audio/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/Unknown speaker/)).toHaveCount(0);
   });
 });
