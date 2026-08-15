@@ -88,6 +88,18 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # tauri.conf.json declares resources/uv*, resources/tts_server/**/* and
+      # resources/requirements.txt as bundle resources, and the Tauri build
+      # script fails the whole compile if a glob matches nothing:
+      #   glob pattern resources/uv* path not found or didn't match any files
+      # Those are generated at build time and untracked, so a clean checkout has
+      # none of them. Stage them the same way scripts/build-release.sh does.
+      - name: Stage bundle resources
+        run: |
+          bash scripts/download-uv.sh
+          cp -r python/tts_server src-tauri/resources/tts_server
+          cp python/requirements.txt src-tauri/resources/requirements.txt
+
       - name: Run Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
