@@ -202,3 +202,66 @@ describe('batchStore error reporting (issue #13)', () => {
     expect(batchStore.state.error).toMatch(/no files were saved/i);
   });
 });
+
+describe('batch file pre-flight (issue #13)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('rejects a file over the server per-item limit and names it', async () => {
+    const { batchStore, MAX_BATCH_ITEM_CHARS } = await import('./batchStore.svelte');
+    const tooLong = 'a'.repeat(MAX_BATCH_ITEM_CHARS + 1);
+
+    await batchStore.addFiles([makeTextFile('chapter-one.txt', tooLong)]);
+
+    expect(batchStore.state.files).toHaveLength(0);
+    expect(batchStore.state.error).toContain('chapter-one.txt');
+    // The message renders the limit with toLocaleString(), i.e. "2,000" — not
+    // String(2000). Match either so the assertion tracks the message, not a
+    // guess about its formatting.
+    expect(batchStore.state.error).toMatch(/2,000|2000/);
+  });
+
+  it('keeps the files that fit when only some are too long', async () => {
+    const { batchStore, MAX_BATCH_ITEM_CHARS } = await import('./batchStore.svelte');
+
+    await batchStore.addFiles([
+      makeTextFile('ok.txt', 'short and fine'),
+      makeTextFile('huge.txt', 'a'.repeat(MAX_BATCH_ITEM_CHARS + 1)),
+    ]);
+
+    expect(batchStore.state.files.map((f) => f.name)).toEqual(['ok.txt']);
+    expect(batchStore.state.error).toContain('huge.txt');
+  });
+
+  it('accepts a file exactly at the limit', async () => {
+    const { batchStore, MAX_BATCH_ITEM_CHARS } = await import('./batchStore.svelte');
+
+    await batchStore.addFiles([makeTextFile('edge.txt', 'a'.repeat(MAX_BATCH_ITEM_CHARS))]);
+
+    expect(batchStore.state.files).toHaveLength(1);
+    expect(batchStore.state.error).toBeNull();
+  });
+
+  it('records a character count for each accepted file', async () => {
+    const { batchStore } = await import('./batchStore.svelte');
+
+    await batchStore.addFiles([makeTextFile('ok.txt', 'hello')]);
+
+    expect(batchStore.state.files[0].charCount).toBe(5);
+    expect(batchStore.state.error).toBeNull();
+  });
+
+  it('reports skipped empty files without claiming nothing was valid', async () => {
+    const { batchStore } = await import('./batchStore.svelte');
+
+    await batchStore.addFiles([
+      makeTextFile('good.txt', 'has content'),
+      makeTextFile('blank.txt', '   \n  '),
+    ]);
+
+    expect(batchStore.state.files.map((f) => f.name)).toEqual(['good.txt']);
+    expect(batchStore.state.error).toMatch(/empty/i);
+  });
+});

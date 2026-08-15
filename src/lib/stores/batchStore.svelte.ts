@@ -11,6 +11,7 @@ export interface BatchFile {
   name: string;
   text: string;
   outputFilename: string;
+  charCount: number;
 }
 
 export interface BatchResult {
@@ -52,6 +53,15 @@ const POLL_INTERVAL_MS = 500;
  */
 export const BATCH_STALL_TIMEOUT_MS = 30 * 60 * 1000;
 
+/**
+ * Server per-item cap, mirrored client-side (MAX_TEXT_LENGTH in main.py).
+ *
+ * Issue #13: without a pre-flight check a single oversized .txt failed the
+ * whole batch with a 400 only after every file had been uploaded, and the
+ * message did not say which file was at fault.
+ */
+export const MAX_BATCH_ITEM_CHARS = 2000;
+
 function createBatchStore() {
   let state = $state<BatchState>({
     files: [],
@@ -85,25 +95,49 @@ function createBatchStore() {
   async function addFiles(input: FileList | File[]) {
     const files = Array.from(input);
     const added: BatchFile[] = [];
+    const rejected: string[] = [];
+    let emptyCount = 0;
 
     for (const file of files) {
       const text = await file.text();
-      if (!text.trim()) continue;
+      if (!text.trim()) {
+        emptyCount += 1;
+        continue;
+      }
+      if (text.length > MAX_BATCH_ITEM_CHARS) {
+        rejected.push(`${file.name} (${text.length.toLocaleString()} characters)`);
+        continue;
+      }
       const base = sanitizeOutputFilename(file.name || "output");
       added.push({
         id: makeId(),
         name: file.name,
         text,
         outputFilename: `${base}.wav`,
+        charCount: text.length,
       });
     }
 
     state.files = [...state.files, ...added];
-    if (added.length === 0) {
-      state.error = "No valid text files were added.";
-    } else {
-      state.error = null;
+
+    // Report every reason separately. The old single message claimed nothing
+    // was valid even when the real problem was one oversized file among several.
+    const problems: string[] = [];
+    if (rejected.length > 0) {
+      problems.push(
+        `Skipped ${rejected.length === 1 ? "a file that is" : "files that are"} over the ` +
+          `${MAX_BATCH_ITEM_CHARS.toLocaleString()} character limit per file: ${rejected.join(", ")}. ` +
+          `Split ${rejected.length === 1 ? "it" : "them"} into smaller files.`
+      );
     }
+    if (emptyCount > 0) {
+      problems.push(`Skipped ${emptyCount} empty file${emptyCount === 1 ? "" : "s"}.`);
+    }
+    if (added.length === 0 && problems.length === 0) {
+      problems.push("No valid text files were added.");
+    }
+
+    state.error = problems.length > 0 ? problems.join(" ") : null;
   }
 
   function removeFile(id: string) {
