@@ -31,7 +31,9 @@ jobs:
             label: macOS (Apple Silicon)
             target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-          - os: macos-13
+          # macos-13 (Intel) runners are deprecated and can queue indefinitely.
+          # Cross-compile the Intel slice from an arm64 runner instead.
+          - os: macos-latest
             label: macOS (Intel)
             target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
