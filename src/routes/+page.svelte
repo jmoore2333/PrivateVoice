@@ -10,7 +10,7 @@
   import { settingsStore } from "$lib/stores/settingsStore.svelte";
   import { libraryStore } from "$lib/stores/libraryStore.svelte";
   import { batchStore } from "$lib/stores/batchStore.svelte";
-  import { ttsClient, type BatchRequest, type Speaker, type SystemInfo } from "$lib/api/ttsClient";
+  import { ttsClient, PRESET_SPEAKERS, type BatchRequest, type Speaker, type SystemInfo } from "$lib/api/ttsClient";
 
   // Layout components
   import Header from "$lib/components/layout/Header.svelte";
@@ -390,11 +390,25 @@
     }
   }
 
+  /** Next free "Voice N" label, so saved voices get a name you can recognise. */
+  function nextVoiceName(): string {
+    const used = libraryStore.saved
+      .map(i => /^Voice (\d+)$/.exec(i.name)?.[1])
+      .filter((n): n is string => Boolean(n))
+      .map(Number);
+    return `Voice ${used.length ? Math.max(...used) + 1 : 1}`;
+  }
+
   function buildLibraryItem(): import('$lib/stores/libraryStore.svelte').LibraryItem {
+    const isClone = ttsState.mode === 'voice-clone';
     return {
       id: crypto.randomUUID(),
-      type: ttsState.mode === 'voice-clone' ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
-      name: ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
+      type: isClone ? 'clone' : ttsState.mode === 'voice-design' ? 'design' : 'audio',
+      // A clone is saved to be reused as a voice, so name it after the voice —
+      // not the sentence it happened to say. Renameable from the Library.
+      name: isClone
+        ? nextVoiceName()
+        : ttsState.text.slice(0, 30) + (ttsState.text.length > 30 ? '...' : ''),
       audioUrl: ttsState.audioUrl!,
       createdAt: new Date(),
       metadata: {
@@ -403,6 +417,9 @@
         referenceText: ttsState.referenceText || undefined,
         voiceDescription: ttsState.voiceDescription || undefined,
         modelId: ttsState.modelId ?? undefined,
+        // Low-quality clones carry no transcript; restoring one must not then
+        // demand a reference text the user never supplied.
+        lowQualityMode: isClone ? ttsState.cloneLowQualityMode : undefined,
       }
     };
   }
@@ -427,7 +444,16 @@
   async function handleSave() {
     if (ttsState.audioBlob && ttsState.audioUrl) {
       try {
-        const result = await libraryStore.saveToLibrary(buildLibraryItem(), ttsState.audioBlob);
+        // Voice Clone saves carry their reference recording so the voice can be
+        // reused. Use ttsState.referenceAudio — it is the WAV-converted File;
+        // referenceAudioBlob may still be WebM/Opus straight from the mic.
+        const referenceBlob =
+          ttsState.mode === 'voice-clone' ? (ttsState.referenceAudio ?? undefined) : undefined;
+        const result = await libraryStore.saveToLibrary(
+          buildLibraryItem(),
+          ttsState.audioBlob,
+          referenceBlob
+        );
         if (result.ok) {
           showSaveNotification('Saved to Library', 'success');
         } else {
@@ -539,7 +565,61 @@
     textTranslationError = null;
   }
 
-  function handleSpeakerChange(speaker: string, _isPreset: boolean) {
+  /** Notice shown after a saved voice moves the app into Voice Clone mode. */
+  let voiceProfileNotice = $state<string | null>(null);
+  let voiceProfileNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function showVoiceProfileNotice(message: string) {
+    if (voiceProfileNoticeTimer) clearTimeout(voiceProfileNoticeTimer);
+    voiceProfileNotice = message;
+    voiceProfileNoticeTimer = setTimeout(() => { voiceProfileNotice = null; }, 6000);
+  }
+
+  /**
+   * Load a saved cloned voice for reuse. Qwen can only render an arbitrary
+   * voice in Voice Clone mode, so this switches modes and restores the
+   * reference recording and transcript the clone was made from. Text the user
+   * already typed is preserved.
+   */
+  async function applyVoiceProfile(id: string): Promise<boolean> {
+    const item =
+      libraryStore.saved.find(i => i.id === id) ?? libraryStore.recent.find(i => i.id === id);
+    if (!item) return false;
+
+    // hasReferenceAudio lives in index.json but the bytes live on disk; the two
+    // can diverge if the file was removed. Say so rather than doing nothing.
+    const referenceBlob = await libraryStore.getReferenceBlob(id);
+    if (!referenceBlob) {
+      showVoiceProfileNotice(
+        `"${item.name}" has no stored reference audio, so it can't be reused as a voice.`
+      );
+      return false;
+    }
+
+    ttsStore.setMode('voice-clone');
+    await handleReferenceAudioChange(referenceBlob, URL.createObjectURL(referenceBlob));
+
+    ttsStore.setCloneLowQualityMode(item.metadata?.lowQualityMode ?? false);
+
+    const transcript = item.metadata?.referenceText ?? '';
+    localReferenceText = transcript;
+    ttsStore.setReferenceText(transcript);
+
+    if (item.metadata?.language) {
+      handleLanguageChange(item.metadata.language);
+    }
+
+    showVoiceProfileNotice(`Loaded "${item.name}" in Voice Clone mode.`);
+    return true;
+  }
+
+  function handleSpeakerChange(speaker: string, isPreset: boolean) {
+    if (!isPreset) {
+      // A saved clone, not a preset: its id is not a speaker. Load it as a
+      // voice profile and leave the preset selection untouched.
+      void applyVoiceProfile(speaker);
+      return;
+    }
     localSpeaker = speaker;
     ttsStore.setSpeaker(speaker as Speaker);
   }
@@ -788,6 +868,21 @@
     </div>
   {/if}
 
+  <!-- Voice Profile Notice -->
+  {#if voiceProfileNotice}
+    <div class="px-4 py-2 bg-[var(--color-accent)]/10 border-b border-[var(--color-accent)]/30">
+      <div class="flex items-center justify-between max-w-4xl mx-auto">
+        <span class="text-sm text-[var(--color-accent)]">{voiceProfileNotice}</span>
+        <button
+          onclick={() => voiceProfileNotice = null}
+          class="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Workspace -->
   <Workspace>
     {#snippet inputPanel()}
@@ -1010,16 +1105,26 @@
 <LibraryDrawer
   isOpen={libraryOpen}
   onClose={() => libraryOpen = false}
-  onUseVoice={(id) => {
+  onUseVoice={async (id) => {
     const item = libraryStore.saved.find(i => i.id === id) ?? libraryStore.recent.find(i => i.id === id);
     if (!item) { libraryOpen = false; return; }
+
+    // A clone that kept its reference recording is a reusable voice; load it as
+    // one. Anything else just restores the settings it was generated with.
+    if (item.type === 'clone' && await applyVoiceProfile(id)) {
+      libraryOpen = false;
+      return;
+    }
 
     // Set mode from item type
     const modeMap = { clone: 'voice-clone', design: 'voice-design', audio: 'custom-voice' } as const;
     ttsStore.setMode(modeMap[item.type]);
 
-    // Restore metadata
-    if (item.metadata?.speaker) ttsStore.setSpeaker(item.metadata.speaker as Speaker);
+    // Restore metadata. Only presets are valid speakers — a clone's stored
+    // speaker may be a library id from before this was guarded.
+    if (item.metadata?.speaker && PRESET_SPEAKERS.includes(item.metadata.speaker as Speaker)) {
+      ttsStore.setSpeaker(item.metadata.speaker as Speaker);
+    }
     if (item.metadata?.language) ttsStore.setLanguage(item.metadata.language);
     if (item.metadata?.voiceDescription) ttsStore.setVoiceDescription(item.metadata.voiceDescription);
     if (item.metadata?.referenceText) ttsStore.setReferenceText(item.metadata.referenceText);

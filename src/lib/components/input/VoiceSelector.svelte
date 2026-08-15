@@ -22,12 +22,21 @@
     { id: 'sohee', name: 'Sohee', description: 'Warm Korean female', accent: 'Korean' },
   ];
 
+  // Only clones that kept their reference recording can be re-rendered as a
+  // voice. Clips saved before reference audio was persisted stay in the
+  // Library drawer, where they belong — offering them here produced the
+  // "Unknown speaker: <uuid>" failure in issue #11.
   const savedVoices = $derived(
-    libraryStore.saved.filter(item => item.type === 'clone')
+    libraryStore.saved.filter(
+      item => item.type === 'clone' && item.metadata?.hasReferenceAudio
+    )
   );
 
   function selectVoice(id: string, isPreset: boolean) {
-    value = id;
+    // Only presets are speakers. A saved voice is a library id, and writing it
+    // into the bound speaker leaks it into generation and batch requests — the
+    // route that produced "Unknown speaker: <uuid>". The parent loads it instead.
+    if (isPreset) value = id;
     onSelect?.(id, isPreset);
   }
 </script>
@@ -86,7 +95,8 @@
       {/each}
     {:else}
       <div class="col-span-2 py-8 text-center text-[var(--color-text-muted)] text-sm">
-        No saved voices yet. Clone a voice to save it here.
+        No reusable voices yet. Clone a voice and save it — the reference audio
+        is stored so you can use the voice again.
       </div>
     {/if}
   </div>
