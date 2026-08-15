@@ -1202,3 +1202,16 @@ class TestGenerateBatch:
 
         with zipfile.ZipFile(io.BytesIO(resp.content)) as archive:
             assert sorted(archive.namelist()) == ["one.wav", "two.wav"]
+
+
+def test_health_reports_the_package_version():
+    """The server version was hardcoded to 1.0.0 in two places and drifted
+    behind __init__.py (verified live during the issue #13 investigation:
+    {"status":"ok","version":"1.0.0"} while the package said 1.0.3)."""
+    from tts_server import __version__
+
+    client = _get_client()
+    resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json()["version"] == __version__
