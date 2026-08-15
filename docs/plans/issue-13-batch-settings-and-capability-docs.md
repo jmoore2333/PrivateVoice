@@ -134,23 +134,19 @@ From `qwen_tts/inference/qwen3_tts_model.py`:
 - Full check before PR: `pnpm test:all` (type check + unit + E2E), plus `cd python && pytest tests/`.
 - Never surface raw internal errors to users; keep `INTERNAL_ERROR_DETAIL` behaviour intact.
 
-### Local toolchain note
+### Toolchain — resolved before implementation (commit `9cf8a84`)
 
-On this machine `pnpm <script>` aborts before running anything:
+`pnpm <script>` used to abort with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, taking the Husky pre-commit hook with it. Three pnpm versions were in play — local **11.21.0**, `ci.yml` **8**, `release.yml` **10** — so pnpm's deps-status check judged `node_modules` stale and wanted to purge it.
 
-```
-[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY] Aborted removal of modules directory due to no TTY
-```
+Fixed by making `package.json`'s `packageManager: "pnpm@11.21.0"` the single source of truth:
 
-The local pnpm is 11.21.0 while CI pins pnpm 8, so pnpm's deps-status check decides `node_modules` (installed under the older pnpm) is stale and wants to purge it. **The toolchain itself is healthy** — invoking the binaries directly runs the full suite green:
+- both workflows use `pnpm/action-setup@v4` with **no** `version:` input, so they read that field and cannot drift again
+- `ci.yml` moves Node 20 → 22 (pnpm 11 requires `>= 22.13`); `release.yml` was already on 22
+- `pnpm-workspace.yaml` is now tracked and sets `allowBuilds: esbuild: true` — pnpm 10+ refuses to run a dependency's install scripts unless named, and treats that refusal as a **non-zero exit**, which is what kept breaking `pnpm install`
 
-```bash
-./node_modules/.bin/vitest run          # 244 tests pass
-./node_modules/.bin/svelte-check --tsconfig ./tsconfig.json
-./node_modules/.bin/playwright test
-```
+Verified locally under pnpm 11: `pnpm install --frozen-lockfile`, `pnpm check` (0 errors), `pnpm test:run` (244 pass), `pnpm build`, and the Husky hook all succeed. **`pnpm-lock.yaml` is byte-identical** — pnpm 11 still writes `lockfileVersion: '9.0'`, so no dependency resolution changed, and all platform `@esbuild/*` variants are present for the Linux and Windows runners.
 
-Use those forms while implementing. Resolving the pnpm version mismatch properly is a maintainer decision, because `pnpm install` under v11 may rewrite `pnpm-lock.yaml` (currently `lockfileVersion: '9.0'`) and that is a real repo change CI would then have to accept. It also means the Husky pre-commit hook (`pnpm lint-staged`) cannot run — commits in this branch need `--no-verify`, so **run `svelte-check` manually before each commit** to keep the gate the hook was providing.
+Use the normal `pnpm` commands throughout implementation. The one thing still unproven locally is CI itself — that is only confirmed once the branch is pushed.
 
 ## File Structure
 
