@@ -301,6 +301,100 @@ describe('libraryStore (localStorage fallback)', () => {
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Tests — reference audio (what makes a saved clone reusable as a voice)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('libraryStore reference audio', () => {
+  beforeEach(async () => {
+    tauriAvailable = false;
+    mockFs = {};
+    createdUrls.length = 0;
+    revokedUrls.length = 0;
+    vi.clearAllMocks();
+    await libraryStore.clearAll();
+  });
+
+  it('marks a clone saved with reference audio as reusable', async () => {
+    const reference = makeBlob();
+
+    const result = await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-1', type: 'clone', name: 'Voice 1' }),
+      undefined,
+      reference
+    );
+
+    expect(result.ok).toBe(true);
+    const saved = libraryStore.saved.find(i => i.id === 'ref-1');
+    expect(saved?.metadata?.hasReferenceAudio).toBe(true);
+    expect(saved?.referenceAudioUrl).toBeTruthy();
+  });
+
+  it('returns the stored reference blob for reuse', async () => {
+    const reference = makeBlob();
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-1', type: 'clone' }),
+      undefined,
+      reference
+    );
+
+    const roundTripped = await libraryStore.getReferenceBlob('ref-1');
+    expect(roundTripped).toBe(reference);
+  });
+
+  it('leaves a clone saved without reference audio unusable as a voice', async () => {
+    await libraryStore.saveToLibrary(makeItem({ id: 'ref-2', type: 'clone' }));
+
+    const saved = libraryStore.saved.find(i => i.id === 'ref-2');
+    expect(saved?.metadata?.hasReferenceAudio).toBeFalsy();
+    expect(await libraryStore.getReferenceBlob('ref-2')).toBeNull();
+  });
+
+  it('preserves existing metadata when recording the reference flag', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({
+        id: 'ref-3',
+        type: 'clone',
+        metadata: { referenceText: 'Testing, testing.', lowQualityMode: true },
+      }),
+      undefined,
+      makeBlob()
+    );
+
+    const saved = libraryStore.saved.find(i => i.id === 'ref-3');
+    expect(saved?.metadata?.referenceText).toBe('Testing, testing.');
+    expect(saved?.metadata?.lowQualityMode).toBe(true);
+    expect(saved?.metadata?.hasReferenceAudio).toBe(true);
+  });
+
+  it('drops the reference when the item is removed', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-4', type: 'clone' }),
+      undefined,
+      makeBlob()
+    );
+    const savedUrl = libraryStore.saved.find(i => i.id === 'ref-4')?.referenceAudioUrl;
+
+    await libraryStore.removeFromLibrary('ref-4');
+
+    expect(await libraryStore.getReferenceBlob('ref-4')).toBeNull();
+    expect(revokedUrls).toContain(savedUrl);
+  });
+
+  it('never writes the reference object URL into persisted metadata', async () => {
+    await libraryStore.saveToLibrary(
+      makeItem({ id: 'ref-5', type: 'clone' }),
+      undefined,
+      makeBlob()
+    );
+
+    const stored = JSON.parse(localStorage.getItem('privatevoice-library') ?? '{}');
+    expect(stored.saved[0].referenceAudioUrl).toBeUndefined();
+    expect(stored.saved[0].audioUrl).toBeUndefined();
+    expect(stored.saved[0].metadata.hasReferenceAudio).toBe(true);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Tests — Tauri FS path (mocked)
 // ──────────────────────────────────────────────────────────────────────────────
 
